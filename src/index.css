@@ -27,10 +27,7 @@ body {
   margin: 0;
 }
 
-#root {
-  max-width: 1400px;
-  margin: 0 auto;
-}
+/* Root styles moved to app layout */
 
 h1 {
   font-size: 3.2em;

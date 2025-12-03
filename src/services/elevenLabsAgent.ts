@@ -2,8 +2,8 @@ import type { Position } from '../types';
 import alpacaApi from './alpacaApi';
 
 // ElevenLabs Agent Configuration
-const AGENT_ID = import.meta.env.VITE_ELEVENLABS_AGENT_ID || 'agent_7801k6206wxsfqh8jxhasqtd0hr9';
-const API_KEY = import.meta.env.VITE_ELEVENLABS_API_KEY || 'sk_a30c60fa0accbee9da7e496657a184279ee38e9c3c7d534b';
+const AGENT_ID = process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID || 'agent_7801k6206wxsfqh8jxhasqtd0hr9';
+const API_KEY = process.env.NEXT_PUBLIC_ELEVENLABS_API_KEY || 'sk_a30c60fa0accbee9da7e496657a184279ee38e9c3c7d534b';
 const ELEVENLABS_WS_URL = 'wss://api.elevenlabs.io/v1/convai/conversation';
 
 interface ConversationConfig {

@@ -1,11 +1,13 @@
+'use client'
+
 import { useState } from 'react';
 import { Home, TrendingUp, Search, User, Menu, X } from 'lucide-react';
-import Portfolio from './components/Portfolio';
-import StockList from './components/StockList';
-import VoiceAssistantNew from './components/VoiceAssistantNew';
-import './App.css';
+import Portfolio from '../src/components/Portfolio';
+import StockList from '../src/components/StockList';
+import VoiceAssistantNew from '../src/components/VoiceAssistantNew';
+import '../src/App.css';
 
-function App() {
+export default function HomePage() {
   const [activeTab, setActiveTab] = useState<'portfolio' | 'stocks'>('portfolio');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const accountName = 'Aida Guru';
@@ -85,4 +87,3 @@ function App() {
   );
 }
 
-export default App;

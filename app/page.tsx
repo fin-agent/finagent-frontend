@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Home, TrendingUp, Search, User, Menu, X } from 'lucide-react';
 import Portfolio from '../src/components/Portfolio';
 import StockList from '../src/components/StockList';
-import VoiceAssistantNew from '../src/components/VoiceAssistantNew';
+import UnifiedAssistant from '../src/components/UnifiedAssistant';
 import '../src/App.css';
 
 export default function HomePage() {
@@ -81,8 +81,8 @@ export default function HomePage() {
         </div>
       </main>
 
-      {/* Voice Assistant */}
-      <VoiceAssistantNew />
+      {/* Unified Assistant (Voice + Text with Generative UI) */}
+      <UnifiedAssistant />
     </div>
   );
 }

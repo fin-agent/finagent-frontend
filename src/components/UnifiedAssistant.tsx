@@ -102,11 +102,16 @@ function extractSymbolOrCompany(text: string): string | null {
 
 // Detect if message contains trade summary data (brief count)
 function detectTradeSummary(text: string): { stockTrades: number; optionTrades: number } | null {
+  // Skip if just checking/looking up
+  const isJustChecking = /I'll check|let me check|checking your|retrieving|looking up|I'll help you find|I'll find|looking that up/i.test(text);
+  if (isJustChecking && !/found|have|total/i.test(text)) return null;
+
   // Multiple patterns to match different response formats
   const patterns = [
     /(\d+)\s*stock\s*(?:trades?)?\s*(?:and)?\s*(\d+)\s*option\s*trades?/i,
     /have\s+(\d+)\s+stock\s+and\s+(\d+)\s+option\s+trades?/i,
     /(\d+)\s+stock\s+trades?\s+and\s+(\d+)\s+option/i,
+    /found\s+(\d+)\s+stock\s+trades?\s+and\s+(\d+)\s+option/i,
   ];
 
   for (const pattern of patterns) {
@@ -121,16 +126,31 @@ function detectTradeSummary(text: string): { stockTrades: number; optionTrades: 
   return null;
 }
 
+// Detect if message contains detailed trades data
+function detectDetailedTrades(text: string): boolean {
+  // Skip if just checking/looking up
+  const isJustChecking = /I'll check|let me check|checking your|retrieving|looking up|I'll help you find|I'll find|looking that up/i.test(text);
+  if (isJustChecking && !/here are|detailed|total shares|total cost/i.test(text)) return false;
+
+  // Check for detailed trade indicators
+  const hasDetailedInfo =
+    /detailed.*trades|total shares purchased|total cost.*\$|profit.?loss.*\$/i.test(text) ||
+    /current value.*\$|here are your.*trades|showing.*trades/i.test(text);
+
+  return hasDetailedInfo;
+}
+
 // Detect if message contains trade stats results (not just "let me check")
 function detectTradeStats(text: string): { tradeType: 'buy' | 'sell' | 'all' } | null {
   // Skip messages that are just "checking" without actual price results
-  const isJustChecking = /I'll check|let me check|checking your|retrieving|looking up|I'll help you find|I'll find|to find your/i.test(text);
+  const isJustChecking = /I'll check|let me check|checking your|retrieving|looking up|I'll help you find|I'll find|to find your|looking that up/i.test(text);
 
   // Check if message contains actual price data (either numeric or spelled out)
   const hasActualResult =
     /was\s+(?:\$[\d,]+|\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred)/i.test(text) ||
     /(?:dollars?|cents?)\s+(?:and|per|for)/i.test(text) ||
-    /\$[\d,]+\.?\d*/i.test(text);
+    /\$[\d,]+\.?\d*/i.test(text) ||
+    /highest price|lowest price|average price/i.test(text);
 
   // If it's just a "checking" message without results, skip
   if (isJustChecking && !hasActualResult) return null;
@@ -142,16 +162,20 @@ function detectTradeStats(text: string): { tradeType: 'buy' | 'sell' | 'all' } |
     // Patterns for sell/sale results
     /highest.*(?:sale|sell|sold)/i,
     /(?:sale|sell|sold).*price/i,
+    /lowest.*(?:sale|sell|sold)/i,
     // Patterns for buy/purchase results
     /highest.*(?:buy|bought|purchase|paid)/i,
     /lowest.*(?:buy|bought|purchase|paid)/i,
     /(?:buy|bought|purchase|paid).*price/i,
     /price.*(?:paid|bought)/i,
     // General patterns
-    /average\s+(?:sell|buy|trade|sale|purchase)\s+price/i,
+    /average\s+(?:sell|buy|trade|sale|purchase)?\s*price/i,
     /trade\s+statistics/i,
+    /highest\s+price.*\$/i,
+    /lowest\s+price.*\$/i,
     /dollars?\s+(?:and|per)/i,
     /cents?\s+(?:per|for)/i,
+    /statistics for \d{4}/i,
   ];
 
   if (patterns.some(p => p.test(text))) {
@@ -166,15 +190,17 @@ function detectTradeStats(text: string): { tradeType: 'buy' | 'sell' | 'all' } |
 // Detect if message contains profitable trades results
 function detectProfitableTrades(text: string): boolean {
   // Skip messages that are just "checking" without actual results
-  const isJustChecking = /I'll check|let me check|checking your|retrieving|looking up|I'll help you find|I'll find|to find your/i.test(text);
+  const isJustChecking = /I'll check|let me check|checking your|retrieving|looking up|I'll help you find|I'll find|to find your|looking that up/i.test(text);
 
   // Check if message contains actual profitable trades data
   const hasProfitableResult =
-    /profitable\s+trades?/i.test(text) && (
+    (/profitable\s+trades?/i.test(text) || /profit.*trades/i.test(text)) && (
       /\$[\d,]+\.?\d*/i.test(text) || // Has dollar amount
       /\d+\s+profitable\s+trades?/i.test(text) || // Has count
       /total\s+profit/i.test(text) ||
-      /profit\s+of/i.test(text)
+      /profit\s+of/i.test(text) ||
+      /total matched trades/i.test(text) ||
+      /matched.*trades/i.test(text)
     );
 
   // If it's just a "checking" message without results, skip
@@ -186,10 +212,10 @@ function detectProfitableTrades(text: string): boolean {
 // Detect if message contains time-based trades results
 function detectTimeBasedTrades(text: string): { timePeriod: string } | null {
   // Skip messages that are just "checking" without actual results
-  const isJustChecking = /I'll check|let me check|checking your|retrieving|looking up|I'll help you find|I'll find|to find your/i.test(text);
+  const isJustChecking = /I'll check|let me check|checking your|retrieving|looking up|I'll help you find|I'll find|to find your|looking that up/i.test(text);
 
   // Check for actual time-based results with trade counts
-  const hasTradeCount = /executed\s+\d+\s+trades?|you\s+(?:have|had)\s+\d+\s+trades?|\d+\s+trades?\s+(?:for|on|over|during)/i.test(text);
+  const hasTradeCount = /executed\s+\d+\s+trades?|you\s+(?:have|had)\s+\d+\s+trades?|\d+\s+trades?\s+(?:for|on|over|during)|no trades found/i.test(text);
 
   if (isJustChecking && !hasTradeCount) return null;
   if (!hasTradeCount) return null;
@@ -206,6 +232,7 @@ function detectTimeBasedTrades(text: string): { timePeriod: string } | null {
     { pattern: /(?:for|on|over|during)\s+(?:the\s+)?(last\s+\d+\s+trading\s+days?)/i, period: null },
     { pattern: /(?:on|for)\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)/i, period: null },
     { pattern: /(\d+)\s+trading\s+days?/i, period: null },
+    { pattern: /(yesterday|today|last week|this week|last month|this month)/i, period: null },
   ];
 
   for (const { pattern, period } of timePatterns) {
@@ -346,16 +373,17 @@ const UnifiedAssistant: React.FC = () => {
               if (statsMatch) {
                 const data = await fetchTradeData(symbol, 'stats', statsMatch.tradeType);
                 if (data) tradeUI = data;
-              } else {
-                // Only show detailed trades table when:
-                // 1. Message indicates we're showing/retrieving trade data (not just asking)
-                // 2. Not just asking "would you like details"
-                const isShowingTrades = /here are|showing|retrieved|found \d+|have \d+\s*(stock|option)?\s*trades?/i.test(message.message);
-                const isJustAsking = /would you like|do you want|shall I|can I pull/i.test(message.message);
-                const isCheckingOrLooking = /let me check|checking|looking up|I'll help you find/i.test(message.message);
-
-                if (isShowingTrades && !isJustAsking && !isCheckingOrLooking) {
-                  const data = await fetchTradeData(symbol, 'detailed');
+              }
+              // Check for detailed trades
+              else if (detectDetailedTrades(message.message)) {
+                const data = await fetchTradeData(symbol, 'detailed');
+                if (data) tradeUI = data;
+              }
+              // Check for trade summary (stock/option breakdown)
+              else {
+                const summaryMatch = detectTradeSummary(message.message);
+                if (summaryMatch) {
+                  const data = await fetchTradeData(symbol, 'summary');
                   if (data) tradeUI = data;
                 }
               }
@@ -473,14 +501,19 @@ const UnifiedAssistant: React.FC = () => {
                     if (tradeData) {
                       baseMessage.tradeUI = tradeData;
                     }
-                  } else {
-                    // Only show detailed trades table when message indicates we're showing data
-                    const isShowingTrades = /here are|showing|retrieved|found \d+|have \d+\s*(stock|option)?\s*trades?/i.test(msg.content);
-                    const isJustAsking = /would you like|do you want|shall I|can I pull/i.test(msg.content);
-                    const isCheckingOrLooking = /let me check|checking|looking up|I'll help you find/i.test(msg.content);
-
-                    if (isShowingTrades && !isJustAsking && !isCheckingOrLooking) {
-                      const tradeData = await fetchTradeData(symbol, 'detailed');
+                  }
+                  // Check for detailed trades
+                  else if (detectDetailedTrades(msg.content)) {
+                    const tradeData = await fetchTradeData(symbol, 'detailed');
+                    if (tradeData) {
+                      baseMessage.tradeUI = tradeData;
+                    }
+                  }
+                  // Check for trade summary
+                  else {
+                    const summaryMatch = detectTradeSummary(msg.content);
+                    if (summaryMatch) {
+                      const tradeData = await fetchTradeData(symbol, 'summary');
                       if (tradeData) {
                         baseMessage.tradeUI = tradeData;
                       }

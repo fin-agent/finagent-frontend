@@ -61,6 +61,78 @@ async function getTradeSummary(symbol: string) {
   };
 }
 
+// Tool: Get trade statistics (highest, lowest, average prices)
+async function getTradeStats(symbol: string, tradeType?: string, year?: number) {
+  const normalizedSymbol = normalizeSymbol(symbol);
+  const filterYear = year || new Date().getFullYear();
+  const yearStart = `${filterYear}-01-01`;
+  const yearEnd = `${filterYear}-12-31`;
+
+  let query = supabase
+    .from('TradeData')
+    .select('*')
+    .eq('AccountCode', ACCOUNT_CODE)
+    .eq('SecurityType', 'S') // Stock trades only for price analysis
+    .or(`Symbol.eq.${normalizedSymbol},UnderlyingSymbol.eq.${normalizedSymbol}`)
+    .gte('Date', yearStart)
+    .lte('Date', yearEnd);
+
+  // Filter by trade type if specified (B = Buy, S = Sell)
+  if (tradeType) {
+    const normalizedType = tradeType.toLowerCase().startsWith('s') ? 'S' : 'B';
+    query = query.eq('TradeType', normalizedType);
+  }
+
+  const { data, error } = await query.order('Date', { ascending: false });
+
+  if (error) {
+    return { error: error.message, symbol: normalizedSymbol };
+  }
+
+  if (!data || data.length === 0) {
+    const typeLabel = tradeType ? (tradeType.toLowerCase().startsWith('s') ? 'sell' : 'buy') : '';
+    return {
+      symbol: normalizedSymbol,
+      year: filterYear,
+      tradeType: typeLabel,
+      message: `No ${typeLabel} trades found for ${normalizedSymbol} in ${filterYear}.`,
+      tradesFound: 0,
+    };
+  }
+
+  // Calculate statistics
+  const prices = data.map(t => parseFloat(t.StockTradePrice || '0')).filter(p => p > 0);
+  const shares = data.map(t => parseFloat(t.StockShareQty || '0'));
+  const totalShares = shares.reduce((a, b) => a + b, 0);
+  const totalValue = data.reduce((sum, t) => sum + Math.abs(parseFloat(t.NetAmount || '0')), 0);
+
+  const highestPrice = Math.max(...prices);
+  const lowestPrice = Math.min(...prices);
+  const avgPrice = prices.reduce((a, b) => a + b, 0) / prices.length;
+
+  // Find the trades with highest and lowest prices
+  const highestTrade = data.find(t => parseFloat(t.StockTradePrice || '0') === highestPrice);
+  const lowestTrade = data.find(t => parseFloat(t.StockTradePrice || '0') === lowestPrice);
+
+  const typeLabel = tradeType ? (tradeType.toLowerCase().startsWith('s') ? 'sell' : 'buy') : 'all';
+
+  return {
+    symbol: normalizedSymbol,
+    year: filterYear,
+    tradeType: typeLabel,
+    tradesFound: data.length,
+    totalShares,
+    totalValue,
+    highestPrice,
+    highestPriceDate: highestTrade?.Date,
+    highestPriceShares: highestTrade ? parseFloat(highestTrade.StockShareQty || '0') : 0,
+    lowestPrice,
+    lowestPriceDate: lowestTrade?.Date,
+    lowestPriceShares: lowestTrade ? parseFloat(lowestTrade.StockShareQty || '0') : 0,
+    averagePrice: avgPrice,
+  };
+}
+
 // Tool: Get detailed trades
 async function getDetailedTrades(symbol: string) {
   const normalizedSymbol = normalizeSymbol(symbol);
@@ -154,6 +226,15 @@ export async function POST(req: NextRequest) {
         result = await getDetailedTrades(parameters.symbol);
         break;
 
+      case 'getTradeStats':
+      case 'get_trade_stats':
+        result = await getTradeStats(
+          parameters.symbol,
+          parameters.trade_type || parameters.tradeType,
+          parameters.year
+        );
+        break;
+
       default:
         return NextResponse.json(
           { error: `Unknown tool: ${tool_name}` },
@@ -182,6 +263,19 @@ export async function POST(req: NextRequest) {
         responseText += `- Current value: $${summary.currentValue.toFixed(2)}\n`;
         responseText += `- Profit/Loss: $${summary.profitLoss.toFixed(2)} (${summary.profitLossPercent.toFixed(2)}%)\n`;
         responseText += `- Stock trades: ${result.stockTradeCount}, Option trades: ${result.optionTradeCount}`;
+      }
+    } else if (tool_name === 'getTradeStats' || tool_name === 'get_trade_stats') {
+      if ('error' in result && result.error) {
+        responseText = `Error getting trade statistics: ${result.error}`;
+      } else if ('message' in result && result.tradesFound === 0) {
+        responseText = result.message as string;
+      } else if ('highestPrice' in result && result.highestPrice !== undefined) {
+        const typeLabel = result.tradeType === 'sell' ? 'sold' : result.tradeType === 'buy' ? 'bought' : 'traded';
+        responseText = `${result.symbol} ${result.tradeType} trade statistics for ${result.year}:\n`;
+        responseText += `- Highest price ${typeLabel}: $${result.highestPrice.toFixed(2)} on ${result.highestPriceDate} (${result.highestPriceShares} shares)\n`;
+        responseText += `- Lowest price ${typeLabel}: $${(result.lowestPrice ?? 0).toFixed(2)} on ${result.lowestPriceDate} (${result.lowestPriceShares} shares)\n`;
+        responseText += `- Average price: $${(result.averagePrice ?? 0).toFixed(2)}\n`;
+        responseText += `- Total ${result.tradesFound} trades, ${result.totalShares} shares, $${(result.totalValue ?? 0).toFixed(2)} total value`;
       }
     }
 

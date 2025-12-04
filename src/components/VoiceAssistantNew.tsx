@@ -96,7 +96,7 @@ const VoiceAssistantNew: React.FC = () => {
       
       // Start the conversation with the agent
       await conversation.startSession({
-        agentId: process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID || 'agent_7801k6206wxsfqh8jxhasqtd0hr9',
+        agentId: process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID!,
         connectionType: 'webrtc' as const,
       });
       

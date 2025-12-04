@@ -5,6 +5,7 @@ import { useConversation } from '@elevenlabs/react';
 import { Mic, MessageSquare, X, Phone, Loader2, Plus, History, Send } from 'lucide-react';
 import { TradesTable } from './generative-ui/TradesTable';
 import { TradeSummary } from './generative-ui/TradeSummary';
+import { TradeStats } from './generative-ui/TradeStats';
 
 type InputMode = 'voice' | 'text';
 type View = 'chat' | 'history';
@@ -17,8 +18,9 @@ interface Conversation {
 }
 
 interface TradeUIData {
-  type: 'summary' | 'detailed';
+  type: 'summary' | 'detailed' | 'stats';
   symbol: string;
+  tradeType?: 'buy' | 'sell' | 'all';
   data: unknown;
 }
 
@@ -46,27 +48,44 @@ const colors = {
   assistantBubble: '#2a2a2a',
 };
 
-// Detect stock symbols in text
-function extractSymbol(text: string): string | null {
-  // Common patterns for stock symbols - check specific symbols first
-  const symbolPatterns = [
-    /\b(AAPL|GOOGL|GOOG|AMZN|MSFT|TSLA|NVDA|META|NFLX|AMD|INTC|BAC|GME|LCID|SPY|QQQ|SOXL)\b/i,
-    /(\w{1,5})\s+Position\s+Summary/i,
-    /(\w{1,5})\s+Trades?\s+For/i,
-    /trades?\s+(?:for|involving)\s+(\w+)/i,
-    /(\w{1,5})\s+trades?/i,
-  ];
+// Extract stock symbol or company name from agent's response
+function extractSymbolOrCompany(text: string): string | null {
+  const commonWords = ['THE', 'FOR', 'AND', 'YOU', 'YOUR', 'ARE', 'HAS', 'HAVE', 'WAS', 'THIS', 'THAT', 'WITH', 'ANY', 'CLASS'];
 
-  for (const pattern of symbolPatterns) {
-    const match = text.match(pattern);
-    if (match && match[1]) {
-      const symbol = match[1].toUpperCase();
-      // Filter out common words that aren't symbols
-      if (!['THE', 'FOR', 'AND', 'YOU', 'YOUR', 'ARE', 'HAS', 'HAVE'].includes(symbol)) {
-        return symbol;
+  // Pattern 1: "for GOOGL shares" or "AAPL trades" - ticker followed by shares/trades
+  const tickerSharesMatch = text.match(/\b([A-Z]{2,5})\s+(?:shares|trades?|stock|position)/i);
+  if (tickerSharesMatch && !commonWords.includes(tickerSharesMatch[1].toUpperCase())) {
+    return tickerSharesMatch[1].toUpperCase();
+  }
+
+  // Pattern 2: "price for Google" or "paid for Apple"
+  const priceForMatch = text.match(/(?:price|paid)\s+(?:for|of)\s+(\w+)/i);
+  if (priceForMatch && !commonWords.includes(priceForMatch[1].toUpperCase())) {
+    return priceForMatch[1];
+  }
+
+  // Pattern 3: "for Google this year" or "sold Tesla this year"
+  const thisYearMatch = text.match(/(?:for|bought|sold)\s+(\w+)\s+(?:this year|in \d{4})/i);
+  if (thisYearMatch && !commonWords.includes(thisYearMatch[1].toUpperCase())) {
+    return thisYearMatch[1];
+  }
+
+  // Pattern 4: Look for standalone tickers (2-5 uppercase) that aren't common words
+  const standaloneMatch = text.match(/\b([A-Z]{2,5})\b/g);
+  if (standaloneMatch) {
+    for (const match of standaloneMatch) {
+      if (!commonWords.includes(match) && /^[A-Z]{2,5}$/.test(match)) {
+        return match;
       }
     }
   }
+
+  // Pattern 5: Company names like "Google", "Apple", "Tesla" etc
+  const companyMatch = text.match(/\b(Google|Apple|Tesla|Amazon|Microsoft|Nvidia|Meta|Netflix|GameStop|Qualcomm|Intel|AMD)\b/i);
+  if (companyMatch) {
+    return companyMatch[1];
+  }
+
   return null;
 }
 
@@ -91,6 +110,47 @@ function detectTradeSummary(text: string): { stockTrades: number; optionTrades: 
   return null;
 }
 
+// Detect if message contains trade stats results (not just "let me check")
+function detectTradeStats(text: string): { tradeType: 'buy' | 'sell' | 'all' } | null {
+  // Skip messages that are just "checking" without actual price results
+  const isJustChecking = /I'll check|let me check|checking your|retrieving|looking up|I'll help you find|I'll find|to find your/i.test(text);
+
+  // Check if message contains actual price data (either numeric or spelled out)
+  const hasActualResult =
+    /was\s+(?:\$[\d,]+|\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred)/i.test(text) ||
+    /(?:dollars?|cents?)\s+(?:and|per|for)/i.test(text) ||
+    /\$[\d,]+\.?\d*/i.test(text);
+
+  // If it's just a "checking" message without results, skip
+  if (isJustChecking && !hasActualResult) return null;
+
+  // Must have some actual price/result to show the card
+  if (!hasActualResult) return null;
+
+  const patterns = [
+    // Patterns for sell/sale results
+    /highest.*(?:sale|sell|sold)/i,
+    /(?:sale|sell|sold).*price/i,
+    // Patterns for buy/purchase results
+    /highest.*(?:buy|bought|purchase|paid)/i,
+    /lowest.*(?:buy|bought|purchase|paid)/i,
+    /(?:buy|bought|purchase|paid).*price/i,
+    /price.*(?:paid|bought)/i,
+    // General patterns
+    /average\s+(?:sell|buy|trade|sale|purchase)\s+price/i,
+    /trade\s+statistics/i,
+    /dollars?\s+(?:and|per)/i,
+    /cents?\s+(?:per|for)/i,
+  ];
+
+  if (patterns.some(p => p.test(text))) {
+    // Determine trade type
+    if (/sold|sell|sale/i.test(text)) return { tradeType: 'sell' };
+    if (/bought|buy|purchase|paid/i.test(text)) return { tradeType: 'buy' };
+    return { tradeType: 'all' };
+  }
+  return null;
+}
 
 const UnifiedAssistant: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -104,7 +164,8 @@ const UnifiedAssistant: React.FC = () => {
   const transcriptRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const agentId = process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID || 'agent_9401k7psm5p0en5a8d80yk22f2zz';
+  const agentId = process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID;
+  console.log('🎤 ElevenLabs Agent ID being used:', agentId);
 
   // Track if we've set a title for current voice conversation
   const voiceTitleSetRef = useRef(false);
@@ -112,20 +173,32 @@ const UnifiedAssistant: React.FC = () => {
   const isResumingFromHistoryRef = useRef(false);
 
   // Fetch trade data for UI rendering
-  const fetchTradeData = useCallback(async (symbol: string, type: 'summary' | 'detailed'): Promise<TradeUIData | null> => {
+  const fetchTradeData = useCallback(async (
+    symbol: string,
+    type: 'summary' | 'detailed' | 'stats',
+    tradeType?: 'buy' | 'sell' | 'all'
+  ): Promise<TradeUIData | null> => {
     try {
-      const endpoint = type === 'summary'
-        ? '/api/elevenlabs/trade-summary'
-        : '/api/elevenlabs/detailed-trades';
+      let endpoint: string;
+      let body: Record<string, unknown> = { symbol };
+
+      if (type === 'summary') {
+        endpoint = '/api/elevenlabs/trade-summary';
+      } else if (type === 'stats') {
+        endpoint = '/api/trade-stats';
+        body = { symbol, tradeType: tradeType || 'all' };
+      } else {
+        endpoint = '/api/elevenlabs/detailed-trades';
+      }
 
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbol }),
+        body: JSON.stringify(body),
       });
 
       const data = await res.json();
-      return { type, symbol, data };
+      return { type, symbol, tradeType, data };
     } catch (error) {
       console.error('Error fetching trade data:', error);
       return null;
@@ -156,16 +229,26 @@ const UnifiedAssistant: React.FC = () => {
 
         // For assistant messages, check if we should render trade UI
         if (role === 'assistant') {
-          const symbol = extractSymbol(message.message);
+          const symbol = extractSymbolOrCompany(message.message);
 
           if (symbol) {
-            // Check if message mentions trades or retrieving data - be aggressive about showing table
-            const mentionsTrades = /trades?|retrieve|position|portfolio|shares/i.test(message.message);
-
-            if (mentionsTrades) {
-              // Always show detailed table when trades are mentioned
-              const data = await fetchTradeData(symbol, 'detailed');
+            // Check for trade stats (highest/lowest price queries)
+            const statsMatch = detectTradeStats(message.message);
+            if (statsMatch) {
+              const data = await fetchTradeData(symbol, 'stats', statsMatch.tradeType);
               if (data) tradeUI = data;
+            } else {
+              // Only show detailed trades table when:
+              // 1. Message indicates we're showing/retrieving trade data (not just asking)
+              // 2. Not just asking "would you like details"
+              const isShowingTrades = /here are|showing|retrieved|found \d+|have \d+\s*(stock|option)?\s*trades?/i.test(message.message);
+              const isJustAsking = /would you like|do you want|shall I|can I pull/i.test(message.message);
+              const isCheckingOrLooking = /let me check|checking|looking up|I'll help you find/i.test(message.message);
+
+              if (isShowingTrades && !isJustAsking && !isCheckingOrLooking) {
+                const data = await fetchTradeData(symbol, 'detailed');
+                if (data) tradeUI = data;
+              }
             }
           }
         }
@@ -180,21 +263,25 @@ const UnifiedAssistant: React.FC = () => {
         setTranscript(prev => [...prev, newMessage]);
         setIsSending(false); // Clear sending state when we get a response
 
-        // Save to database if we have a conversation
-        if (currentConversationId && role === 'assistant') {
-          saveMessage(currentConversationId, 'assistant', message.message, inputMode);
-        }
-        if (currentConversationId && role === 'user') {
-          saveMessage(currentConversationId, 'user', message.message, inputMode);
-          // Auto-generate title from first user message
-          if (!voiceTitleSetRef.current) {
-            const currentConv = conversations.find((c) => c.id === currentConversationId);
-            if (currentConv?.title === 'New Chat') {
-              updateConversationTitle(currentConversationId, message.message.slice(0, 50));
-              voiceTitleSetRef.current = true;
+        // Save to database - use refs/state updater to avoid stale closure
+        setCurrentConversationId(prevConvId => {
+          if (prevConvId) {
+            saveMessage(prevConvId, role, message.message, inputMode);
+
+            // Auto-generate title from first user message
+            if (role === 'user' && !voiceTitleSetRef.current) {
+              setConversations(prevConvs => {
+                const conv = prevConvs.find(c => c.id === prevConvId);
+                if (conv?.title === 'New Chat') {
+                  updateConversationTitle(prevConvId, message.message.slice(0, 50));
+                  voiceTitleSetRef.current = true;
+                }
+                return prevConvs;
+              });
             }
           }
-        }
+          return prevConvId; // Return unchanged
+        });
       }
     },
     onError: (error) => {
@@ -249,13 +336,26 @@ const UnifiedAssistant: React.FC = () => {
 
             // For assistant messages, check if we should render trade UI
             if (msg.role === 'assistant') {
-              const symbol = extractSymbol(msg.content);
+              const symbol = extractSymbolOrCompany(msg.content);
               if (symbol) {
-                const mentionsTrades = /trades?|retrieve|position|portfolio|shares/i.test(msg.content);
-                if (mentionsTrades) {
-                  const tradeData = await fetchTradeData(symbol, 'detailed');
+                // Check for trade stats first
+                const statsMatch = detectTradeStats(msg.content);
+                if (statsMatch) {
+                  const tradeData = await fetchTradeData(symbol, 'stats', statsMatch.tradeType);
                   if (tradeData) {
                     baseMessage.tradeUI = tradeData;
+                  }
+                } else {
+                  // Only show detailed trades table when message indicates we're showing data
+                  const isShowingTrades = /here are|showing|retrieved|found \d+|have \d+\s*(stock|option)?\s*trades?/i.test(msg.content);
+                  const isJustAsking = /would you like|do you want|shall I|can I pull/i.test(msg.content);
+                  const isCheckingOrLooking = /let me check|checking|looking up|I'll help you find/i.test(msg.content);
+
+                  if (isShowingTrades && !isJustAsking && !isCheckingOrLooking) {
+                    const tradeData = await fetchTradeData(symbol, 'detailed');
+                    if (tradeData) {
+                      baseMessage.tradeUI = tradeData;
+                    }
                   }
                 }
               }
@@ -344,12 +444,23 @@ const UnifiedAssistant: React.FC = () => {
   // Handlers
   const handleOpen = useCallback(async () => {
     setIsOpen(true);
+    setInputMode('voice'); // Always open in voice mode
     setCurrentView('chat');
     if (!currentConversationId) {
       const newId = await createConversation();
       if (newId) setCurrentConversationId(newId);
     }
-  }, [currentConversationId]);
+    // Auto-start voice session
+    if (elevenLabsConversation.status !== 'connected' && elevenLabsConversation.status !== 'connecting') {
+      try {
+        await navigator.mediaDevices.getUserMedia({ audio: true });
+        // @ts-expect-error - ElevenLabs SDK types
+        await elevenLabsConversation.startSession({ agentId });
+      } catch (error) {
+        console.error('Failed to auto-start voice session:', error);
+      }
+    }
+  }, [currentConversationId, elevenLabsConversation, agentId]);
 
   const handleClose = useCallback(() => {
     setIsOpen(false);
@@ -472,6 +583,46 @@ const UnifiedAssistant: React.FC = () => {
           <DetailedTradesLoader symbol={symbol} />
         </div>
       );
+    }
+
+    if (type === 'stats') {
+      const statsData = data as { stats?: {
+        symbol: string;
+        year: number;
+        tradeType: 'buy' | 'sell' | 'all';
+        highestPrice: number;
+        highestPriceDate: string;
+        highestPriceShares: number;
+        lowestPrice: number;
+        lowestPriceDate: string;
+        lowestPriceShares: number;
+        averagePrice: number;
+        totalTrades: number;
+        totalShares: number;
+        totalValue: number;
+      }};
+
+      if (statsData.stats) {
+        return (
+          <div style={{ marginTop: '12px' }}>
+            <TradeStats
+              symbol={statsData.stats.symbol}
+              year={statsData.stats.year}
+              tradeType={statsData.stats.tradeType}
+              highestPrice={statsData.stats.highestPrice}
+              highestPriceDate={statsData.stats.highestPriceDate}
+              highestPriceShares={statsData.stats.highestPriceShares}
+              lowestPrice={statsData.stats.lowestPrice}
+              lowestPriceDate={statsData.stats.lowestPriceDate}
+              lowestPriceShares={statsData.stats.lowestPriceShares}
+              averagePrice={statsData.stats.averagePrice}
+              totalTrades={statsData.stats.totalTrades}
+              totalShares={statsData.stats.totalShares}
+              totalValue={statsData.stats.totalValue}
+            />
+          </div>
+        );
+      }
     }
 
     return null;

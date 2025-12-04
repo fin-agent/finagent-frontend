@@ -29,7 +29,7 @@ interface TradeSummary {
 
 interface TradesTableProps {
   trades: Trade[];
-  summary: TradeSummary;
+  summary?: TradeSummary | null;
   accountCode?: string;
 }
 
@@ -68,8 +68,17 @@ const colors = {
 export function TradesTable({ trades, summary, accountCode = 'C40421' }: TradesTableProps) {
   const stockTrades = trades.filter(t => t.SecurityType === 'S');
   const optionTrades = trades.filter(t => t.SecurityType === 'O');
-  const pnl = summary.currentValue - summary.totalCost;
-  const pnlPercent = summary.totalCost > 0 ? (pnl / summary.totalCost) * 100 : 0;
+
+  // Handle null/undefined summary
+  const safeSummary = summary || {
+    symbol: stockTrades[0]?.Symbol || 'Unknown',
+    totalShares: 0,
+    totalCost: 0,
+    currentValue: 0,
+  };
+
+  const pnl = safeSummary.currentValue - safeSummary.totalCost;
+  const pnlPercent = safeSummary.totalCost > 0 ? (pnl / safeSummary.totalCost) * 100 : 0;
 
   const styles = {
     container: {
@@ -220,7 +229,7 @@ export function TradesTable({ trades, summary, accountCode = 'C40421' }: TradesT
     <div style={styles.container}>
       {/* Header */}
       <div style={styles.header}>
-        <span style={styles.headerTitle}>{summary.symbol} Trades For {accountCode}</span>
+        <span style={styles.headerTitle}>{safeSummary.symbol} Trades For {accountCode}</span>
         <div style={styles.headerActions}>
           <button style={styles.iconButton} title="Download">
             <Download size={16} />
@@ -234,10 +243,10 @@ export function TradesTable({ trades, summary, accountCode = 'C40421' }: TradesT
       {/* Summary */}
       <div style={styles.summarySection}>
         <p style={styles.summaryText}>
-          <span style={styles.summaryValue}>{summary.totalShares.toLocaleString()}</span> shares purchased for{' '}
-          <span style={styles.summaryValue}>{formatCurrency(summary.totalCost)}</span>
+          <span style={styles.summaryValue}>{safeSummary.totalShares.toLocaleString()}</span> shares purchased for{' '}
+          <span style={styles.summaryValue}>{formatCurrency(safeSummary.totalCost)}</span>
           {' '}&bull;{' '}Current value:{' '}
-          <span style={styles.summaryValue}>{formatCurrency(summary.currentValue)}</span>
+          <span style={styles.summaryValue}>{formatCurrency(safeSummary.currentValue)}</span>
         </p>
         <div style={{
           ...styles.pnlBadge,

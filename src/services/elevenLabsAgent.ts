@@ -2,9 +2,23 @@ import type { Position } from '../types';
 import alpacaApi from './alpacaApi';
 
 // ElevenLabs Agent Configuration
-const AGENT_ID = process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID || 'agent_7801k6206wxsfqh8jxhasqtd0hr9';
-const API_KEY = process.env.NEXT_PUBLIC_ELEVENLABS_API_KEY || 'sk_a30c60fa0accbee9da7e496657a184279ee38e9c3c7d534b';
 const ELEVENLABS_WS_URL = 'wss://api.elevenlabs.io/v1/convai/conversation';
+
+function getAgentId(): string {
+  const agentId = process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID;
+  if (!agentId) {
+    throw new Error('Missing NEXT_PUBLIC_ELEVENLABS_AGENT_ID environment variable');
+  }
+  return agentId;
+}
+
+function getApiKey(): string {
+  const apiKey = process.env.NEXT_PUBLIC_ELEVENLABS_API_KEY;
+  if (!apiKey) {
+    throw new Error('Missing NEXT_PUBLIC_ELEVENLABS_API_KEY environment variable');
+  }
+  return apiKey;
+}
 
 interface ConversationConfig {
   agent_id: string;
@@ -77,7 +91,7 @@ class ElevenLabsAgentService {
           
           // Send initialization message
           const config: ConversationConfig = {
-            agent_id: AGENT_ID,
+            agent_id: getAgentId(),
             requires_auth: true,
             audio_input_mode: 'streaming',
             audio_output_mode: 'streaming',
@@ -129,7 +143,7 @@ class ElevenLabsAgentService {
         // Send authentication
         this.sendMessage({
           type: 'user_authorization',
-          authorization: `Bearer ${API_KEY}`
+          authorization: `Bearer ${getApiKey()}`
         });
         break;
 

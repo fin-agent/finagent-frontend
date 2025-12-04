@@ -71,6 +71,65 @@ flowchart TB
 - **Agent ID**: `agent_3101kbjqgdc0fkgvt8f1zw2hbvxv`
 - **Voice ID**: `ys3XeJJA4ArWMhRpcX1D`
 
+### Agent System Prompt
+
+The agent is configured with a comprehensive system prompt that defines its personality, capabilities, and constraints:
+
+#### Personality & Role
+```
+You are FinAgent, a helpful quantitative analyst assistant. You help users
+understand their trading portfolio and answer questions about their stock
+and option trades.
+```
+
+#### Number Formatting Rule (Critical for TTS)
+```
+# CRITICAL: NUMBER FORMATTING
+NEVER spell out numbers. Always use numeric format exactly as received from tools:
+- "$195.80" NOT "one hundred ninety five dollars and eighty cents"
+- "227 shares" NOT "two hundred twenty seven shares"
+- "August 13, 2025" NOT "August thirteenth, two thousand twenty five"
+```
+
+This ensures the text-to-speech engine receives clean numeric data for natural pronunciation.
+
+#### Agent-Level Symbol Normalization
+The agent converts company names to ticker symbols before calling tools:
+```
+When users mention company names, convert them to the appropriate ticker symbol:
+- Apple → AAPL
+- Google/Alphabet → GOOGL
+- Amazon → AMZN
+- Microsoft → MSFT
+- Tesla → TSLA
+- Nvidia → NVDA
+- Meta/Facebook → META
+```
+
+#### Tone & Communication Style
+- **Clear, professional, and informative**
+- **Friendly and approachable**, but concise
+- **Free of jargon**, unless explicitly requested
+- Focused on **accuracy and clarity**
+
+#### Guardrails
+| ✅ Allowed | ❌ Not Allowed |
+|-----------|---------------|
+| Factual portfolio data | Investment advice |
+| Trade history & statistics | Personal recommendations |
+| P&L calculations | Speculation or opinions |
+| Market data (quotes, volume) | Disclosing internal tools |
+
+#### Query Categories (Filtering Rules)
+The agent only processes queries in these categories:
+- Account balances and equity summaries
+- Historical or current trades and orders
+- Realized / unrealized P&L
+- Fees, commissions, and interest data
+- Market data (quotes, volume, fundamentals)
+- Position and exposure breakdowns
+- Trade statistics (highest/lowest prices, averages)
+
 ### Available Tools
 
 The ElevenLabs agent has access to webhook tools that query trade data:
@@ -81,6 +140,17 @@ The ElevenLabs agent has access to webhook tools that query trade data:
 | `get_detailed_trades` | `/api/elevenlabs/tools` | Get full trade history with details |
 | `get_trade_stats` | `/api/elevenlabs/tools` | Get highest/lowest prices, averages for a symbol |
 | `get_profitable_trades` | `/api/elevenlabs/profitable-trades` | Calculate profitable trades using FIFO matching |
+
+#### Tool Usage Guidelines (from System Prompt)
+
+| Tool | Use When User Asks... | Example Queries |
+|------|----------------------|-----------------|
+| `get_trade_summary` | General trade counts | "How many trades do I have for Apple?", "Show me my NVDA trades" |
+| `get_detailed_trades` | Position details, cost basis | "What's my position in Tesla?", "How much did I spend on Apple?" |
+| `get_trade_stats` | Price extremes, averages | "Highest price I sold NVDA at?", "Average sell price for Apple?" |
+| `get_profitable_trades` | Realized gains, profit | "Show profitable trades on Apple", "How much profit on NVDA?" |
+
+**Important**: The agent is instructed to always pass ticker symbols (AAPL, GOOGL) not company names to tools.
 
 ### Tool Webhook Flow
 
@@ -354,12 +424,37 @@ Returns trade statistics for UI card rendering.
 
 ---
 
-## Symbol Normalization
+## Symbol Normalization (Dual-Layer)
 
-The system maps common company names to ticker symbols:
+Symbol normalization happens at **two levels** to ensure robustness:
+
+```mermaid
+flowchart LR
+    subgraph Layer1["Layer 1: Agent (System Prompt)"]
+        U[User: "Apple trades"] --> A[Agent converts to AAPL]
+    end
+
+    subgraph Layer2["Layer 2: Webhook (Code)"]
+        A --> W[Webhook receives "AAPL" or "Apple"]
+        W --> N[normalizeSymbol function]
+        N --> D[(Database Query)]
+    end
+
+    style Layer1 fill:#1a3a1a
+    style Layer2 fill:#1a1a3a
+```
+
+### Layer 1: Agent-Level (System Prompt)
+The ElevenLabs agent is instructed to convert company names before calling tools:
+```
+Apple → AAPL, Google/Alphabet → GOOGL, Tesla → TSLA, etc.
+```
+
+### Layer 2: Webhook-Level (Code Fallback)
+If the agent passes a company name, the webhook handles it as a fallback:
 
 ```typescript
-const SYMBOL_MAP = {
+const SYMBOL_MAP: Record<string, string> = {
   'apple': 'AAPL',
   'google': 'GOOGL',
   'alphabet': 'GOOGL',
@@ -372,9 +467,21 @@ const SYMBOL_MAP = {
   'netflix': 'NFLX',
   'amd': 'AMD',
   'intel': 'INTC',
-  'gamestop': 'GME'
+  'bank of america': 'BAC',
+  'citigroup': 'C',
+  'gamestop': 'GME',
+  'lucid': 'LCID',
 };
+
+function normalizeSymbol(input: string): string {
+  const lower = input.toLowerCase().trim();
+  return SYMBOL_MAP[lower] || input.toUpperCase();
+}
 ```
+
+This dual-layer approach ensures:
+1. **Best case**: Agent sends ticker symbol directly (fastest)
+2. **Fallback**: Webhook normalizes company name (robust)
 
 ---
 

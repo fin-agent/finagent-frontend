@@ -6,6 +6,7 @@ import { Mic, MessageSquare, X, Phone, Loader2, Plus, History, Send } from 'luci
 import { TradesTable } from './generative-ui/TradesTable';
 import { TradeSummary } from './generative-ui/TradeSummary';
 import { TradeStats } from './generative-ui/TradeStats';
+import { OptionStats } from './generative-ui/OptionStats';
 import { ProfitableTrades } from './generative-ui/ProfitableTrades';
 import { TimeBasedTrades } from './generative-ui/TimeBasedTrades';
 
@@ -20,11 +21,12 @@ interface Conversation {
 }
 
 interface TradeUIData {
-  type: 'summary' | 'detailed' | 'stats' | 'profitable' | 'time-based';
+  type: 'summary' | 'detailed' | 'stats' | 'profitable' | 'time-based' | 'option-stats';
   symbol: string;
   tradeType?: 'buy' | 'sell' | 'all';
   timePeriod?: string;
   data: unknown;
+  optionData?: unknown; // For combined stock + option stats
 }
 
 interface TranscriptMessage {
@@ -240,7 +242,7 @@ const UnifiedAssistant: React.FC = () => {
   // Fetch trade data for UI rendering
   const fetchTradeData = useCallback(async (
     symbol: string,
-    type: 'summary' | 'detailed' | 'stats' | 'profitable' | 'time-based',
+    type: 'summary' | 'detailed' | 'stats' | 'profitable' | 'time-based' | 'option-stats',
     tradeType?: 'buy' | 'sell' | 'all',
     timePeriod?: string
   ): Promise<TradeUIData | null> => {
@@ -251,7 +253,24 @@ const UnifiedAssistant: React.FC = () => {
       if (type === 'summary') {
         endpoint = '/api/elevenlabs/trade-summary';
       } else if (type === 'stats') {
-        endpoint = '/api/trade-stats';
+        // Fetch both stock stats and option stats
+        const [stockRes, optionRes] = await Promise.all([
+          fetch('/api/trade-stats', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ symbol, tradeType: tradeType || 'all' }),
+          }),
+          fetch('/api/option-stats', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ symbol, tradeType: tradeType || 'all' }),
+          }),
+        ]);
+        const stockData = await stockRes.json();
+        const optionData = await optionRes.json();
+        return { type, symbol, tradeType, timePeriod, data: stockData, optionData };
+      } else if (type === 'option-stats') {
+        endpoint = '/api/option-stats';
         body = { symbol, tradeType: tradeType || 'all' };
       } else if (type === 'profitable') {
         endpoint = '/api/profitable-trades-ui';
@@ -696,7 +715,7 @@ const UnifiedAssistant: React.FC = () => {
     }
 
     if (type === 'stats') {
-      const statsData = data as { stats?: {
+      const stockStatsData = data as { stats?: {
         symbol: string;
         year: number;
         tradeType: 'buy' | 'sell' | 'all';
@@ -712,24 +731,74 @@ const UnifiedAssistant: React.FC = () => {
         totalValue: number;
       }};
 
-      if (statsData.stats) {
+      const optionStatsData = tradeUI.optionData as { optionStats?: {
+        symbol: string;
+        year: number;
+        tradeType: 'buy' | 'sell' | 'all';
+        highestPremium: number;
+        highestPremiumDate: string;
+        highestPremiumContracts: number;
+        highestPremiumStrike: number;
+        highestPremiumCallPut: 'Call' | 'Put';
+        lowestPremium: number;
+        lowestPremiumDate: string;
+        lowestPremiumContracts: number;
+        lowestPremiumStrike: number;
+        lowestPremiumCallPut: 'Call' | 'Put';
+        averagePremium: number;
+        totalTrades: number;
+        totalContracts: number;
+        totalValue: number;
+        callCount: number;
+        putCount: number;
+      }} | null;
+
+      const hasStockStats = stockStatsData?.stats;
+      const hasOptionStats = optionStatsData?.optionStats;
+
+      if (hasStockStats || hasOptionStats) {
         return (
           <div style={{ marginTop: '12px' }}>
-            <TradeStats
-              symbol={statsData.stats.symbol}
-              year={statsData.stats.year}
-              tradeType={statsData.stats.tradeType}
-              highestPrice={statsData.stats.highestPrice}
-              highestPriceDate={statsData.stats.highestPriceDate}
-              highestPriceShares={statsData.stats.highestPriceShares}
-              lowestPrice={statsData.stats.lowestPrice}
-              lowestPriceDate={statsData.stats.lowestPriceDate}
-              lowestPriceShares={statsData.stats.lowestPriceShares}
-              averagePrice={statsData.stats.averagePrice}
-              totalTrades={statsData.stats.totalTrades}
-              totalShares={statsData.stats.totalShares}
-              totalValue={statsData.stats.totalValue}
-            />
+            {hasStockStats && (
+              <TradeStats
+                symbol={stockStatsData.stats!.symbol}
+                year={stockStatsData.stats!.year}
+                tradeType={stockStatsData.stats!.tradeType}
+                highestPrice={stockStatsData.stats!.highestPrice}
+                highestPriceDate={stockStatsData.stats!.highestPriceDate}
+                highestPriceShares={stockStatsData.stats!.highestPriceShares}
+                lowestPrice={stockStatsData.stats!.lowestPrice}
+                lowestPriceDate={stockStatsData.stats!.lowestPriceDate}
+                lowestPriceShares={stockStatsData.stats!.lowestPriceShares}
+                averagePrice={stockStatsData.stats!.averagePrice}
+                totalTrades={stockStatsData.stats!.totalTrades}
+                totalShares={stockStatsData.stats!.totalShares}
+                totalValue={stockStatsData.stats!.totalValue}
+              />
+            )}
+            {hasOptionStats && (
+              <OptionStats
+                symbol={optionStatsData.optionStats!.symbol}
+                year={optionStatsData.optionStats!.year}
+                tradeType={optionStatsData.optionStats!.tradeType}
+                highestPremium={optionStatsData.optionStats!.highestPremium}
+                highestPremiumDate={optionStatsData.optionStats!.highestPremiumDate}
+                highestPremiumContracts={optionStatsData.optionStats!.highestPremiumContracts}
+                highestPremiumStrike={optionStatsData.optionStats!.highestPremiumStrike}
+                highestPremiumCallPut={optionStatsData.optionStats!.highestPremiumCallPut}
+                lowestPremium={optionStatsData.optionStats!.lowestPremium}
+                lowestPremiumDate={optionStatsData.optionStats!.lowestPremiumDate}
+                lowestPremiumContracts={optionStatsData.optionStats!.lowestPremiumContracts}
+                lowestPremiumStrike={optionStatsData.optionStats!.lowestPremiumStrike}
+                lowestPremiumCallPut={optionStatsData.optionStats!.lowestPremiumCallPut}
+                averagePremium={optionStatsData.optionStats!.averagePremium}
+                totalTrades={optionStatsData.optionStats!.totalTrades}
+                totalContracts={optionStatsData.optionStats!.totalContracts}
+                totalValue={optionStatsData.optionStats!.totalValue}
+                callCount={optionStatsData.optionStats!.callCount}
+                putCount={optionStatsData.optionStats!.putCount}
+              />
+            )}
           </div>
         );
       }

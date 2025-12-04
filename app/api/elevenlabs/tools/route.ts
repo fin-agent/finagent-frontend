@@ -133,6 +133,133 @@ async function getTradeStats(symbol: string, tradeType?: string, year?: number) 
   };
 }
 
+// Tool: Get profitable trades (FIFO matching)
+async function getProfitableTrades(symbol: string, onlyProfitable: boolean = true) {
+  const normalizedSymbol = normalizeSymbol(symbol);
+
+  // Fetch all buy trades for the symbol
+  const { data: buyTrades, error: buyError } = await supabase
+    .from('TradeData')
+    .select('*')
+    .eq('AccountCode', ACCOUNT_CODE)
+    .or(`Symbol.eq.${normalizedSymbol},UnderlyingSymbol.eq.${normalizedSymbol}`)
+    .eq('TradeType', 'B')
+    .order('Date', { ascending: true })
+    .order('TradeID', { ascending: true });
+
+  if (buyError) {
+    console.error('Buy trades error:', buyError);
+    return { error: buyError.message, symbol: normalizedSymbol };
+  }
+
+  console.log(`Found ${buyTrades?.length || 0} buy trades for ${normalizedSymbol}`);
+
+  // Fetch all sell trades for the symbol (case-insensitive for 's' and 'S')
+  const { data: sellTrades, error: sellError } = await supabase
+    .from('TradeData')
+    .select('*')
+    .eq('AccountCode', ACCOUNT_CODE)
+    .or(`Symbol.eq.${normalizedSymbol},UnderlyingSymbol.eq.${normalizedSymbol}`)
+    .ilike('TradeType', 'S')
+    .order('Date', { ascending: true })
+    .order('TradeID', { ascending: true });
+
+  if (sellError) {
+    console.error('Sell trades error:', sellError);
+    return { error: sellError.message, symbol: normalizedSymbol };
+  }
+
+  console.log(`Found ${sellTrades?.length || 0} sell trades for ${normalizedSymbol}`);
+
+  // Debug: Log security types
+  if (buyTrades?.length) {
+    const buySecTypes = buyTrades.map(t => t.SecurityType);
+    console.log('Buy SecurityTypes:', [...new Set(buySecTypes)]);
+  }
+  if (sellTrades?.length) {
+    const sellSecTypes = sellTrades.map(t => t.SecurityType);
+    console.log('Sell SecurityTypes:', [...new Set(sellSecTypes)]);
+  }
+
+  if (!buyTrades?.length || !sellTrades?.length) {
+    return {
+      symbol: normalizedSymbol,
+      message: `No matched buy/sell pairs found for ${normalizedSymbol}.`,
+      trades: [],
+      totalMatchedTrades: 0,
+      profitableTrades: 0,
+      totalProfitLoss: 0,
+    };
+  }
+
+  // Match trades using FIFO by security type
+  interface MatchedTrade {
+    buyTradeId: number;
+    buyDate: string;
+    securityType: string;
+    symbol: string;
+    quantity: number;
+    buyPrice: number;
+    buyCost: number;
+    sellTradeId: number;
+    sellDate: string;
+    sellPrice: number;
+    sellProceeds: number;
+    profitLoss: number;
+  }
+
+  const matchedTrades: MatchedTrade[] = [];
+  const securityTypes = ['S', 'O'];
+
+  for (const secType of securityTypes) {
+    const buys = buyTrades.filter(t => t.SecurityType === secType);
+    const sells = sellTrades.filter(t => t.SecurityType === secType);
+    const matchCount = Math.min(buys.length, sells.length);
+
+    for (let i = 0; i < matchCount; i++) {
+      const buy = buys[i];
+      const sell = sells[i];
+      const profitLoss = (parseFloat(sell.NetAmount) || 0) + (parseFloat(buy.NetAmount) || 0);
+
+      matchedTrades.push({
+        buyTradeId: buy.TradeID,
+        buyDate: buy.Date,
+        securityType: secType === 'S' ? 'Stock' : 'Option',
+        symbol: buy.Symbol,
+        quantity: parseFloat(buy.StockShareQty || buy.OptionContracts || '0'),
+        buyPrice: parseFloat(buy.StockTradePrice || buy.OptionTradePremium || '0'),
+        buyCost: parseFloat(buy.NetAmount || '0'),
+        sellTradeId: sell.TradeID,
+        sellDate: sell.Date,
+        sellPrice: parseFloat(sell.StockTradePrice || sell.OptionTradePremium || '0'),
+        sellProceeds: parseFloat(sell.NetAmount || '0'),
+        profitLoss,
+      });
+    }
+  }
+
+  console.log(`Total matched trades before filter: ${matchedTrades.length}`);
+  matchedTrades.forEach(t => console.log(`  ${t.securityType}: P/L = ${t.profitLoss}`));
+
+  // Filter and sort results
+  let results = onlyProfitable
+    ? matchedTrades.filter(t => t.profitLoss > 0)
+    : matchedTrades;
+
+  results = results.sort((a, b) => b.profitLoss - a.profitLoss);
+
+  const totalProfit = results.reduce((sum, t) => sum + t.profitLoss, 0);
+  const profitableCount = results.filter(t => t.profitLoss > 0).length;
+
+  return {
+    symbol: normalizedSymbol,
+    totalMatchedTrades: results.length,
+    profitableTrades: profitableCount,
+    totalProfitLoss: totalProfit,
+    trades: results,
+  };
+}
+
 // Tool: Get detailed trades
 async function getDetailedTrades(symbol: string) {
   const normalizedSymbol = normalizeSymbol(symbol);
@@ -208,8 +335,9 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
 
-    // ElevenLabs sends tool calls in this format
-    const { tool_name, parameters } = body;
+    // ElevenLabs sends tool calls - parameters can be nested or flat
+    const tool_name = body.tool_name;
+    const parameters = body.parameters || body; // Support both nested and flat params
 
     console.log('ElevenLabs tool call:', { tool_name, parameters });
 
@@ -232,6 +360,14 @@ export async function POST(req: NextRequest) {
           parameters.symbol,
           parameters.trade_type || parameters.tradeType,
           parameters.year
+        );
+        break;
+
+      case 'getProfitableTrades':
+      case 'get_profitable_trades':
+        result = await getProfitableTrades(
+          parameters.symbol,
+          parameters.only_profitable ?? parameters.onlyProfitable ?? true
         );
         break;
 
@@ -276,6 +412,31 @@ export async function POST(req: NextRequest) {
         responseText += `- Lowest price ${typeLabel}: $${(result.lowestPrice ?? 0).toFixed(2)} on ${result.lowestPriceDate} (${result.lowestPriceShares} shares)\n`;
         responseText += `- Average price: $${(result.averagePrice ?? 0).toFixed(2)}\n`;
         responseText += `- Total ${result.tradesFound} trades, ${result.totalShares} shares, $${(result.totalValue ?? 0).toFixed(2)} total value`;
+      }
+    } else if (tool_name === 'getProfitableTrades' || tool_name === 'get_profitable_trades') {
+      if ('error' in result && result.error) {
+        responseText = `Error getting profitable trades: ${result.error}`;
+      } else if ('message' in result && result.totalMatchedTrades === 0) {
+        responseText = result.message as string;
+      } else if ('totalProfitLoss' in result) {
+        responseText = `Profitable trades for ${result.symbol}:\n`;
+        responseText += `- Total matched trades: ${result.totalMatchedTrades}\n`;
+        responseText += `- Profitable trades: ${result.profitableTrades}\n`;
+        responseText += `- Total profit: $${result.totalProfitLoss.toFixed(2)}\n\n`;
+
+        // List top trades (limit to 5 for voice response)
+        const topTrades = result.trades?.slice(0, 5) || [];
+        if (topTrades.length > 0) {
+          responseText += `Top trades:\n`;
+          topTrades.forEach((trade: { securityType: string; buyDate: string; sellDate: string; quantity: number; profitLoss: number }, i: number) => {
+            const profitLabel = trade.profitLoss >= 0 ? 'Profit' : 'Loss';
+            responseText += `${i + 1}. ${trade.securityType}: Bought ${trade.buyDate}, Sold ${trade.sellDate}, ${trade.quantity} shares, ${profitLabel}: $${Math.abs(trade.profitLoss).toFixed(2)}\n`;
+          });
+        }
+
+        if (result.totalMatchedTrades === 0 && result.profitableTrades === 0) {
+          responseText = `No profitable trades found for ${result.symbol}. There may be matched trades that resulted in losses.`;
+        }
       }
     }
 

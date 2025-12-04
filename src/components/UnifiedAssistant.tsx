@@ -6,6 +6,7 @@ import { Mic, MessageSquare, X, Phone, Loader2, Plus, History, Send } from 'luci
 import { TradesTable } from './generative-ui/TradesTable';
 import { TradeSummary } from './generative-ui/TradeSummary';
 import { TradeStats } from './generative-ui/TradeStats';
+import { ProfitableTrades } from './generative-ui/ProfitableTrades';
 
 type InputMode = 'voice' | 'text';
 type View = 'chat' | 'history';
@@ -18,7 +19,7 @@ interface Conversation {
 }
 
 interface TradeUIData {
-  type: 'summary' | 'detailed' | 'stats';
+  type: 'summary' | 'detailed' | 'stats' | 'profitable';
   symbol: string;
   tradeType?: 'buy' | 'sell' | 'all';
   data: unknown;
@@ -50,7 +51,13 @@ const colors = {
 
 // Extract stock symbol or company name from agent's response
 function extractSymbolOrCompany(text: string): string | null {
-  const commonWords = ['THE', 'FOR', 'AND', 'YOU', 'YOUR', 'ARE', 'HAS', 'HAVE', 'WAS', 'THIS', 'THAT', 'WITH', 'ANY', 'CLASS'];
+  const commonWords = ['THE', 'FOR', 'AND', 'YOU', 'YOUR', 'ARE', 'HAS', 'HAVE', 'WAS', 'THIS', 'THAT', 'WITH', 'ANY', 'CLASS', 'BOTH', 'WERE', 'FIRST', 'TRADE', 'STOCK', 'TOTAL', 'PROFIT'];
+
+  // Pattern 0: "profitable trades for Google" or "trades for AAPL"
+  const tradesForMatch = text.match(/(?:profitable\s+)?trades?\s+for\s+(\w+)/i);
+  if (tradesForMatch && !commonWords.includes(tradesForMatch[1].toUpperCase())) {
+    return tradesForMatch[1];
+  }
 
   // Pattern 1: "for GOOGL shares" or "AAPL trades" - ticker followed by shares/trades
   const tickerSharesMatch = text.match(/\b([A-Z]{2,5})\s+(?:shares|trades?|stock|position)/i);
@@ -152,6 +159,26 @@ function detectTradeStats(text: string): { tradeType: 'buy' | 'sell' | 'all' } |
   return null;
 }
 
+// Detect if message contains profitable trades results
+function detectProfitableTrades(text: string): boolean {
+  // Skip messages that are just "checking" without actual results
+  const isJustChecking = /I'll check|let me check|checking your|retrieving|looking up|I'll help you find|I'll find|to find your/i.test(text);
+
+  // Check if message contains actual profitable trades data
+  const hasProfitableResult =
+    /profitable\s+trades?/i.test(text) && (
+      /\$[\d,]+\.?\d*/i.test(text) || // Has dollar amount
+      /\d+\s+profitable\s+trades?/i.test(text) || // Has count
+      /total\s+profit/i.test(text) ||
+      /profit\s+of/i.test(text)
+    );
+
+  // If it's just a "checking" message without results, skip
+  if (isJustChecking && !hasProfitableResult) return false;
+
+  return hasProfitableResult;
+}
+
 const UnifiedAssistant: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [inputMode, setInputMode] = useState<InputMode>('text');
@@ -175,7 +202,7 @@ const UnifiedAssistant: React.FC = () => {
   // Fetch trade data for UI rendering
   const fetchTradeData = useCallback(async (
     symbol: string,
-    type: 'summary' | 'detailed' | 'stats',
+    type: 'summary' | 'detailed' | 'stats' | 'profitable',
     tradeType?: 'buy' | 'sell' | 'all'
   ): Promise<TradeUIData | null> => {
     try {
@@ -187,6 +214,8 @@ const UnifiedAssistant: React.FC = () => {
       } else if (type === 'stats') {
         endpoint = '/api/trade-stats';
         body = { symbol, tradeType: tradeType || 'all' };
+      } else if (type === 'profitable') {
+        endpoint = '/api/profitable-trades-ui';
       } else {
         endpoint = '/api/elevenlabs/detailed-trades';
       }
@@ -230,24 +259,36 @@ const UnifiedAssistant: React.FC = () => {
         // For assistant messages, check if we should render trade UI
         if (role === 'assistant') {
           const symbol = extractSymbolOrCompany(message.message);
+          console.log('🔍 Message:', message.message.substring(0, 100));
+          console.log('🔍 Extracted symbol:', symbol);
 
           if (symbol) {
-            // Check for trade stats (highest/lowest price queries)
-            const statsMatch = detectTradeStats(message.message);
-            if (statsMatch) {
-              const data = await fetchTradeData(symbol, 'stats', statsMatch.tradeType);
+            // Check for profitable trades first
+            const isProfitable = detectProfitableTrades(message.message);
+            console.log('🔍 Is profitable trades message:', isProfitable);
+            if (isProfitable) {
+              const data = await fetchTradeData(symbol, 'profitable');
+              console.log('🔍 Fetched profitable data:', data);
               if (data) tradeUI = data;
-            } else {
-              // Only show detailed trades table when:
-              // 1. Message indicates we're showing/retrieving trade data (not just asking)
-              // 2. Not just asking "would you like details"
-              const isShowingTrades = /here are|showing|retrieved|found \d+|have \d+\s*(stock|option)?\s*trades?/i.test(message.message);
-              const isJustAsking = /would you like|do you want|shall I|can I pull/i.test(message.message);
-              const isCheckingOrLooking = /let me check|checking|looking up|I'll help you find/i.test(message.message);
-
-              if (isShowingTrades && !isJustAsking && !isCheckingOrLooking) {
-                const data = await fetchTradeData(symbol, 'detailed');
+            }
+            // Check for trade stats (highest/lowest price queries)
+            else {
+              const statsMatch = detectTradeStats(message.message);
+              if (statsMatch) {
+                const data = await fetchTradeData(symbol, 'stats', statsMatch.tradeType);
                 if (data) tradeUI = data;
+              } else {
+                // Only show detailed trades table when:
+                // 1. Message indicates we're showing/retrieving trade data (not just asking)
+                // 2. Not just asking "would you like details"
+                const isShowingTrades = /here are|showing|retrieved|found \d+|have \d+\s*(stock|option)?\s*trades?/i.test(message.message);
+                const isJustAsking = /would you like|do you want|shall I|can I pull/i.test(message.message);
+                const isCheckingOrLooking = /let me check|checking|looking up|I'll help you find/i.test(message.message);
+
+                if (isShowingTrades && !isJustAsking && !isCheckingOrLooking) {
+                  const data = await fetchTradeData(symbol, 'detailed');
+                  if (data) tradeUI = data;
+                }
               }
             }
           }
@@ -338,23 +379,33 @@ const UnifiedAssistant: React.FC = () => {
             if (msg.role === 'assistant') {
               const symbol = extractSymbolOrCompany(msg.content);
               if (symbol) {
-                // Check for trade stats first
-                const statsMatch = detectTradeStats(msg.content);
-                if (statsMatch) {
-                  const tradeData = await fetchTradeData(symbol, 'stats', statsMatch.tradeType);
+                // Check for profitable trades first
+                const isProfitable = detectProfitableTrades(msg.content);
+                if (isProfitable) {
+                  const tradeData = await fetchTradeData(symbol, 'profitable');
                   if (tradeData) {
                     baseMessage.tradeUI = tradeData;
                   }
-                } else {
-                  // Only show detailed trades table when message indicates we're showing data
-                  const isShowingTrades = /here are|showing|retrieved|found \d+|have \d+\s*(stock|option)?\s*trades?/i.test(msg.content);
-                  const isJustAsking = /would you like|do you want|shall I|can I pull/i.test(msg.content);
-                  const isCheckingOrLooking = /let me check|checking|looking up|I'll help you find/i.test(msg.content);
-
-                  if (isShowingTrades && !isJustAsking && !isCheckingOrLooking) {
-                    const tradeData = await fetchTradeData(symbol, 'detailed');
+                }
+                // Check for trade stats
+                else {
+                  const statsMatch = detectTradeStats(msg.content);
+                  if (statsMatch) {
+                    const tradeData = await fetchTradeData(symbol, 'stats', statsMatch.tradeType);
                     if (tradeData) {
                       baseMessage.tradeUI = tradeData;
+                    }
+                  } else {
+                    // Only show detailed trades table when message indicates we're showing data
+                    const isShowingTrades = /here are|showing|retrieved|found \d+|have \d+\s*(stock|option)?\s*trades?/i.test(msg.content);
+                    const isJustAsking = /would you like|do you want|shall I|can I pull/i.test(msg.content);
+                    const isCheckingOrLooking = /let me check|checking|looking up|I'll help you find/i.test(msg.content);
+
+                    if (isShowingTrades && !isJustAsking && !isCheckingOrLooking) {
+                      const tradeData = await fetchTradeData(symbol, 'detailed');
+                      if (tradeData) {
+                        baseMessage.tradeUI = tradeData;
+                      }
                     }
                   }
                 }
@@ -619,6 +670,38 @@ const UnifiedAssistant: React.FC = () => {
               totalTrades={statsData.stats.totalTrades}
               totalShares={statsData.stats.totalShares}
               totalValue={statsData.stats.totalValue}
+            />
+          </div>
+        );
+      }
+    }
+
+    if (type === 'profitable') {
+      console.log('🎨 Rendering profitable trades card with data:', data);
+      const profitableData = data as {
+        symbol: string;
+        totalProfitableTrades: number;
+        totalProfit: number;
+        trades: Array<{
+          securityType: string;
+          buyDate: string;
+          sellDate: string;
+          quantity: number;
+          buyPrice: number;
+          sellPrice: number;
+          profitLoss: number;
+        }>;
+      };
+
+      // Always render if we have data, even with 0 trades (to show "no profitable trades")
+      if (profitableData.symbol) {
+        return (
+          <div style={{ marginTop: '12px' }}>
+            <ProfitableTrades
+              symbol={profitableData.symbol}
+              totalProfitableTrades={profitableData.totalProfitableTrades || 0}
+              totalProfit={profitableData.totalProfit || 0}
+              trades={profitableData.trades || []}
             />
           </div>
         );

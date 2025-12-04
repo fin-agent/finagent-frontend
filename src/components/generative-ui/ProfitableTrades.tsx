@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { TrendingUp, TrendingDown, Calendar, DollarSign } from 'lucide-react';
+import { TrendingUp, Calendar, DollarSign } from 'lucide-react';
 
 interface Trade {
   securityType: string;

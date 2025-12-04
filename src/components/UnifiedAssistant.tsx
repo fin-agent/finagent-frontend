@@ -7,6 +7,7 @@ import { TradesTable } from './generative-ui/TradesTable';
 import { TradeSummary } from './generative-ui/TradeSummary';
 import { TradeStats } from './generative-ui/TradeStats';
 import { ProfitableTrades } from './generative-ui/ProfitableTrades';
+import { TimeBasedTrades } from './generative-ui/TimeBasedTrades';
 
 type InputMode = 'voice' | 'text';
 type View = 'chat' | 'history';
@@ -19,9 +20,10 @@ interface Conversation {
 }
 
 interface TradeUIData {
-  type: 'summary' | 'detailed' | 'stats' | 'profitable';
+  type: 'summary' | 'detailed' | 'stats' | 'profitable' | 'time-based';
   symbol: string;
   tradeType?: 'buy' | 'sell' | 'all';
+  timePeriod?: string;
   data: unknown;
 }
 
@@ -179,6 +181,42 @@ function detectProfitableTrades(text: string): boolean {
   return hasProfitableResult;
 }
 
+// Detect if message contains time-based trades results
+function detectTimeBasedTrades(text: string): { timePeriod: string } | null {
+  // Skip messages that are just "checking" without actual results
+  const isJustChecking = /I'll check|let me check|checking your|retrieving|looking up|I'll help you find|I'll find|to find your/i.test(text);
+
+  // Check for actual time-based results with trade counts
+  const hasTradeCount = /executed\s+\d+\s+trades?|you\s+(?:have|had)\s+\d+\s+trades?|\d+\s+trades?\s+(?:for|on|over|during)/i.test(text);
+
+  if (isJustChecking && !hasTradeCount) return null;
+  if (!hasTradeCount) return null;
+
+  // Time period patterns to detect
+  const timePatterns = [
+    { pattern: /(?:for|on|over|during)\s+(today)/i, period: 'today' },
+    { pattern: /(?:for|on|over|during)\s+(yesterday)/i, period: 'yesterday' },
+    { pattern: /(?:for|on|over|during)\s+(?:the\s+)?(last\s+week|past\s+week)/i, period: 'last week' },
+    { pattern: /(?:for|on|over|during)\s+(?:the\s+)?(this\s+week)/i, period: 'this week' },
+    { pattern: /(?:for|on|over|during)\s+(?:the\s+)?(last\s+month|past\s+month)/i, period: 'last month' },
+    { pattern: /(?:for|on|over|during)\s+(?:the\s+)?(this\s+month)/i, period: 'this month' },
+    { pattern: /(?:for|on|over|during)\s+(?:the\s+)?(last\s+\d+\s+days?|past\s+\d+\s+days?)/i, period: null },
+    { pattern: /(?:for|on|over|during)\s+(?:the\s+)?(last\s+\d+\s+trading\s+days?)/i, period: null },
+    { pattern: /(?:on|for)\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)/i, period: null },
+    { pattern: /(\d+)\s+trading\s+days?/i, period: null },
+  ];
+
+  for (const { pattern, period } of timePatterns) {
+    const match = text.match(pattern);
+    if (match) {
+      const detectedPeriod = period || match[1].toLowerCase();
+      return { timePeriod: detectedPeriod };
+    }
+  }
+
+  return null;
+}
+
 const UnifiedAssistant: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [inputMode, setInputMode] = useState<InputMode>('text');
@@ -202,8 +240,9 @@ const UnifiedAssistant: React.FC = () => {
   // Fetch trade data for UI rendering
   const fetchTradeData = useCallback(async (
     symbol: string,
-    type: 'summary' | 'detailed' | 'stats' | 'profitable',
-    tradeType?: 'buy' | 'sell' | 'all'
+    type: 'summary' | 'detailed' | 'stats' | 'profitable' | 'time-based',
+    tradeType?: 'buy' | 'sell' | 'all',
+    timePeriod?: string
   ): Promise<TradeUIData | null> => {
     try {
       let endpoint: string;
@@ -216,6 +255,9 @@ const UnifiedAssistant: React.FC = () => {
         body = { symbol, tradeType: tradeType || 'all' };
       } else if (type === 'profitable') {
         endpoint = '/api/profitable-trades-ui';
+      } else if (type === 'time-based') {
+        endpoint = '/api/time-trades-ui';
+        body = { symbol: symbol || null, timePeriod };
       } else {
         endpoint = '/api/elevenlabs/detailed-trades';
       }
@@ -227,7 +269,7 @@ const UnifiedAssistant: React.FC = () => {
       });
 
       const data = await res.json();
-      return { type, symbol, tradeType, data };
+      return { type, symbol, tradeType, timePeriod, data };
     } catch (error) {
       console.error('Error fetching trade data:', error);
       return null;
@@ -262,8 +304,16 @@ const UnifiedAssistant: React.FC = () => {
           console.log('🔍 Message:', message.message.substring(0, 100));
           console.log('🔍 Extracted symbol:', symbol);
 
-          if (symbol) {
-            // Check for profitable trades first
+          // Check for time-based trades first (highest priority for time queries)
+          const timeMatch = detectTimeBasedTrades(message.message);
+          if (timeMatch) {
+            console.log('🔍 Time-based trades detected:', timeMatch.timePeriod);
+            const data = await fetchTradeData(symbol || '', 'time-based', undefined, timeMatch.timePeriod);
+            console.log('🔍 Fetched time-based data:', data);
+            if (data) tradeUI = data;
+          }
+          // Check for profitable trades
+          else if (symbol) {
             const isProfitable = detectProfitableTrades(message.message);
             console.log('🔍 Is profitable trades message:', isProfitable);
             if (isProfitable) {
@@ -378,7 +428,16 @@ const UnifiedAssistant: React.FC = () => {
             // For assistant messages, check if we should render trade UI
             if (msg.role === 'assistant') {
               const symbol = extractSymbolOrCompany(msg.content);
-              if (symbol) {
+
+              // Check for time-based trades first
+              const timeMatch = detectTimeBasedTrades(msg.content);
+              if (timeMatch) {
+                const tradeData = await fetchTradeData(symbol || '', 'time-based', undefined, timeMatch.timePeriod);
+                if (tradeData) {
+                  baseMessage.tradeUI = tradeData;
+                }
+              }
+              else if (symbol) {
                 // Check for profitable trades first
                 const isProfitable = detectProfitableTrades(msg.content);
                 if (isProfitable) {
@@ -702,6 +761,50 @@ const UnifiedAssistant: React.FC = () => {
               totalProfitableTrades={profitableData.totalProfitableTrades || 0}
               totalProfit={profitableData.totalProfit || 0}
               trades={profitableData.trades || []}
+            />
+          </div>
+        );
+      }
+    }
+
+    if (type === 'time-based') {
+      console.log('🎨 Rendering time-based trades card with data:', data);
+      const timeData = data as {
+        timePeriod: {
+          description: string;
+          displayRange: string;
+          tradingDays: number;
+        };
+        summary: {
+          totalTrades: number;
+          stockCount: number;
+          optionCount: number;
+          totalValue: number;
+          averagePrice?: number;
+        };
+        trades: Array<{
+          TradeID: number;
+          Date: string;
+          Symbol: string;
+          SecurityType: string;
+          TradeType: string;
+          StockTradePrice?: string;
+          StockShareQty?: string;
+          OptionContracts?: string;
+          NetAmount: string;
+          displayDate?: string;
+        }>;
+        symbol?: string | null;
+      };
+
+      if (timeData.timePeriod && timeData.summary) {
+        return (
+          <div style={{ marginTop: '12px' }}>
+            <TimeBasedTrades
+              timePeriod={timeData.timePeriod}
+              summary={timeData.summary}
+              trades={timeData.trades || []}
+              symbol={timeData.symbol}
             />
           </div>
         );

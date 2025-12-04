@@ -403,7 +403,7 @@ export async function POST(req: NextRequest) {
     } else if (tool_name === 'getTradeStats' || tool_name === 'get_trade_stats') {
       if ('error' in result && result.error) {
         responseText = `Error getting trade statistics: ${result.error}`;
-      } else if ('message' in result && result.tradesFound === 0) {
+      } else if ('message' in result && 'tradesFound' in result && result.tradesFound === 0) {
         responseText = result.message as string;
       } else if ('highestPrice' in result && result.highestPrice !== undefined) {
         const typeLabel = result.tradeType === 'sell' ? 'sold' : result.tradeType === 'buy' ? 'bought' : 'traded';
@@ -416,9 +416,9 @@ export async function POST(req: NextRequest) {
     } else if (tool_name === 'getProfitableTrades' || tool_name === 'get_profitable_trades') {
       if ('error' in result && result.error) {
         responseText = `Error getting profitable trades: ${result.error}`;
-      } else if ('message' in result && result.totalMatchedTrades === 0) {
+      } else if ('message' in result && 'totalMatchedTrades' in result && result.totalMatchedTrades === 0) {
         responseText = result.message as string;
-      } else if ('totalProfitLoss' in result) {
+      } else if ('totalProfitLoss' in result && result.totalProfitLoss !== undefined) {
         responseText = `Profitable trades for ${result.symbol}:\n`;
         responseText += `- Total matched trades: ${result.totalMatchedTrades}\n`;
         responseText += `- Profitable trades: ${result.profitableTrades}\n`;

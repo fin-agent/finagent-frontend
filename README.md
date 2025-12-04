@@ -430,12 +430,12 @@ Symbol normalization happens at **two levels** to ensure robustness:
 
 ```mermaid
 flowchart LR
-    subgraph Layer1["Layer 1: Agent (System Prompt)"]
-        U[User: "Apple trades"] --> A[Agent converts to AAPL]
+    subgraph Layer1["Layer 1: Agent - System Prompt"]
+        U[User says Apple trades] --> A[Agent converts to AAPL]
     end
 
-    subgraph Layer2["Layer 2: Webhook (Code)"]
-        A --> W[Webhook receives "AAPL" or "Apple"]
+    subgraph Layer2["Layer 2: Webhook - Code"]
+        A --> W[Webhook receives symbol]
         W --> N[normalizeSymbol function]
         N --> D[(Database Query)]
     end

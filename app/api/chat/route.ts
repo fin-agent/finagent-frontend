@@ -55,8 +55,11 @@ export async function POST(req: Request) {
 When users ask about trades for a company:
 1. Convert company name to ticker symbol (Apple -> AAPL, Google -> GOOGL, etc.)
 2. Use the getTradeSummary tool to get the count of trades
-3. Respond conversationally: "You have X stock and Y option trades. Would you like more details?"
-4. If the user says yes or wants more details, use the getDetailedTrades tool to fetch and display the full trade data
+3. After receiving the tool result, provide a brief summary message. The detailed data will be displayed automatically by the UI.
+4. If the user asks for more details or wants to see trades, use the getDetailedTrades tool
+5. After getDetailedTrades, provide a brief conversational response. The full table will be rendered by the UI.
+
+IMPORTANT: When tools return data, keep your text response brief - just acknowledge the data. The UI will automatically render beautiful components showing the trade details. Don't try to list all the trades in text format.
 
 Be professional, precise, and knowledgeable about financial instruments. Always use the tools to get accurate data.`,
     messages: convertToModelMessages(messages),

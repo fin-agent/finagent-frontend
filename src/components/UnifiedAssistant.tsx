@@ -2,7 +2,9 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useConversation } from '@elevenlabs/react';
-import { Mic, MessageSquare, X, Phone, Send, Loader2, Plus, History } from 'lucide-react';
+import { Mic, MessageSquare, X, Phone, Loader2, Plus, History, Send } from 'lucide-react';
+import { TradesTable } from './generative-ui/TradesTable';
+import { TradeSummary } from './generative-ui/TradeSummary';
 
 type InputMode = 'voice' | 'text';
 type View = 'chat' | 'history';
@@ -14,11 +16,18 @@ interface Conversation {
   updated_at: string;
 }
 
+interface TradeUIData {
+  type: 'summary' | 'detailed';
+  symbol: string;
+  data: unknown;
+}
+
 interface TranscriptMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
+  tradeUI?: TradeUIData;
 }
 
 // App color scheme (dark theme)
@@ -36,6 +45,52 @@ const colors = {
   userBubble: '#00c806',
   assistantBubble: '#2a2a2a',
 };
+
+// Detect stock symbols in text
+function extractSymbol(text: string): string | null {
+  // Common patterns for stock symbols - check specific symbols first
+  const symbolPatterns = [
+    /\b(AAPL|GOOGL|GOOG|AMZN|MSFT|TSLA|NVDA|META|NFLX|AMD|INTC|BAC|GME|LCID|SPY|QQQ|SOXL)\b/i,
+    /(\w{1,5})\s+Position\s+Summary/i,
+    /(\w{1,5})\s+Trades?\s+For/i,
+    /trades?\s+(?:for|involving)\s+(\w+)/i,
+    /(\w{1,5})\s+trades?/i,
+  ];
+
+  for (const pattern of symbolPatterns) {
+    const match = text.match(pattern);
+    if (match && match[1]) {
+      const symbol = match[1].toUpperCase();
+      // Filter out common words that aren't symbols
+      if (!['THE', 'FOR', 'AND', 'YOU', 'YOUR', 'ARE', 'HAS', 'HAVE'].includes(symbol)) {
+        return symbol;
+      }
+    }
+  }
+  return null;
+}
+
+// Detect if message contains trade summary data (brief count)
+function detectTradeSummary(text: string): { stockTrades: number; optionTrades: number } | null {
+  // Multiple patterns to match different response formats
+  const patterns = [
+    /(\d+)\s*stock\s*(?:trades?)?\s*(?:and)?\s*(\d+)\s*option\s*trades?/i,
+    /have\s+(\d+)\s+stock\s+and\s+(\d+)\s+option\s+trades?/i,
+    /(\d+)\s+stock\s+trades?\s+and\s+(\d+)\s+option/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match) {
+      return {
+        stockTrades: parseInt(match[1]) || 0,
+        optionTrades: parseInt(match[2]) || 0,
+      };
+    }
+  }
+  return null;
+}
+
 
 const UnifiedAssistant: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -56,6 +111,27 @@ const UnifiedAssistant: React.FC = () => {
   // Track if we're resuming from history (don't clear transcript)
   const isResumingFromHistoryRef = useRef(false);
 
+  // Fetch trade data for UI rendering
+  const fetchTradeData = useCallback(async (symbol: string, type: 'summary' | 'detailed'): Promise<TradeUIData | null> => {
+    try {
+      const endpoint = type === 'summary'
+        ? '/api/elevenlabs/trade-summary'
+        : '/api/elevenlabs/detailed-trades';
+
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbol }),
+      });
+
+      const data = await res.json();
+      return { type, symbol, data };
+    } catch (error) {
+      console.error('Error fetching trade data:', error);
+      return null;
+    }
+  }, []);
+
   // ElevenLabs Conversation Hook - single source of truth for both voice and text
   const elevenLabsConversation = useConversation({
     onConnect: () => {
@@ -72,14 +148,34 @@ const UnifiedAssistant: React.FC = () => {
       console.log('ElevenLabs disconnected');
       setIsSending(false);
     },
-    onMessage: (message) => {
+    onMessage: async (message) => {
       if (message.message) {
         const role = message.source === 'user' ? 'user' : 'assistant';
+
+        let tradeUI: TradeUIData | undefined;
+
+        // For assistant messages, check if we should render trade UI
+        if (role === 'assistant') {
+          const symbol = extractSymbol(message.message);
+
+          if (symbol) {
+            // Check if message mentions trades or retrieving data - be aggressive about showing table
+            const mentionsTrades = /trades?|retrieve|position|portfolio|shares/i.test(message.message);
+
+            if (mentionsTrades) {
+              // Always show detailed table when trades are mentioned
+              const data = await fetchTradeData(symbol, 'detailed');
+              if (data) tradeUI = data;
+            }
+          }
+        }
+
         const newMessage: TranscriptMessage = {
           id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           role,
           content: message.message,
           timestamp: new Date(),
+          tradeUI,
         };
         setTranscript(prev => [...prev, newMessage]);
         setIsSending(false); // Clear sending state when we get a response
@@ -141,13 +237,33 @@ const UnifiedAssistant: React.FC = () => {
       const res = await fetch(`/api/messages?conversation_id=${conversationId}`);
       const data = await res.json();
       if (data.messages) {
-        // Load messages into unified transcript
-        const loadedMessages: TranscriptMessage[] = data.messages.map((msg: { id: string; role: string; content: string; created_at: string }) => ({
-          id: msg.id,
-          role: msg.role as 'user' | 'assistant',
-          content: msg.content,
-          timestamp: new Date(msg.created_at),
-        }));
+        // Load messages into unified transcript, detecting trade UI for assistant messages
+        const loadedMessages: TranscriptMessage[] = await Promise.all(
+          data.messages.map(async (msg: { id: string; role: string; content: string; created_at: string }) => {
+            const baseMessage: TranscriptMessage = {
+              id: msg.id,
+              role: msg.role as 'user' | 'assistant',
+              content: msg.content,
+              timestamp: new Date(msg.created_at),
+            };
+
+            // For assistant messages, check if we should render trade UI
+            if (msg.role === 'assistant') {
+              const symbol = extractSymbol(msg.content);
+              if (symbol) {
+                const mentionsTrades = /trades?|retrieve|position|portfolio|shares/i.test(msg.content);
+                if (mentionsTrades) {
+                  const tradeData = await fetchTradeData(symbol, 'detailed');
+                  if (tradeData) {
+                    baseMessage.tradeUI = tradeData;
+                  }
+                }
+              }
+            }
+
+            return baseMessage;
+          })
+        );
         setTranscript(loadedMessages);
       }
     } catch (error) {
@@ -324,6 +440,43 @@ const UnifiedAssistant: React.FC = () => {
     }
   };
 
+  // Render trade UI component based on data
+  const renderTradeUI = (tradeUI: TradeUIData) => {
+    const { type, symbol, data } = tradeUI;
+
+    if (type === 'summary') {
+      // Parse from the response data
+      const responseData = data as { response?: string };
+      const text = responseData.response || '';
+      const summaryMatch = detectTradeSummary(text);
+
+      if (summaryMatch) {
+        return (
+          <div style={{ marginTop: '12px' }}>
+            <TradeSummary
+              symbol={symbol}
+              stockCount={summaryMatch.stockTrades}
+              optionCount={summaryMatch.optionTrades}
+            />
+          </div>
+        );
+      }
+    }
+
+    if (type === 'detailed') {
+      // For detailed trades, we need to fetch the full data with trades array
+      // The API returns a text response, but we need to call a different endpoint
+      // that returns structured data for the table
+      return (
+        <div style={{ marginTop: '12px' }}>
+          <DetailedTradesLoader symbol={symbol} />
+        </div>
+      );
+    }
+
+    return null;
+  };
+
   const isVoiceConnected = elevenLabsConversation.status === 'connected';
   const isVoiceConnecting = elevenLabsConversation.status === 'connecting';
   const isStreaming = isSending;
@@ -413,8 +566,8 @@ const UnifiedAssistant: React.FC = () => {
       top: '50%',
       left: '50%',
       transform: 'translate(-50%, -50%)',
-      width: '400px',
-      height: '600px',
+      width: '420px',
+      height: '650px',
       maxHeight: '90vh',
       display: 'flex',
       flexDirection: 'column' as const,
@@ -507,7 +660,7 @@ const UnifiedAssistant: React.FC = () => {
       borderRadius: '16px',
       borderTopLeftRadius: '4px',
       padding: '12px 16px',
-      maxWidth: '280px',
+      maxWidth: '300px',
     },
     userBubble: {
       backgroundColor: colors.userBubble,
@@ -573,77 +726,6 @@ const UnifiedAssistant: React.FC = () => {
       backgroundColor: colors.accent,
       border: 'none',
       borderRadius: '6px',
-      cursor: 'pointer',
-    },
-    // Voice mode
-    voiceContainer: {
-      flex: 1,
-      display: 'flex',
-      flexDirection: 'column' as const,
-      alignItems: 'center',
-      justifyContent: 'center',
-      padding: '24px',
-      backgroundColor: colors.bgPrimary,
-    },
-    voiceOrb: {
-      position: 'relative' as const,
-      width: '180px',
-      height: '180px',
-      marginBottom: '32px',
-    },
-    orbOuter: {
-      position: 'absolute' as const,
-      inset: 0,
-      borderRadius: '50%',
-      background: `radial-gradient(circle at 30% 30%, #00ff08, ${colors.accent}, #006604)`,
-    },
-    orbInner: {
-      position: 'absolute' as const,
-      top: '10px',
-      left: '10px',
-      width: '20px',
-      height: '20px',
-      borderRadius: '50%',
-      background: 'rgba(255,255,255,0.3)',
-    },
-    callButton: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '8px',
-      padding: '12px 24px',
-      fontSize: '14px',
-      fontWeight: 500,
-      color: colors.textPrimary,
-      backgroundColor: colors.bgHover,
-      border: `1px solid ${colors.border}`,
-      borderRadius: '24px',
-      cursor: 'pointer',
-    },
-    endCallButton: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '8px',
-      padding: '12px 24px',
-      fontSize: '14px',
-      fontWeight: 500,
-      color: colors.textPrimary,
-      backgroundColor: '#ff5000',
-      border: 'none',
-      borderRadius: '24px',
-      cursor: 'pointer',
-    },
-    statusText: {
-      color: colors.textSecondary,
-      fontSize: '14px',
-      marginBottom: '16px',
-    },
-    showConversationLink: {
-      marginTop: '32px',
-      fontSize: '14px',
-      color: colors.textMuted,
-      textDecoration: 'underline',
-      background: 'none',
-      border: 'none',
       cursor: 'pointer',
     },
     // History view
@@ -813,7 +895,7 @@ const UnifiedAssistant: React.FC = () => {
         </div>
       ) : inputMode === 'text' ? (
         <>
-          {/* Chat Messages */}
+          {/* Text Chat Messages */}
           <div ref={transcriptRef} style={styles.messagesContainer}>
             {/* Welcome Message */}
             {transcript.length === 0 && (
@@ -829,21 +911,24 @@ const UnifiedAssistant: React.FC = () => {
 
             {/* Messages */}
             {transcript.map((message) => (
-              <div
-                key={message.id}
-                style={{
-                  ...styles.messageRow,
-                  justifyContent: message.role === 'user' ? 'flex-end' : 'flex-start',
-                }}
-              >
-                {message.role === 'assistant' && (
-                  <div style={styles.avatar}>FA</div>
-                )}
-                <div style={message.role === 'user' ? styles.userBubble : styles.assistantBubble}>
-                  <p style={{ ...styles.messageText, color: message.role === 'user' ? colors.bgPrimary : colors.textPrimary }}>
-                    {message.content}
-                  </p>
+              <div key={message.id}>
+                <div
+                  style={{
+                    ...styles.messageRow,
+                    justifyContent: message.role === 'user' ? 'flex-end' : 'flex-start',
+                  }}
+                >
+                  {message.role === 'assistant' && (
+                    <div style={styles.avatar}>FA</div>
+                  )}
+                  <div style={message.role === 'user' ? styles.userBubble : styles.assistantBubble}>
+                    <p style={{ ...styles.messageText, color: message.role === 'user' ? colors.bgPrimary : colors.textPrimary }}>
+                      {message.content}
+                    </p>
+                  </div>
                 </div>
+                {/* Render trade UI if available */}
+                {message.tradeUI && renderTradeUI(message.tradeUI)}
               </div>
             ))}
 
@@ -1019,43 +1104,46 @@ const UnifiedAssistant: React.FC = () => {
             ) : (
               <>
                 {transcript.map((msg) => (
-                  <div
-                    key={msg.id}
-                    style={{
-                      display: 'flex',
-                      gap: '12px',
-                      marginBottom: '16px',
-                      justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
-                    }}
-                  >
-                    {msg.role === 'assistant' && (
-                      <div style={{
-                        width: '32px',
-                        height: '32px',
-                        borderRadius: '50%',
-                        backgroundColor: colors.accent,
+                  <div key={msg.id}>
+                    <div
+                      style={{
                         display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        color: colors.bgPrimary,
-                        fontSize: '11px',
-                        fontWeight: 700,
-                        flexShrink: 0,
-                      }}>FA</div>
-                    )}
-                    <div style={{
-                      backgroundColor: msg.role === 'user' ? colors.accent : colors.assistantBubble,
-                      color: msg.role === 'user' ? colors.bgPrimary : colors.textPrimary,
-                      borderRadius: '16px',
-                      borderTopLeftRadius: msg.role === 'assistant' ? '4px' : '16px',
-                      borderTopRightRadius: msg.role === 'user' ? '4px' : '16px',
-                      padding: '12px 16px',
-                      maxWidth: '280px',
-                    }}>
-                      <p style={{ fontSize: '14px', lineHeight: 1.5, margin: 0, whiteSpace: 'pre-wrap' }}>
-                        {msg.content}
-                      </p>
+                        gap: '12px',
+                        marginBottom: '16px',
+                        justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
+                      }}
+                    >
+                      {msg.role === 'assistant' && (
+                        <div style={{
+                          width: '32px',
+                          height: '32px',
+                          borderRadius: '50%',
+                          backgroundColor: colors.accent,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: colors.bgPrimary,
+                          fontSize: '11px',
+                          fontWeight: 700,
+                          flexShrink: 0,
+                        }}>FA</div>
+                      )}
+                      <div style={{
+                        backgroundColor: msg.role === 'user' ? colors.accent : colors.assistantBubble,
+                        color: msg.role === 'user' ? colors.bgPrimary : colors.textPrimary,
+                        borderRadius: '16px',
+                        borderTopLeftRadius: msg.role === 'assistant' ? '4px' : '16px',
+                        borderTopRightRadius: msg.role === 'user' ? '4px' : '16px',
+                        padding: '12px 16px',
+                        maxWidth: '280px',
+                      }}>
+                        <p style={{ fontSize: '14px', lineHeight: 1.5, margin: 0, whiteSpace: 'pre-wrap' }}>
+                          {msg.content}
+                        </p>
+                      </div>
                     </div>
+                    {/* Render trade UI if available */}
+                    {msg.tradeUI && renderTradeUI(msg.tradeUI)}
                   </div>
                 ))}
                 {/* Scroll anchor */}
@@ -1128,5 +1216,70 @@ const UnifiedAssistant: React.FC = () => {
     </div>
   );
 };
+
+// Component to load detailed trades data
+function DetailedTradesLoader({ symbol }: { symbol: string }) {
+  const [tradesData, setTradesData] = useState<{
+    trades: Array<{
+      TradeID: number;
+      Date: string;
+      Symbol: string;
+      SecurityType: string;
+      TradeType: string;
+      StockTradePrice: string;
+      StockShareQty: string;
+      OptionContracts: string;
+      OptionTradePremium: string;
+      GrossAmount: string;
+      NetAmount: string;
+      Strike?: string;
+      Expiration?: string;
+      'Call/Put'?: string;
+    }>;
+    summary: {
+      totalShares: number;
+      totalCost: number;
+      currentValue: number;
+      symbol: string;
+    };
+  } | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const res = await fetch('/api/trades-ui', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ symbol }),
+        });
+        const data = await res.json();
+        if (data.trades) {
+          setTradesData(data);
+        }
+      } catch (error) {
+        console.error('Error loading trades:', error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchData();
+  }, [symbol]);
+
+  if (loading) {
+    return (
+      <div style={{ padding: '20px', textAlign: 'center', color: '#8c8c8e' }}>
+        <Loader2 size={24} style={{ animation: 'spin 1s linear infinite' }} />
+        <p style={{ marginTop: '8px', fontSize: '14px' }}>Loading trades...</p>
+      </div>
+    );
+  }
+
+  if (!tradesData) {
+    return null;
+  }
+
+  return <TradesTable trades={tradesData.trades} summary={tradesData.summary} />;
+}
 
 export default UnifiedAssistant;

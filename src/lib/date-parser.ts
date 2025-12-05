@@ -5,11 +5,44 @@
 
 import { getDateOffset, formatDateForDB } from './date-utils';
 
+// Convert spelled-out numbers to digits
+const wordToNumber: Record<string, number> = {
+  'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5,
+  'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10,
+  'eleven': 11, 'twelve': 12, 'thirteen': 13, 'fourteen': 14, 'fifteen': 15,
+  'sixteen': 16, 'seventeen': 17, 'eighteen': 18, 'nineteen': 19, 'twenty': 20,
+};
+
+// Month name to number mapping (0-indexed for JavaScript Date)
+const monthNameToNumber: Record<string, number> = {
+  'january': 0, 'jan': 0,
+  'february': 1, 'feb': 1,
+  'march': 2, 'mar': 2,
+  'april': 3, 'apr': 3,
+  'may': 4,
+  'june': 5, 'jun': 5,
+  'july': 6, 'jul': 6,
+  'august': 7, 'aug': 7,
+  'september': 8, 'sept': 8, 'sep': 8,
+  'october': 9, 'oct': 9,
+  'november': 10, 'nov': 10,
+  'december': 11, 'dec': 11,
+};
+
+function parseNumber(str: string): number | null {
+  const lower = str.toLowerCase().trim();
+  if (wordToNumber[lower] !== undefined) {
+    return wordToNumber[lower];
+  }
+  const parsed = parseInt(lower);
+  return isNaN(parsed) ? null : parsed;
+}
+
 export interface DateRange {
   startDate: string; // YYYY-MM-DD format (DB-adjusted)
   endDate: string; // YYYY-MM-DD format (DB-adjusted)
   description: string; // Human-readable description
-  tradingDays: number; // Approximate trading days in range
+  tradingDays: number; // Calendar days in the range (for display)
 }
 
 export interface ParsedDateQuery {
@@ -67,6 +100,46 @@ export function parseTimeExpression(expression: string): ParsedDateQuery | null 
     };
   }
 
+  // Pattern: Specific calendar date - "November 18th", "Nov 18", "December 3rd"
+  // Matches: full/abbreviated month name + day number + optional ordinal suffix
+  const monthNames = 'january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sept|sep|october|oct|november|nov|december|dec';
+  const calendarDateMatch = lowerExpr.match(new RegExp(`^(?:on\\s+)?(${monthNames})\\s+(\\d{1,2})(?:st|nd|rd|th)?$`, 'i'));
+  if (calendarDateMatch) {
+    const monthStr = calendarDateMatch[1].toLowerCase();
+    const day = parseInt(calendarDateMatch[2]);
+    const month = monthNameToNumber[monthStr];
+
+    if (month !== undefined && day >= 1 && day <= 31) {
+      // Determine the year - use current year, but if the date is in the future, use last year
+      let year = today.getFullYear();
+      const targetDate = new Date(year, month, day);
+      targetDate.setHours(0, 0, 0, 0);
+
+      // If the date is in the future, assume user means last year
+      if (targetDate > today) {
+        year -= 1;
+        targetDate.setFullYear(year);
+      }
+
+      // Format the description nicely
+      const monthDisplay = targetDate.toLocaleDateString('en-US', { month: 'long' });
+      const dayDisplay = day;
+      const ordinal = day === 1 || day === 21 || day === 31 ? 'st'
+                    : day === 2 || day === 22 ? 'nd'
+                    : day === 3 || day === 23 ? 'rd' : 'th';
+
+      return {
+        type: 'specific',
+        dateRange: {
+          startDate: toDBDate(targetDate),
+          endDate: toDBDate(targetDate),
+          description: `${monthDisplay} ${dayDisplay}${ordinal}`,
+          tradingDays: 1
+        }
+      };
+    }
+  }
+
   // Pattern: "last week" / "past week"
   if (/^(last|past)\s*week$/.test(lowerExpr)) {
     const endDate = new Date(today);
@@ -79,7 +152,7 @@ export function parseTimeExpression(expression: string): ParsedDateQuery | null 
         startDate: toDBDate(startDate),
         endDate: toDBDate(endDate),
         description: 'last week',
-        tradingDays: 5
+        tradingDays: 7
       }
     };
   }
@@ -95,26 +168,29 @@ export function parseTimeExpression(expression: string): ParsedDateQuery | null 
         startDate: toDBDate(startOfWeek),
         endDate: toDBDate(today),
         description: 'this week',
-        tradingDays: Math.min(dayOfWeek + 1, 5)
+        tradingDays: dayOfWeek + 1 // Actual days since Sunday
       }
     };
   }
 
-  // Pattern: "last N days" / "past N days"
-  const daysMatch = lowerExpr.match(/^(?:last|past)\s*(\d+)\s*days?$/);
+  // Pattern: "last N days" / "past N days" (supports spelled-out numbers)
+  const numberWordsPattern = 'one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|\\d+';
+  const daysMatch = lowerExpr.match(new RegExp(`^(?:last|past)\\s*(${numberWordsPattern})\\s*days?$`, 'i'));
   if (daysMatch) {
-    const numDays = parseInt(daysMatch[1]);
-    const startDate = new Date(today);
-    startDate.setDate(startDate.getDate() - numDays + 1);
-    return {
-      type: 'range',
-      dateRange: {
-        startDate: toDBDate(startDate),
-        endDate: toDBDate(today),
-        description: `last ${numDays} days`,
-        tradingDays: Math.ceil(numDays * 5 / 7) // Approximate trading days
-      }
-    };
+    const numDays = parseNumber(daysMatch[1]);
+    if (numDays !== null) {
+      const startDate = new Date(today);
+      startDate.setDate(startDate.getDate() - numDays + 1);
+      return {
+        type: 'range',
+        dateRange: {
+          startDate: toDBDate(startDate),
+          endDate: toDBDate(today),
+          description: `last ${numDays} days`,
+          tradingDays: numDays // Use the actual days requested
+        }
+      };
+    }
   }
 
   // Pattern: "last month" / "past month"
@@ -127,7 +203,7 @@ export function parseTimeExpression(expression: string): ParsedDateQuery | null 
         startDate: toDBDate(startDate),
         endDate: toDBDate(endDate),
         description: 'last month',
-        tradingDays: 22 // Approximate trading days in a month
+        tradingDays: endDate.getDate() // Actual days in previous month
       }
     };
   }
@@ -141,7 +217,7 @@ export function parseTimeExpression(expression: string): ParsedDateQuery | null 
         startDate: toDBDate(startDate),
         endDate: toDBDate(today),
         description: 'this month',
-        tradingDays: Math.ceil(today.getDate() * 5 / 7)
+        tradingDays: today.getDate() // Actual days so far this month
       }
     };
   }
@@ -185,23 +261,25 @@ export function parseTimeExpression(expression: string): ParsedDateQuery | null 
     }
   }
 
-  // Pattern: "X trading days"
-  const tradingDaysMatch = lowerExpr.match(/^(?:last|past)\s*(\d+)\s*trading\s*days?$/);
+  // Pattern: "X trading days" (supports spelled-out numbers)
+  const tradingDaysMatch = lowerExpr.match(new RegExp(`^(?:last|past)\\s*(${numberWordsPattern})\\s*trading\\s*days?$`, 'i'));
   if (tradingDaysMatch) {
-    const numTradingDays = parseInt(tradingDaysMatch[1]);
-    // Approximate calendar days (trading days * 7/5)
-    const calendarDays = Math.ceil(numTradingDays * 7 / 5);
-    const startDate = new Date(today);
-    startDate.setDate(startDate.getDate() - calendarDays);
-    return {
-      type: 'range',
-      dateRange: {
-        startDate: toDBDate(startDate),
-        endDate: toDBDate(today),
-        description: `last ${numTradingDays} trading days`,
-        tradingDays: numTradingDays
-      }
-    };
+    const numTradingDays = parseNumber(tradingDaysMatch[1]);
+    if (numTradingDays !== null) {
+      // Approximate calendar days (trading days * 7/5)
+      const calendarDays = Math.ceil(numTradingDays * 7 / 5);
+      const startDate = new Date(today);
+      startDate.setDate(startDate.getDate() - calendarDays);
+      return {
+        type: 'range',
+        dateRange: {
+          startDate: toDBDate(startDate),
+          endDate: toDBDate(today),
+          description: `last ${numTradingDays} trading days`,
+          tradingDays: numTradingDays
+        }
+      };
+    }
   }
 
   return null;
@@ -253,10 +331,18 @@ export function extractTimePeriodFromQuery(query: string): string | null {
     }
   }
 
-  // "last N days" pattern
-  const daysMatch = lowerQuery.match(/((?:last|past)\s*\d+\s*days?)/i);
+  // "last N days" pattern (supports spelled-out numbers)
+  const numberWordsExtract = 'one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|\\d+';
+  const daysMatch = lowerQuery.match(new RegExp(`((?:last|past)\\s*(?:${numberWordsExtract})\\s*(?:trading\\s*)?days?)`, 'i'));
   if (daysMatch) {
     return daysMatch[1];
+  }
+
+  // Specific calendar date patterns - "November 18th", "Nov 18", "December 3rd"
+  const monthNamesExtract = 'january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sept|sep|october|oct|november|nov|december|dec';
+  const calendarDateExtract = lowerQuery.match(new RegExp(`((?:${monthNamesExtract})\\s+\\d{1,2}(?:st|nd|rd|th)?)`, 'i'));
+  if (calendarDateExtract) {
+    return calendarDateExtract[1];
   }
 
   return null;

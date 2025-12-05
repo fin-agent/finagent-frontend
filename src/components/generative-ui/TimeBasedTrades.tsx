@@ -45,6 +45,37 @@ const formatCurrency = (value: number) => {
   }).format(value);
 };
 
+// Parse OCC option symbol format: GOOGL251220C00200000
+// Format: SYMBOL + YYMMDD + C/P + 8-digit strike (3 decimal places implied)
+function parseOptionSymbol(symbol: string): { underlying: string; expiry: string; callPut: string; strike: number } | null {
+  // Match pattern: letters (1-6) + 6 digits + C/P + 8 digits
+  const match = symbol.match(/^([A-Z]{1,6})(\d{6})([CP])(\d{8})$/);
+  if (!match) return null;
+
+  const [, underlying, dateStr, callPut, strikeStr] = match;
+
+  // Parse date: YYMMDD -> MM/DD
+  const year = dateStr.substring(0, 2);
+  const month = dateStr.substring(2, 4);
+  const day = dateStr.substring(4, 6);
+  const expiry = `${month}/${day}/${year}`;
+
+  // Parse strike: 00200000 -> 200.00 (last 3 digits are decimals)
+  const strike = parseInt(strikeStr) / 1000;
+
+  return { underlying, expiry, callPut: callPut === 'C' ? 'Call' : 'Put', strike };
+}
+
+// Format symbol for display - parse option symbols into readable format
+function formatSymbol(symbol: string, isOption: boolean): string {
+  if (!isOption) return symbol;
+
+  const parsed = parseOptionSymbol(symbol);
+  if (!parsed) return symbol; // Return raw if can't parse
+
+  return `${parsed.underlying} $${parsed.strike} ${parsed.callPut}`;
+}
+
 // Colors matching the app theme
 const colors = {
   bgCard: '#1a1a1a',
@@ -137,6 +168,8 @@ export function TimeBasedTrades({
     },
     tradesPreview: {
       padding: '12px 16px',
+      maxHeight: '280px',
+      overflowY: 'auto' as const,
     },
     tradeRow: {
       display: 'flex',
@@ -190,12 +223,6 @@ export function TimeBasedTrades({
       fontSize: '12px',
       color: colors.textSecondary,
     },
-    moreIndicator: {
-      textAlign: 'center' as const,
-      padding: '8px',
-      color: colors.textMuted,
-      fontSize: '12px',
-    },
     dateRangeFooter: {
       display: 'flex',
       alignItems: 'center',
@@ -209,9 +236,8 @@ export function TimeBasedTrades({
     },
   };
 
-  // Get the first 5 trades for preview
-  const previewTrades = trades.slice(0, 5);
-  const remainingCount = trades.length - previewTrades.length;
+  // Show all trades in scrollable container
+  const displayTrades = trades;
 
   // Title based on symbol and time period
   const title = symbol
@@ -228,7 +254,7 @@ export function TimeBasedTrades({
         </span>
         <div style={styles.headerBadge}>
           <Clock size={12} />
-          {timePeriod.tradingDays} trading day{timePeriod.tradingDays !== 1 ? 's' : ''}
+          {timePeriod.tradingDays} day{timePeriod.tradingDays !== 1 ? 's' : ''}
         </div>
       </div>
 
@@ -271,10 +297,10 @@ export function TimeBasedTrades({
         </div>
       )}
 
-      {/* Trades Preview */}
-      {previewTrades.length > 0 && (
+      {/* Trades List - Scrollable */}
+      {displayTrades.length > 0 && (
         <div style={styles.tradesPreview}>
-          {previewTrades.map((trade, idx) => {
+          {displayTrades.map((trade, idx) => {
             const netAmount = parseFloat(trade.NetAmount || '0');
             const isBuy = trade.TradeType === 'B';
             const isStock = trade.SecurityType === 'S';
@@ -284,7 +310,7 @@ export function TimeBasedTrades({
                 key={trade.TradeID || idx}
                 style={{
                   ...styles.tradeRow,
-                  marginBottom: idx === previewTrades.length - 1 && remainingCount === 0 ? 0 : '8px',
+                  marginBottom: idx === displayTrades.length - 1 ? 0 : '8px',
                 }}
               >
                 <div style={styles.tradeLeft}>
@@ -296,7 +322,7 @@ export function TimeBasedTrades({
                     {isBuy ? 'BUY' : 'SELL'}
                   </div>
                   <div>
-                    <div style={styles.tradeSymbol}>{trade.Symbol}</div>
+                    <div style={styles.tradeSymbol}>{formatSymbol(trade.Symbol, !isStock)}</div>
                     <div style={styles.tradeType}>
                       {isStock ? 'Stock' : 'Option'}
                       {isStock && trade.StockShareQty && ` · ${parseFloat(trade.StockShareQty).toLocaleString()} shares`}
@@ -318,12 +344,6 @@ export function TimeBasedTrades({
               </div>
             );
           })}
-
-          {remainingCount > 0 && (
-            <div style={styles.moreIndicator}>
-              +{remainingCount} more trade{remainingCount !== 1 ? 's' : ''}
-            </div>
-          )}
         </div>
       )}
 

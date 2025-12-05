@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import { parseTimeExpression } from '@/src/lib/date-parser';
-import { formatDisplayDate, formatDateRange } from '@/src/lib/date-utils';
+import { formatDisplayDate, formatDateRange, formatCalendarDate } from '@/src/lib/date-utils';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
 
     if (!timePeriod) {
       return NextResponse.json({
-        response: 'Please specify a time period like "last week", "yesterday", "past 5 days", or a day name like "Monday".',
+        response: 'Please specify a time period like "last week", "yesterday", "past 5 days", "November 18th", or a day name like "Monday".',
       });
     }
 
@@ -60,7 +60,7 @@ export async function POST(req: NextRequest) {
     const parsedTime = parseTimeExpression(timePeriod);
     if (!parsedTime) {
       return NextResponse.json({
-        response: `I couldn't understand the time period "${timePeriod}". Try "last week", "yesterday", "past 5 days", "this month", or a day name like "Monday".`,
+        response: `I couldn't understand the time period "${timePeriod}". Try "last week", "yesterday", "past 5 days", "November 18th", "this month", or a day name like "Monday".`,
       });
     }
 
@@ -158,6 +158,10 @@ export async function POST(req: NextRequest) {
       response = `You executed ${tradeCount} trades${symbolText} ${description}: ${stockCount} stock trade${stockCount !== 1 ? 's' : ''} and ${optionCount} option trade${optionCount !== 1 ? 's' : ''}.${statsText} Would you like a detailed list?`;
     }
 
+    // Convert individual dates for display (applying date offset)
+    const displayStartDate = formatDisplayDate(startDate);
+    const displayEndDate = formatDisplayDate(endDate);
+
     return NextResponse.json({
       response,
       data: {
@@ -167,12 +171,16 @@ export async function POST(req: NextRequest) {
         timePeriod: description,
         displayRange,
         tradingDays,
-        startDate,
-        endDate,
+        // Use display-formatted dates so agent uses correct dates
+        startDate: displayStartDate,
+        endDate: displayEndDate,
+        dateRange: displayRange, // Also provide explicit date range string
         symbol: normalizedSymbol,
         totalValue: Math.round(totalValue * 100) / 100,
         trades: trades.map(t => ({
           ...t,
+          // Replace raw DB date with formatted display date (offset applied)
+          Date: formatCalendarDate(t.Date),
           displayDate: formatDisplayDate(t.Date),
         })),
       }

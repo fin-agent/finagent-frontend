@@ -1,5 +1,6 @@
 import type { Stock, Portfolio, Position, ChartData, Trade, TradeActivity } from '../types';
 import { supabase } from './supabaseClient';
+import { getDateOffset, demoDateToRealDate } from '../lib/date-utils';
 
 const ACCOUNT_CODE = 'C40421';
 
@@ -166,14 +167,24 @@ class PortfolioDataService {
 
   async getChartData(_symbol: string, period: '1D' | '1W' | '1M' | '3M' | '1Y' = '1M'): Promise<ChartData[]> {
     const days = PERIOD_LOOKUP[period] ?? 30;
-    const fromDate = new Date();
-    fromDate.setDate(fromDate.getDate() - days);
+
+    // Apply date offset to convert real dates to demo database dates
+    // Demo data is from July-Nov 2025, but we query as if "today" is DEMO_TODAY
+    const offset = getDateOffset();
+
+    // Calculate the "from" date in real terms, then convert to demo date
+    const realFromDate = new Date();
+    realFromDate.setDate(realFromDate.getDate() - days);
+
+    // Convert to demo date by adding offset
+    const demoFromDate = new Date(realFromDate);
+    demoFromDate.setDate(demoFromDate.getDate() + offset);
 
     const { data, error } = await supabase
       .from('AccountBalance')
       .select('Date, "Account Equity"')
       .eq('AccountCode', ACCOUNT_CODE)
-      .gte('Date', formatDateForQuery(fromDate))
+      .gte('Date', formatDateForQuery(demoFromDate))
       .order('Date', { ascending: true });
 
     if (error) {
@@ -182,8 +193,9 @@ class PortfolioDataService {
 
     const rows = (data ?? []) as AccountBalanceRow[];
 
+    // Convert demo dates back to display dates for the chart
     return rows.map((row) => ({
-      timestamp: new Date(row.Date).getTime(),
+      timestamp: demoDateToRealDate(row.Date).getTime(),
       price: toNumber(row['Account Equity']),
     }));
   }

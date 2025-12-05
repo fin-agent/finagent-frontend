@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
+import { formatCalendarDate } from '@/src/lib/date-utils';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -72,10 +73,10 @@ export async function POST(req: NextRequest) {
       : 0;
     const currentValue = totalSharesPurchased * lastPrice;
 
-    // Format trades for the TradesTable component
+    // Format trades for the TradesTable component with offset-adjusted dates
     const trades = data.map(t => ({
       TradeID: t.TradeID,
-      Date: t.Date,
+      Date: formatCalendarDate(t.Date),
       Symbol: t.Symbol || normalizedSymbol,
       SecurityType: t.SecurityType,
       TradeType: t.TradeType,
@@ -86,7 +87,7 @@ export async function POST(req: NextRequest) {
       GrossAmount: t.GrossAmount || '0',
       NetAmount: t.NetAmount || '0',
       Strike: t.Strike,
-      Expiration: t.Expiration,
+      Expiration: t.Expiration ? formatCalendarDate(t.Expiration) : null,
       'Call/Put': t['Call/Put'],
     }));
 

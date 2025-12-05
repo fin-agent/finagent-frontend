@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
+import { formatCalendarDate } from '@/src/lib/date-utils';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -91,10 +92,11 @@ export async function POST(req: NextRequest) {
         year: filterYear,
         tradeType: typeLabel,
         highestPrice,
-        highestPriceDate: highestTrade?.Date,
+        // Format dates with offset applied for display
+        highestPriceDate: highestTrade?.Date ? formatCalendarDate(highestTrade.Date) : null,
         highestPriceShares: highestTrade ? parseFloat(highestTrade.StockShareQty || '0') : 0,
         lowestPrice,
-        lowestPriceDate: lowestTrade?.Date,
+        lowestPriceDate: lowestTrade?.Date ? formatCalendarDate(lowestTrade.Date) : null,
         lowestPriceShares: lowestTrade ? parseFloat(lowestTrade.StockShareQty || '0') : 0,
         averagePrice: avgPrice,
         totalTrades: data.length,

@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
+import { formatCalendarDate } from '@/src/lib/date-utils';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -106,8 +107,9 @@ export async function POST(req: NextRequest) {
 
         matchedTrades.push({
           securityType: secType === 'S' ? 'Stock' : 'Option',
-          buyDate: buy.Date,
-          sellDate: sell.Date,
+          // Format dates with offset applied for display
+          buyDate: formatCalendarDate(buy.Date),
+          sellDate: formatCalendarDate(sell.Date),
           quantity: parseFloat(buy.StockShareQty || buy.OptionContracts || '0'),
           buyPrice: parseFloat(buy.StockTradePrice || buy.OptionTradePremium || '0'),
           sellPrice: parseFloat(sell.StockTradePrice || sell.OptionTradePremium || '0'),

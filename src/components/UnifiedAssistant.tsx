@@ -53,9 +53,60 @@ const colors = {
   assistantBubble: '#2a2a2a',
 };
 
+// Known stock symbols for validation
+const KNOWN_SYMBOLS = [
+  'AAPL', 'GOOGL', 'GOOG', 'AMZN', 'MSFT', 'TSLA', 'NVDA', 'META', 'NFLX', 'AMD', 'INTC', 'GME', 'QCOM',
+  'SPY', 'QQQ', 'DIA', 'IWM', 'VTI', 'VOO', 'ARKK', 'XLF', 'XLE', 'XLK',
+];
+
+// Check if response mentions multiple different stock symbols (portfolio-wide query)
+function isPortfolioWideQuery(text: string): boolean {
+  const symbolsFound = new Set<string>();
+
+  // Check for known symbols
+  for (const sym of KNOWN_SYMBOLS) {
+    const regex = new RegExp(`\\b${sym}\\b`, 'gi');
+    if (regex.test(text)) {
+      symbolsFound.add(sym);
+    }
+  }
+
+  // Check for company names
+  const companyMap: Record<string, string> = {
+    'google': 'GOOGL', 'apple': 'AAPL', 'tesla': 'TSLA', 'amazon': 'AMZN',
+    'microsoft': 'MSFT', 'nvidia': 'NVDA', 'meta': 'META', 'netflix': 'NFLX',
+  };
+  for (const [company, symbol] of Object.entries(companyMap)) {
+    const regex = new RegExp(`\\b${company}\\b`, 'gi');
+    if (regex.test(text)) {
+      symbolsFound.add(symbol);
+    }
+  }
+
+  // If 2+ different symbols are mentioned, it's a portfolio-wide query
+  return symbolsFound.size >= 2;
+}
+
 // Extract stock symbol or company name from agent's response
 function extractSymbolOrCompany(text: string): string | null {
-  const commonWords = ['THE', 'FOR', 'AND', 'YOU', 'YOUR', 'ARE', 'HAS', 'HAVE', 'WAS', 'THIS', 'THAT', 'WITH', 'ANY', 'CLASS', 'BOTH', 'WERE', 'FIRST', 'TRADE', 'STOCK', 'TOTAL', 'PROFIT'];
+  const commonWords = [
+    'THE', 'FOR', 'AND', 'YOU', 'YOUR', 'ARE', 'HAS', 'HAVE', 'WAS', 'THIS', 'THAT', 'WITH', 'ANY',
+    'CLASS', 'BOTH', 'WERE', 'FIRST', 'TRADE', 'STOCK', 'TOTAL', 'PROFIT', 'FROM', 'EACH', 'ALL',
+    'LAST', 'WEEK', 'MONTH', 'YEAR', 'DAY', 'DAYS', 'TODAY', 'YESTERDAY', 'PAST', 'RECENT',
+    'SHOW', 'HERE', 'SUMMARY', 'DETAIL', 'OPTION', 'OPTIONS', 'SHARES', 'ABOUT', 'JUST', 'ONLY',
+    // Month names (to avoid extracting from date ranges)
+    'JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE', 'JULY', 'AUGUST',
+    'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER', 'JAN', 'FEB', 'MAR', 'APR',
+    'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC',
+    // Day names (to avoid extracting from day-of-week queries)
+    'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY',
+    'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN',
+    // Time indicators (to avoid extracting AM/PM from timestamps like "11:22 AM")
+    'AM', 'PM',
+    // Other common words
+    'EXECUTED', 'OVER', 'DURING', 'BREAKDOWN', 'WOULD', 'LIKE', 'MORE', 'DETAILS',
+    'BOUGHT', 'SOLD', 'WHAT', 'TRADED', 'VALUE', 'PRICE'
+  ];
 
   // Pattern 0: "profitable trades for Google" or "trades for AAPL"
   const tradesForMatch = text.match(/(?:profitable\s+)?trades?\s+for\s+(\w+)/i);
@@ -126,16 +177,25 @@ function detectTradeSummary(text: string): { stockTrades: number; optionTrades: 
   return null;
 }
 
-// Detect if message contains detailed trades data
+// Detect if message contains detailed trades data (general trade listing)
 function detectDetailedTrades(text: string): boolean {
   // Skip if just checking/looking up
   const isJustChecking = /I'll check|let me check|checking your|retrieving|looking up|I'll help you find|I'll find|looking that up/i.test(text);
-  if (isJustChecking && !/here are|detailed|total shares|total cost/i.test(text)) return false;
+  if (isJustChecking && !/here are|detailed|total shares|total cost|found|have/i.test(text)) return false;
 
-  // Check for detailed trade indicators
+  // Check for detailed trade indicators - general trade listing patterns
   const hasDetailedInfo =
+    // Detailed/all trades patterns
     /detailed.*trades|total shares purchased|total cost.*\$|profit.?loss.*\$/i.test(text) ||
-    /current value.*\$|here are your.*trades|showing.*trades/i.test(text);
+    /current value.*\$/i.test(text) ||
+    // General trade listing patterns
+    /here\s+are\s+(your|all|the).*trades/i.test(text) ||
+    /showing\s+(your|all|the).*trades/i.test(text) ||
+    /found\s+\d+.*trades?\s+for/i.test(text) ||  // "found 8 trades for AAPL"
+    /you\s+have\s+\d+.*trades?\s+for/i.test(text) ||  // "you have 8 trades for Apple"
+    /\d+\s+(stock|option)\s+trades?\s+and\s+\d+/i.test(text) ||  // "5 stock trades and 3 option"
+    /trades?\s+for\s+\w+.*include/i.test(text) ||  // "trades for Apple include..."
+    /your\s+\w+\s+trades\s+include/i.test(text);  // "your Apple trades include..."
 
   return hasDetailedInfo;
 }
@@ -188,25 +248,33 @@ function detectTradeStats(text: string): { tradeType: 'buy' | 'sell' | 'all' } |
 }
 
 // Detect if message contains profitable trades results
+// This should be specific - only match when the response is dedicated to profitable trades analysis
 function detectProfitableTrades(text: string): boolean {
   // Skip messages that are just "checking" without actual results
   const isJustChecking = /I'll check|let me check|checking your|retrieving|looking up|I'll help you find|I'll find|to find your|looking that up/i.test(text);
+  if (isJustChecking) return false;
 
-  // Check if message contains actual profitable trades data
-  const hasProfitableResult =
-    (/profitable\s+trades?/i.test(text) || /profit.*trades/i.test(text)) && (
-      /\$[\d,]+\.?\d*/i.test(text) || // Has dollar amount
-      /\d+\s+profitable\s+trades?/i.test(text) || // Has count
-      /total\s+profit/i.test(text) ||
-      /profit\s+of/i.test(text) ||
-      /total matched trades/i.test(text) ||
-      /matched.*trades/i.test(text)
-    );
+  // Must explicitly be about profitable trades analysis - not just mentioning profit in passing
+  // Look for patterns that indicate a dedicated profitable trades response
+  const isProfitableTradesReport =
+    // Specific profitable trades patterns
+    /\d+\s+profitable\s+trades?/i.test(text) ||  // "1 profitable trade", "5 profitable trades"
+    /profitable\s+trades?\s+for\s+/i.test(text) || // "profitable trades for AAPL"
+    /total\s+profit\s+of\s+\$/i.test(text) ||  // "total profit of $X"
+    /here\s+are\s+your\s+profitable/i.test(text) || // "here are your profitable..."
+    /found\s+\d+\s+profitable/i.test(text) ||  // "found 3 profitable..."
+    /total\s+matched\s+trades/i.test(text) ||  // FIFO matching result
+    /profit.*from\s+matched/i.test(text);      // FIFO matched profit
 
-  // If it's just a "checking" message without results, skip
-  if (isJustChecking && !hasProfitableResult) return false;
+  // Exclude general trade listing messages that happen to mention profit
+  const isGeneralTradeListing =
+    /here\s+are\s+(your|all|the)\s+.*trades/i.test(text) && !/profitable/i.test(text) ||
+    /showing\s+(your|all|the)\s+trades/i.test(text) ||
+    /you\s+have\s+\d+\s+(stock|option)\s+trades?/i.test(text);
 
-  return hasProfitableResult;
+  if (isGeneralTradeListing) return false;
+
+  return isProfitableTradesReport;
 }
 
 // Detect if message contains time-based trades results
@@ -214,23 +282,44 @@ function detectTimeBasedTrades(text: string): { timePeriod: string } | null {
   // Skip messages that are just "checking" without actual results
   const isJustChecking = /I'll check|let me check|checking your|retrieving|looking up|I'll help you find|I'll find|to find your|looking that up/i.test(text);
 
+  // Pattern for spelled-out numbers (one through twenty)
+  const numberWords = '(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|\\d+)';
+
   // Check for actual time-based results with trade counts
-  const hasTradeCount = /executed\s+\d+\s+trades?|you\s+(?:have|had)\s+\d+\s+trades?|\d+\s+trades?\s+(?:for|on|over|during)|no trades found/i.test(text);
+  const hasTradeCount = /executed\s+\d+\s+trades?|you\s+(?:have|had)\s+\d+\s+trades?|\d+\s+trades?\s+(?:for|on|over|during|last|this|yesterday|today)|no trades found|\d+\s+total\s+trades?|here\s+are\s+(?:all\s+)?your\s+trades?|last\s+(?:five|ten|seven|\d+)\s+days?/i.test(text);
 
   if (isJustChecking && !hasTradeCount) return null;
   if (!hasTradeCount) return null;
 
-  // Time period patterns to detect
+  // Time period patterns to detect - ordered from most specific to most general
   const timePatterns = [
-    { pattern: /(?:for|on|over|during)\s+(today)/i, period: 'today' },
-    { pattern: /(?:for|on|over|during)\s+(yesterday)/i, period: 'yesterday' },
-    { pattern: /(?:for|on|over|during)\s+(?:the\s+)?(last\s+week|past\s+week)/i, period: 'last week' },
-    { pattern: /(?:for|on|over|during)\s+(?:the\s+)?(this\s+week)/i, period: 'this week' },
-    { pattern: /(?:for|on|over|during)\s+(?:the\s+)?(last\s+month|past\s+month)/i, period: 'last month' },
-    { pattern: /(?:for|on|over|during)\s+(?:the\s+)?(this\s+month)/i, period: 'this month' },
-    { pattern: /(?:for|on|over|during)\s+(?:the\s+)?(last\s+\d+\s+days?|past\s+\d+\s+days?)/i, period: null },
-    { pattern: /(?:for|on|over|during)\s+(?:the\s+)?(last\s+\d+\s+trading\s+days?)/i, period: null },
-    { pattern: /(?:on|for)\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)/i, period: null },
+    // "last N days" patterns with spelled-out or numeric numbers (highest priority)
+    { pattern: new RegExp(`(?:for|on|over|during|from)?\\s*(?:the\\s+)?((?:last|past)\\s+${numberWords}\\s+(?:trading\\s+)?days?)`, 'i'), period: null },
+    // Direct "N trades [time period]" patterns
+    { pattern: /\d+\s+trades?\s+(last\s+week|past\s+week)/i, period: 'last week' },
+    { pattern: /\d+\s+trades?\s+(this\s+week)/i, period: 'this week' },
+    { pattern: /\d+\s+trades?\s+(last\s+month|past\s+month)/i, period: 'last month' },
+    { pattern: /\d+\s+trades?\s+(this\s+month)/i, period: 'this month' },
+    { pattern: /\d+\s+trades?\s+(yesterday)/i, period: 'yesterday' },
+    { pattern: /\d+\s+trades?\s+(today)/i, period: 'today' },
+    // Patterns with prepositions
+    { pattern: /(?:for|on|over|during|from)\s+(today)/i, period: 'today' },
+    { pattern: /(?:for|on|over|during|from)\s+(yesterday)/i, period: 'yesterday' },
+    { pattern: /(?:for|on|over|during|from)\s+(?:the\s+)?(last\s+week|past\s+week)/i, period: 'last week' },
+    { pattern: /(?:for|on|over|during|from)\s+(?:the\s+)?(this\s+week)/i, period: 'this week' },
+    { pattern: /(?:for|on|over|during|from)\s+(?:the\s+)?(last\s+month|past\s+month)/i, period: 'last month' },
+    { pattern: /(?:for|on|over|during|from)\s+(?:the\s+)?(this\s+month)/i, period: 'this month' },
+    { pattern: /(?:for|on|over|during|from)\s+(?:the\s+)?(last\s+\d+\s+days?|past\s+\d+\s+days?)/i, period: null },
+    { pattern: /(?:for|on|over|during|from)\s+(?:the\s+)?(last\s+\d+\s+trading\s+days?)/i, period: null },
+    { pattern: /(?:on|for|from)\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)/i, period: null },
+    // Patterns without prepositions - "trades last week" style
+    { pattern: /trades?\s+(last\s+week|past\s+week)/i, period: 'last week' },
+    { pattern: /trades?\s+(this\s+week)/i, period: 'this week' },
+    { pattern: /trades?\s+(last\s+month|past\s+month)/i, period: 'last month' },
+    { pattern: /trades?\s+(this\s+month)/i, period: 'this month' },
+    { pattern: /trades?\s+(yesterday)/i, period: 'yesterday' },
+    { pattern: /trades?\s+(today)/i, period: 'today' },
+    // General fallback patterns
     { pattern: /(\d+)\s+trading\s+days?/i, period: null },
     { pattern: /(yesterday|today|last week|this week|last month|this month)/i, period: null },
   ];
@@ -265,6 +354,80 @@ const UnifiedAssistant: React.FC = () => {
   const voiceTitleSetRef = useRef(false);
   // Track if we're resuming from history (don't clear transcript)
   const isResumingFromHistoryRef = useRef(false);
+
+  // Text-only ElevenLabs conversation (no voice, just text)
+  const textOnlyConversation = useConversation({
+    textOnly: true,
+    onMessage: async (message) => {
+      if (message.message && inputMode === 'text') {
+        const role = message.source === 'user' ? 'user' : 'assistant';
+
+        // Skip user messages as we add them immediately on send
+        if (role === 'user') return;
+
+        let tradeUI: TradeUIData | undefined;
+
+        // For assistant messages, check if we should render trade UI
+        const symbol = extractSymbolOrCompany(message.message);
+
+        // Check for time-based trades first
+        const timeMatch = detectTimeBasedTrades(message.message);
+        if (timeMatch) {
+          // For time-based queries, check if it's portfolio-wide:
+          // 1. Multiple symbols mentioned in response
+          // 2. Day-of-week queries (Monday, Tuesday, etc.) are portfolio-wide by default
+          const isPortfolioQuery = isPortfolioWideQuery(message.message);
+          const isDayOfWeekQuery = /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(timeMatch.timePeriod);
+          const timeSymbol = (isPortfolioQuery || isDayOfWeekQuery) ? null : symbol;
+          const data = await fetchTradeData(timeSymbol || '', 'time-based', undefined, timeMatch.timePeriod);
+          if (data) tradeUI = data;
+        }
+        else if (symbol) {
+          // Check detection in order of priority:
+          // 1. Trade stats (specific price queries)
+          // 2. Profitable trades (specific profit analysis) - check BEFORE detailed
+          // 3. Detailed trades (general trade listing)
+          // 4. Trade summary (count overview)
+          const statsMatch = detectTradeStats(message.message);
+          if (statsMatch) {
+            const data = await fetchTradeData(symbol, 'stats', statsMatch.tradeType);
+            if (data) tradeUI = data;
+          } else if (detectProfitableTrades(message.message)) {
+            const data = await fetchTradeData(symbol, 'profitable');
+            if (data) tradeUI = data;
+          } else if (detectDetailedTrades(message.message)) {
+            const data = await fetchTradeData(symbol, 'detailed');
+            if (data) tradeUI = data;
+          } else {
+            const summaryMatch = detectTradeSummary(message.message);
+            if (summaryMatch) {
+              const data = await fetchTradeData(symbol, 'summary');
+              if (data) tradeUI = data;
+            }
+          }
+        }
+
+        const newMessage: TranscriptMessage = {
+          id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          role,
+          content: message.message,
+          timestamp: new Date(),
+          tradeUI,
+        };
+        setTranscript(prev => [...prev, newMessage]);
+        setIsSending(false);
+
+        // Save to database
+        if (currentConversationId) {
+          saveMessage(currentConversationId, role, message.message, 'text');
+        }
+      }
+    },
+    onError: (error) => {
+      console.error('Text-only ElevenLabs error:', error);
+      setIsSending(false);
+    },
+  });
 
   // Fetch trade data for UI rendering
   const fetchTradeData = useCallback(async (
@@ -354,38 +517,41 @@ const UnifiedAssistant: React.FC = () => {
           const timeMatch = detectTimeBasedTrades(message.message);
           if (timeMatch) {
             console.log('🔍 Time-based trades detected:', timeMatch.timePeriod);
-            const data = await fetchTradeData(symbol || '', 'time-based', undefined, timeMatch.timePeriod);
+            // For time-based queries, check if it's portfolio-wide:
+            // 1. Multiple symbols mentioned in response
+            // 2. Day-of-week queries (Monday, Tuesday, etc.) are portfolio-wide by default
+            const isPortfolioQuery = isPortfolioWideQuery(message.message);
+            const isDayOfWeekQuery = /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(timeMatch.timePeriod);
+            const timeSymbol = (isPortfolioQuery || isDayOfWeekQuery) ? null : symbol;
+            console.log('🔍 Portfolio-wide query:', isPortfolioQuery, 'Day-of-week:', isDayOfWeekQuery, 'Using symbol:', timeSymbol);
+            const data = await fetchTradeData(timeSymbol || '', 'time-based', undefined, timeMatch.timePeriod);
             console.log('🔍 Fetched time-based data:', data);
             if (data) tradeUI = data;
           }
-          // Check for profitable trades
+          // Check for symbol-based queries (not time-based)
           else if (symbol) {
-            const isProfitable = detectProfitableTrades(message.message);
-            console.log('🔍 Is profitable trades message:', isProfitable);
-            if (isProfitable) {
-              const data = await fetchTradeData(symbol, 'profitable');
-              console.log('🔍 Fetched profitable data:', data);
+            // Check detection in order of priority:
+            // 1. Trade stats (specific price queries)
+            // 2. Profitable trades (specific profit analysis) - check BEFORE detailed
+            // 3. Detailed trades (general trade listing)
+            // 4. Trade summary (count overview)
+            const statsMatch = detectTradeStats(message.message);
+            if (statsMatch) {
+              const data = await fetchTradeData(symbol, 'stats', statsMatch.tradeType);
               if (data) tradeUI = data;
-            }
-            // Check for trade stats (highest/lowest price queries)
-            else {
-              const statsMatch = detectTradeStats(message.message);
-              if (statsMatch) {
-                const data = await fetchTradeData(symbol, 'stats', statsMatch.tradeType);
+            } else if (detectProfitableTrades(message.message)) {
+              console.log('🔍 Profitable trades detected');
+              const data = await fetchTradeData(symbol, 'profitable');
+              if (data) tradeUI = data;
+            } else if (detectDetailedTrades(message.message)) {
+              console.log('🔍 Detailed trades detected');
+              const data = await fetchTradeData(symbol, 'detailed');
+              if (data) tradeUI = data;
+            } else {
+              const summaryMatch = detectTradeSummary(message.message);
+              if (summaryMatch) {
+                const data = await fetchTradeData(symbol, 'summary');
                 if (data) tradeUI = data;
-              }
-              // Check for detailed trades
-              else if (detectDetailedTrades(message.message)) {
-                const data = await fetchTradeData(symbol, 'detailed');
-                if (data) tradeUI = data;
-              }
-              // Check for trade summary (stock/option breakdown)
-              else {
-                const summaryMatch = detectTradeSummary(message.message);
-                if (summaryMatch) {
-                  const data = await fetchTradeData(symbol, 'summary');
-                  if (data) tradeUI = data;
-                }
               }
             }
           }
@@ -479,44 +645,45 @@ const UnifiedAssistant: React.FC = () => {
               // Check for time-based trades first
               const timeMatch = detectTimeBasedTrades(msg.content);
               if (timeMatch) {
-                const tradeData = await fetchTradeData(symbol || '', 'time-based', undefined, timeMatch.timePeriod);
+                // For time-based queries, check if it's portfolio-wide:
+                // 1. Multiple symbols mentioned in response
+                // 2. Day-of-week queries (Monday, Tuesday, etc.) are portfolio-wide by default
+                const isPortfolioQuery = isPortfolioWideQuery(msg.content);
+                const isDayOfWeekQuery = /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(timeMatch.timePeriod);
+                const timeSymbol = (isPortfolioQuery || isDayOfWeekQuery) ? null : symbol;
+                const tradeData = await fetchTradeData(timeSymbol || '', 'time-based', undefined, timeMatch.timePeriod);
                 if (tradeData) {
                   baseMessage.tradeUI = tradeData;
                 }
               }
               else if (symbol) {
-                // Check for profitable trades first
-                const isProfitable = detectProfitableTrades(msg.content);
-                if (isProfitable) {
+                // Check detection in order of priority:
+                // 1. Trade stats (specific price queries)
+                // 2. Profitable trades (specific profit analysis) - check BEFORE detailed
+                // 3. Detailed trades (general trade listing)
+                // 4. Trade summary (count overview)
+                const statsMatch = detectTradeStats(msg.content);
+                if (statsMatch) {
+                  const tradeData = await fetchTradeData(symbol, 'stats', statsMatch.tradeType);
+                  if (tradeData) {
+                    baseMessage.tradeUI = tradeData;
+                  }
+                } else if (detectProfitableTrades(msg.content)) {
                   const tradeData = await fetchTradeData(symbol, 'profitable');
                   if (tradeData) {
                     baseMessage.tradeUI = tradeData;
                   }
-                }
-                // Check for trade stats
-                else {
-                  const statsMatch = detectTradeStats(msg.content);
-                  if (statsMatch) {
-                    const tradeData = await fetchTradeData(symbol, 'stats', statsMatch.tradeType);
+                } else if (detectDetailedTrades(msg.content)) {
+                  const tradeData = await fetchTradeData(symbol, 'detailed');
+                  if (tradeData) {
+                    baseMessage.tradeUI = tradeData;
+                  }
+                } else {
+                  const summaryMatch = detectTradeSummary(msg.content);
+                  if (summaryMatch) {
+                    const tradeData = await fetchTradeData(symbol, 'summary');
                     if (tradeData) {
                       baseMessage.tradeUI = tradeData;
-                    }
-                  }
-                  // Check for detailed trades
-                  else if (detectDetailedTrades(msg.content)) {
-                    const tradeData = await fetchTradeData(symbol, 'detailed');
-                    if (tradeData) {
-                      baseMessage.tradeUI = tradeData;
-                    }
-                  }
-                  // Check for trade summary
-                  else {
-                    const summaryMatch = detectTradeSummary(msg.content);
-                    if (summaryMatch) {
-                      const tradeData = await fetchTradeData(symbol, 'summary');
-                      if (tradeData) {
-                        baseMessage.tradeUI = tradeData;
-                      }
                     }
                   }
                 }
@@ -606,7 +773,7 @@ const UnifiedAssistant: React.FC = () => {
   // Handlers
   const handleOpen = useCallback(async () => {
     setIsOpen(true);
-    setInputMode('voice'); // Always open in voice mode
+    setInputMode('voice'); // Always open in voice mode first
     setCurrentView('chat');
     if (!currentConversationId) {
       const newId = await createConversation();
@@ -653,6 +820,51 @@ const UnifiedAssistant: React.FC = () => {
     setInputValue('');
     setIsSending(true);
 
+    let convId = currentConversationId;
+    if (!convId) {
+      convId = await createConversation(message.slice(0, 50));
+      if (convId) setCurrentConversationId(convId);
+    }
+
+    // TEXT MODE: Use ElevenLabs text-only (no voice)
+    if (inputMode === 'text') {
+      // Ensure text-only session is connected
+      if (textOnlyConversation.status !== 'connected') {
+        try {
+          // @ts-expect-error - ElevenLabs SDK types
+          await textOnlyConversation.startSession({ agentId });
+          await new Promise(resolve => setTimeout(resolve, 500));
+        } catch (error) {
+          console.error('Failed to start text-only session:', error);
+          setIsSending(false);
+          return;
+        }
+      }
+
+      // Add user message to transcript immediately
+      const userMessage: TranscriptMessage = {
+        id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        role: 'user',
+        content: message,
+        timestamp: new Date(),
+      };
+      setTranscript(prev => [...prev, userMessage]);
+
+      // Save to database
+      if (convId) {
+        await saveMessage(convId, 'user', message, 'text');
+        const currentConv = conversations.find((c) => c.id === convId);
+        if (currentConv?.title === 'New Chat') {
+          updateConversationTitle(convId, message.slice(0, 50));
+        }
+      }
+
+      // Send to ElevenLabs text-only conversation
+      textOnlyConversation.sendUserMessage(message);
+      return;
+    }
+
+    // VOICE MODE: Use ElevenLabs (voice response)
     // Ensure ElevenLabs session is connected
     if (elevenLabsConversation.status !== 'connected') {
       try {
@@ -668,12 +880,6 @@ const UnifiedAssistant: React.FC = () => {
       }
     }
 
-    let convId = currentConversationId;
-    if (!convId) {
-      convId = await createConversation(message.slice(0, 50));
-      if (convId) setCurrentConversationId(convId);
-    }
-
     // Add user message to transcript immediately for UI feedback
     const userMessage: TranscriptMessage = {
       id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -685,7 +891,7 @@ const UnifiedAssistant: React.FC = () => {
 
     // Save to database
     if (convId) {
-      await saveMessage(convId, 'user', message, 'text');
+      await saveMessage(convId, 'user', message, 'voice');
       const currentConv = conversations.find((c) => c.id === convId);
       if (currentConv?.title === 'New Chat') {
         updateConversationTitle(convId, message.slice(0, 50));
@@ -693,9 +899,9 @@ const UnifiedAssistant: React.FC = () => {
       }
     }
 
-    // Send message to ElevenLabs agent
+    // Send message to ElevenLabs agent (will respond with voice)
     elevenLabsConversation.sendUserMessage(message);
-  }, [inputValue, isSending, currentConversationId, conversations, elevenLabsConversation, agentId]);
+  }, [inputValue, isSending, inputMode, currentConversationId, conversations, elevenLabsConversation, agentId, textOnlyConversation]);
 
   const handleEndChat = useCallback(() => {
     setTranscript([]);
@@ -704,14 +910,31 @@ const UnifiedAssistant: React.FC = () => {
     stopVoiceSession();
   }, [stopVoiceSession]);
 
-  const toggleMode = () => {
+  const toggleMode = useCallback(async () => {
     const newMode = inputMode === 'text' ? 'voice' : 'text';
     setInputMode(newMode);
-    // Both modes use the same ElevenLabs session, so just start it if not connected
-    if (elevenLabsConversation.status !== 'connected' && elevenLabsConversation.status !== 'connecting') {
-      startVoiceSession();
+
+    if (newMode === 'text') {
+      // Switching to chat mode - stop voice ElevenLabs, start text-only
+      stopVoiceSession();
+      if (textOnlyConversation.status !== 'connected' && textOnlyConversation.status !== 'connecting') {
+        try {
+          // @ts-expect-error - ElevenLabs SDK types
+          await textOnlyConversation.startSession({ agentId });
+        } catch (error) {
+          console.error('Failed to start text-only session:', error);
+        }
+      }
+    } else {
+      // Switching to voice mode - stop text-only, start voice ElevenLabs
+      if (textOnlyConversation.status === 'connected') {
+        await textOnlyConversation.endSession();
+      }
+      if (elevenLabsConversation.status !== 'connected' && elevenLabsConversation.status !== 'connecting') {
+        startVoiceSession();
+      }
     }
-  };
+  }, [inputMode, elevenLabsConversation.status, textOnlyConversation, startVoiceSession, stopVoiceSession, agentId]);
 
   // Render trade UI component based on data
   const renderTradeUI = (tradeUI: TradeUIData) => {
@@ -945,7 +1168,7 @@ const UnifiedAssistant: React.FC = () => {
       transform: 'translateX(-50%)',
       display: 'flex',
       alignItems: 'center',
-      gap: '12px',
+      gap: '8px',
       padding: '8px 8px 8px 12px',
       background: colors.bgCard,
       borderRadius: '40px',
@@ -953,51 +1176,56 @@ const UnifiedAssistant: React.FC = () => {
       boxShadow: '0 8px 32px rgba(0, 0, 0, 0.8)',
       cursor: 'pointer',
       zIndex: 9999,
+      whiteSpace: 'nowrap' as const,
+      maxWidth: 'calc(100vw - 32px)',
     },
     widgetOrb: {
       position: 'relative' as const,
-      width: '40px',
-      height: '40px',
+      width: '32px',
+      height: '32px',
+      minWidth: '32px',
       borderRadius: '50%',
       background: `radial-gradient(circle at 50% 50%, #00ff08, ${colors.accent}, #008a04)`,
       boxShadow: 'inset 0 -2px 6px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 200, 6, 0.3)',
     },
     widgetOrbHighlight: {
       position: 'absolute' as const,
-      top: '6px',
-      left: '8px',
-      width: '12px',
-      height: '10px',
+      top: '5px',
+      left: '6px',
+      width: '10px',
+      height: '8px',
       borderRadius: '50%',
       background: 'rgba(255, 255, 255, 0.4)',
       filter: 'blur(1px)',
     },
     widgetOrbReflection: {
       position: 'absolute' as const,
-      top: '4px',
-      left: '6px',
-      width: '6px',
-      height: '5px',
+      top: '3px',
+      left: '5px',
+      width: '5px',
+      height: '4px',
       borderRadius: '50%',
       background: 'rgba(255, 255, 255, 0.7)',
     },
     widgetText: {
       color: colors.textSecondary,
-      fontSize: '14px',
+      fontSize: '13px',
       fontWeight: 500,
+      whiteSpace: 'nowrap' as const,
     },
     widgetCallBtn: {
       display: 'flex',
       alignItems: 'center',
-      gap: '8px',
-      padding: '10px 20px',
+      gap: '6px',
+      padding: '8px 14px',
       background: colors.bgHover,
       border: `1px solid ${colors.border}`,
       borderRadius: '24px',
       color: colors.textSecondary,
-      fontSize: '14px',
+      fontSize: '13px',
       fontWeight: 500,
       cursor: 'pointer',
+      whiteSpace: 'nowrap' as const,
     },
     // Main card - centered on screen
     card: {
@@ -1261,6 +1489,25 @@ const UnifiedAssistant: React.FC = () => {
 
   return (
     <div style={styles.card}>
+      {/* Minimize handle - tap to close */}
+      <div
+        onClick={handleClose}
+        style={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          padding: '8px',
+          cursor: 'pointer',
+          backgroundColor: colors.bgSecondary,
+        }}
+      >
+        <div style={{
+          width: '36px',
+          height: '4px',
+          borderRadius: '2px',
+          backgroundColor: colors.textMuted,
+        }} />
+      </div>
       {/* Header */}
       <div style={styles.header}>
         <div style={styles.headerLeft}>

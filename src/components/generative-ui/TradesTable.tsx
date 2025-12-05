@@ -30,7 +30,6 @@ interface TradeSummary {
 interface TradesTableProps {
   trades: Trade[];
   summary?: TradeSummary | null;
-  accountCode?: string;
 }
 
 const formatCurrency = (value: number) => {
@@ -65,7 +64,7 @@ const colors = {
   sell: '#ff5252',
 };
 
-export function TradesTable({ trades, summary, accountCode = 'C40421' }: TradesTableProps) {
+export function TradesTable({ trades, summary }: TradesTableProps) {
   const stockTrades = trades.filter(t => t.SecurityType === 'S');
   const optionTrades = trades.filter(t => t.SecurityType === 'O');
 
@@ -229,7 +228,7 @@ export function TradesTable({ trades, summary, accountCode = 'C40421' }: TradesT
     <div style={styles.container}>
       {/* Header */}
       <div style={styles.header}>
-        <span style={styles.headerTitle}>{safeSummary.symbol} Trades For {accountCode}</span>
+        <span style={styles.headerTitle}>{safeSummary.symbol} Trades</span>
         <div style={styles.headerActions}>
           <button style={styles.iconButton} title="Download">
             <Download size={16} />

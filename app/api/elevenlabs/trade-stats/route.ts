@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
+import { formatCalendarDate } from '@/src/lib/date-utils';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -90,9 +91,13 @@ export async function POST(req: NextRequest) {
     const highShareQty = parseFloat(highestTrade?.StockShareQty || '0');
     const lowShareQty = parseFloat(lowestTrade?.StockShareQty || '0');
 
+    // Format dates with offset applied for display
+    const highDate = highestTrade?.Date ? formatCalendarDate(highestTrade.Date) : 'N/A';
+    const lowDate = lowestTrade?.Date ? formatCalendarDate(lowestTrade.Date) : 'N/A';
+
     let response = `${normalizedSymbol} trade statistics for ${filterYear}: `;
-    response += `Highest price ${typeLabel}: ${formatPrice(highestPrice)} on ${highestTrade?.Date} for ${formatNumber(highShareQty)} shares. `;
-    response += `Lowest price ${typeLabel}: ${formatPrice(lowestPrice)} on ${lowestTrade?.Date} for ${formatNumber(lowShareQty)} shares. `;
+    response += `Highest price ${typeLabel}: ${formatPrice(highestPrice)} on ${highDate} for ${formatNumber(highShareQty)} shares. `;
+    response += `Lowest price ${typeLabel}: ${formatPrice(lowestPrice)} on ${lowDate} for ${formatNumber(lowShareQty)} shares. `;
     response += `Average price: ${formatPrice(avgPrice)}. `;
     response += `Total: ${formatNumber(data.length)} trades, ${formatNumber(totalShares)} shares, ${formatPrice(totalValue)} total value.`;
 

@@ -32,8 +32,10 @@ flowchart TB
     subgraph API["Next.js API Routes"]
         Tools["/api/elevenlabs/tools"]
         PT["/api/elevenlabs/profitable-trades"]
+        TT["/api/elevenlabs/time-trades"]
         TS["/api/trade-stats"]
         TUI["/api/profitable-trades-ui"]
+        TTUI["/api/time-trades-ui"]
         Conv["/api/conversations"]
         Msg["/api/messages"]
     end
@@ -49,14 +51,18 @@ flowchart TB
     UA <-->|WebSocket| Agent
     Agent -->|Webhook| Tools
     Agent -->|Webhook| PT
+    Agent -->|Webhook| TT
     UA -->|REST| TUI
+    UA -->|REST| TTUI
     UA -->|REST| TS
     UA -->|REST| Conv
     UA -->|REST| Msg
 
     Tools --> TD
     PT --> TD
+    TT --> TD
     TUI --> TD
+    TTUI --> TD
     TS --> TD
     Conv --> C
     Msg --> M
@@ -138,8 +144,9 @@ The ElevenLabs agent has access to webhook tools that query trade data:
 |-----------|----------|-------------|
 | `get_trade_summary` | `/api/elevenlabs/tools` | Get count of stock and option trades for a symbol |
 | `get_detailed_trades` | `/api/elevenlabs/tools` | Get full trade history with details |
-| `get_trade_stats` | `/api/elevenlabs/tools` | Get highest/lowest prices, averages for a symbol |
+| `get_trade_stats` | `/api/elevenlabs/trade-stats` | Get highest/lowest prices, averages for a symbol |
 | `get_profitable_trades` | `/api/elevenlabs/profitable-trades` | Calculate profitable trades using FIFO matching |
+| `get_time_based_trades` | `/api/elevenlabs/time-trades` | Get trades for a time period (last week, yesterday, Nov 18th) |
 
 #### Tool Usage Guidelines (from System Prompt)
 
@@ -149,6 +156,7 @@ The ElevenLabs agent has access to webhook tools that query trade data:
 | `get_detailed_trades` | Position details, cost basis | "What's my position in Tesla?", "How much did I spend on Apple?" |
 | `get_trade_stats` | Price extremes, averages | "Highest price I sold NVDA at?", "Average sell price for Apple?" |
 | `get_profitable_trades` | Realized gains, profit | "Show profitable trades on Apple", "How much profit on NVDA?" |
+| `get_time_based_trades` | Trades for a time period | "Show trades for last week", "Yesterday's trades", "Trades on November 18th" |
 
 **Important**: The agent is instructed to always pass ticker symbols (AAPL, GOOGL) not company names to tools.
 
@@ -254,6 +262,77 @@ for (const secType of ['S', 'O']) {
 
 ---
 
+## Date Utilities & Demo Data Mapping
+
+The application uses **demo trade data** with future dates (2025) that are dynamically mapped to display as recent dates relative to today. This allows the demo to always show relevant "recent" trades.
+
+### Date Offset System
+
+```mermaid
+flowchart LR
+    subgraph DemoData["Database (Demo)"]
+        DB["2025-11-20<br/>(DEMO_TODAY)"]
+    end
+
+    subgraph Offset["Date Offset Calculation"]
+        CALC["offset = DEMO_TODAY - TODAY<br/>~351 days"]
+    end
+
+    subgraph Display["User Display"]
+        DISP["Dec 4, 2024<br/>(Today)"]
+    end
+
+    DB --> CALC --> DISP
+```
+
+### Key Functions (`src/lib/date-utils.ts`)
+
+| Function | Purpose |
+|----------|---------|
+| `getDateOffset()` | Calculate days between demo "today" (2025-11-20) and actual today |
+| `realDateToDemoDate(date)` | Convert real date → DB date (add offset for queries) |
+| `demoDateToRealDate(dbDate)` | Convert DB date → real date (subtract offset for display) |
+| `formatDisplayDate(dbDate)` | Format as relative date ("Yesterday", "2 days ago") |
+| `formatCalendarDate(dbDate)` | Format as calendar date ("Dec 4, 2024") |
+| `formatDateRange(start, end)` | Format date range ("Nov 27 - Dec 3") |
+
+### Time-Based Trade Queries
+
+The application supports natural language time expressions for querying trades:
+
+#### Supported Time Expressions (`src/lib/date-parser.ts`)
+
+| Category | Examples |
+|----------|----------|
+| **Relative Days** | "today", "yesterday" |
+| **Relative Ranges** | "last week", "this week", "last month", "this month" |
+| **N Days** | "last 5 days", "past 10 days", "last 3 trading days" |
+| **Day Names** | "Monday", "Tuesday", "last Friday" |
+| **Specific Dates** | "November 18th", "Nov 18", "December 3rd" |
+
+#### Time-Based Query Flow
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Agent as ElevenLabs Agent
+    participant API as /api/elevenlabs/time-trades
+    participant Parser as date-parser.ts
+    participant DB as Supabase
+
+    User->>Agent: "Show trades for last week"
+    Agent->>API: POST {time_period: "last week", symbol: "GOOGL"}
+    API->>Parser: parseTimeExpression("last week")
+    Parser-->>API: {startDate: "2025-11-13", endDate: "2025-11-19", description: "last week"}
+    API->>DB: Query trades WHERE Date BETWEEN startDate AND endDate
+    DB-->>API: trades[]
+    API->>API: Format dates with offset for display
+    API-->>Agent: {response: "You executed 5 trades last week", data: {...}}
+    Agent-->>User: Voice response with correct dates
+```
+
+---
+
 ## Database Schema
 
 ```mermaid
@@ -351,6 +430,7 @@ flowchart TD
 | `TradeStats` | "highest price", "lowest sold", "average" | High/low prices with dates, averages, totals |
 | `TradesTable` | "found X trades", "here are your trades" | Full trade history table |
 | `TradeSummary` | "X stock trades and Y option trades" | Quick trade count summary |
+| `TimeBasedTrades` | "trades last week", "executed X trades yesterday" | Time period summary, trade list with display dates |
 
 ---
 
@@ -421,6 +501,49 @@ Returns structured data for the ProfitableTrades component.
 #### `POST /api/trade-stats`
 
 Returns trade statistics for UI card rendering.
+
+#### `POST /api/elevenlabs/time-trades`
+
+Called by ElevenLabs agent to get trades for a specific time period.
+
+**Request:**
+```json
+{
+  "time_period": "last week",
+  "symbol": "GOOGL",
+  "trade_type": "buy"
+}
+```
+
+**Response:**
+```json
+{
+  "response": "You executed 5 trades for GOOGL last week over 7 trading days. Would you like a detailed list?",
+  "data": {
+    "tradeCount": 5,
+    "stockCount": 4,
+    "optionCount": 1,
+    "timePeriod": "last week",
+    "displayRange": "Nov 27 - Dec 3",
+    "tradingDays": 7,
+    "startDate": "Nov 27",
+    "endDate": "Dec 3",
+    "symbol": "GOOGL",
+    "totalValue": 50000.00,
+    "trades": [...]
+  }
+}
+```
+
+**Supported Time Periods:**
+- Relative: `today`, `yesterday`, `last week`, `this month`
+- N Days: `last 5 days`, `past 10 trading days`
+- Day Names: `Monday`, `Tuesday`, `last Friday`
+- Specific Dates: `November 18th`, `Nov 18`, `December 3rd`
+
+#### `POST /api/time-trades-ui`
+
+Returns structured data for the TimeBasedTrades UI component.
 
 ---
 
@@ -493,10 +616,13 @@ finagent-frontend/
 │   ├── api/
 │   │   ├── elevenlabs/
 │   │   │   ├── profitable-trades/    # Profitable trades webhook
+│   │   │   ├── time-trades/          # Time-based trades webhook
+│   │   │   ├── trade-stats/          # Trade statistics webhook
 │   │   │   ├── tools/                # Multi-tool webhook endpoint
 │   │   │   ├── trade-summary/        # Trade summary endpoint
 │   │   │   └── detailed-trades/      # Detailed trades endpoint
 │   │   ├── profitable-trades-ui/     # UI data for profitable trades card
+│   │   ├── time-trades-ui/           # UI data for time-based trades card
 │   │   ├── trade-stats/              # Trade statistics UI data
 │   │   ├── trades-ui/                # Trades table UI data
 │   │   ├── conversations/            # Conversation CRUD
@@ -504,10 +630,14 @@ finagent-frontend/
 │   ├── layout.tsx
 │   └── page.tsx
 ├── src/
+│   ├── lib/
+│   │   ├── date-utils.ts             # Date offset utilities for demo data
+│   │   └── date-parser.ts            # Natural language date parsing
 │   └── components/
 │       ├── UnifiedAssistant.tsx      # Main chat/voice interface
 │       └── generative-ui/
 │           ├── ProfitableTrades.tsx  # Profitable trades card
+│           ├── TimeBasedTrades.tsx   # Time-based trades card
 │           ├── TradeStats.tsx        # Trade statistics card
 │           ├── TradesTable.tsx       # Full trades table
 │           └── TradeSummary.tsx      # Quick summary card
@@ -566,6 +696,10 @@ ngrok http 3000
 | "What's the highest price I sold NVDA at?" | get_trade_stats | TradeStats |
 | "How many AAPL trades do I have?" | get_trade_summary | TradeSummary |
 | "Show me all my Tesla trades" | get_detailed_trades | TradesTable |
+| "Show my trades from last week" | get_time_based_trades | TimeBasedTrades |
+| "What trades did I make yesterday?" | get_time_based_trades | TimeBasedTrades |
+| "GOOGL trades on November 18th" | get_time_based_trades | TimeBasedTrades |
+| "Show trades for the past 5 days" | get_time_based_trades | TimeBasedTrades |
 
 ---
 

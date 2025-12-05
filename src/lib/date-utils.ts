@@ -14,7 +14,9 @@ export function getDateOffset(): number {
   const actualToday = new Date();
   actualToday.setHours(0, 0, 0, 0);
 
-  const demoToday = new Date(DEMO_TODAY);
+  // Parse DEMO_TODAY as local date (not UTC) to avoid timezone issues
+  const [year, month, day] = DEMO_TODAY.split('-').map(Number);
+  const demoToday = new Date(year, month - 1, day); // month is 0-indexed
   demoToday.setHours(0, 0, 0, 0);
 
   const diffMs = demoToday.getTime() - actualToday.getTime();
@@ -44,7 +46,9 @@ export function realDateToDemoDate(realDate: Date): Date {
  */
 export function demoDateToRealDate(demoDateStr: string): Date {
   const offset = getDateOffset();
-  const demoDate = new Date(demoDateStr);
+  // Parse as local date to avoid timezone issues
+  const [year, month, day] = demoDateStr.split('-').map(Number);
+  const demoDate = new Date(year, month - 1, day);
   demoDate.setDate(demoDate.getDate() - offset);
   return demoDate;
 }
@@ -117,4 +121,17 @@ export function formatDateRange(startDateStr: string, endDateStr: string): strin
 export function getDayOfWeek(demoDateStr: string): string {
   const realDate = demoDateToRealDate(demoDateStr);
   return realDate.toLocaleDateString('en-US', { weekday: 'long' });
+}
+
+/**
+ * Format a demo date to a standard calendar format (e.g., "Dec 3, 2024")
+ * This converts the database date to the actual display date with offset applied
+ */
+export function formatCalendarDate(demoDateStr: string): string {
+  const realDate = demoDateToRealDate(demoDateStr);
+  return realDate.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric'
+  });
 }

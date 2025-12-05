@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
-import { formatCalendarDate } from '@/src/lib/date-utils';
+import { formatCalendarDate, getDateOffset } from '@/src/lib/date-utils';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -40,9 +40,17 @@ export async function POST(req: NextRequest) {
     }
 
     const normalizedSymbol = normalizeSymbol(symbol);
-    const filterYear = new Date().getFullYear();
-    const yearStart = `${filterYear}-01-01`;
-    const yearEnd = `${filterYear}-12-31`;
+
+    // Get the date offset to map user's year to demo database year
+    const offset = getDateOffset();
+    const userYear = new Date().getFullYear();
+
+    // Convert user's year to demo database year by adding the offset
+    const offsetYears = Math.round(offset / 365);
+    const dbYear = userYear + offsetYears;
+
+    const yearStart = `${dbYear}-01-01`;
+    const yearEnd = `${dbYear}-12-31`;
 
     let query = supabase
       .from('TradeData')
@@ -69,7 +77,7 @@ export async function POST(req: NextRequest) {
     if (!data || data.length === 0) {
       const typeLabel = tradeType ? (tradeType.toLowerCase().startsWith('s') ? 'sell' : 'buy') : '';
       return NextResponse.json({
-        response: `No ${typeLabel} trades found for ${normalizedSymbol} in ${filterYear}.`,
+        response: `No ${typeLabel} trades found for ${normalizedSymbol} in ${userYear}.`,
       });
     }
 
@@ -95,7 +103,7 @@ export async function POST(req: NextRequest) {
     const highDate = highestTrade?.Date ? formatCalendarDate(highestTrade.Date) : 'N/A';
     const lowDate = lowestTrade?.Date ? formatCalendarDate(lowestTrade.Date) : 'N/A';
 
-    let response = `${normalizedSymbol} trade statistics for ${filterYear}: `;
+    let response = `${normalizedSymbol} trade statistics for ${userYear}: `;
     response += `Highest price ${typeLabel}: ${formatPrice(highestPrice)} on ${highDate} for ${formatNumber(highShareQty)} shares. `;
     response += `Lowest price ${typeLabel}: ${formatPrice(lowestPrice)} on ${lowDate} for ${formatNumber(lowShareQty)} shares. `;
     response += `Average price: ${formatPrice(avgPrice)}. `;

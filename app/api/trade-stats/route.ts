@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
-import { formatCalendarDate } from '@/src/lib/date-utils';
+import { formatCalendarDate, getDateOffset } from '@/src/lib/date-utils';
+import { parseTimeExpression } from '@/src/lib/date-parser';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -37,16 +38,41 @@ function normalizeSymbol(input: string): string {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { symbol, tradeType, year } = body;
+    const { symbol, tradeType, year, timePeriod } = body;
 
     if (!symbol) {
       return NextResponse.json({ error: 'Symbol required' }, { status: 400 });
     }
 
     const normalizedSymbol = normalizeSymbol(symbol);
-    const filterYear = year || new Date().getFullYear();
-    const yearStart = `${filterYear}-01-01`;
-    const yearEnd = `${filterYear}-12-31`;
+
+    // Get the date offset to map user's year to demo database year
+    const offset = getDateOffset();
+    const userYear = year || new Date().getFullYear();
+    const offsetYears = Math.round(offset / 365);
+    const dbYear = userYear + offsetYears;
+
+    let dateStart: string;
+    let dateEnd: string;
+    let timePeriodDescription: string | null = null;
+
+    // If timePeriod is provided, parse it to get date range
+    if (timePeriod) {
+      const parsedTime = parseTimeExpression(timePeriod);
+      if (parsedTime) {
+        dateStart = parsedTime.dateRange.startDate;
+        dateEnd = parsedTime.dateRange.endDate;
+        timePeriodDescription = parsedTime.dateRange.description;
+      } else {
+        // Fallback to full year if parsing fails
+        dateStart = `${dbYear}-01-01`;
+        dateEnd = `${dbYear}-12-31`;
+      }
+    } else {
+      // Default to full year
+      dateStart = `${dbYear}-01-01`;
+      dateEnd = `${dbYear}-12-31`;
+    }
 
     let query = supabase
       .from('TradeData')
@@ -54,8 +80,8 @@ export async function POST(req: NextRequest) {
       .eq('AccountCode', ACCOUNT_CODE)
       .eq('SecurityType', 'S')
       .or(`Symbol.eq.${normalizedSymbol},UnderlyingSymbol.eq.${normalizedSymbol}`)
-      .gte('Date', yearStart)
-      .lte('Date', yearEnd);
+      .gte('Date', dateStart)
+      .lte('Date', dateEnd);
 
     if (tradeType) {
       const normalizedType = tradeType.toLowerCase().startsWith('s') ? 'S' : 'B';
@@ -89,8 +115,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       stats: {
         symbol: normalizedSymbol,
-        year: filterYear,
+        year: userYear, // Return user's requested year, not DB year
         tradeType: typeLabel,
+        timePeriod: timePeriodDescription, // e.g., "last month", "last week", null for full year
         highestPrice,
         // Format dates with offset applied for display
         highestPriceDate: highestTrade?.Date ? formatCalendarDate(highestTrade.Date) : null,

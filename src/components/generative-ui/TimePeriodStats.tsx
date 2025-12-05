@@ -1,13 +1,12 @@
 'use client';
 
 import React from 'react';
-import { TrendingUp, TrendingDown, Calendar, Hash } from 'lucide-react';
+import { TrendingUp, TrendingDown, Calendar, Hash, DollarSign } from 'lucide-react';
 
-interface TradeStatsProps {
+interface TimePeriodStatsProps {
   symbol: string;
-  year: number;
+  timePeriod: string; // "last month", "last week", etc.
   tradeType: 'buy' | 'sell' | 'all';
-  timePeriod?: string | null; // e.g., "last month", "last week", null for full year
   highestPrice: number;
   highestPriceDate: string;
   highestPriceShares: number;
@@ -33,7 +32,6 @@ const formatDate = (dateStr: string) => {
   return date.toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric',
-    year: 'numeric'
   });
 };
 
@@ -48,13 +46,13 @@ const colors = {
   accent: '#00c806',
   high: '#00c806',
   low: '#ff5252',
+  blue: '#3b82f6',
 };
 
-export function TradeStats({
+export function TimePeriodStats({
   symbol,
-  year,
-  tradeType,
   timePeriod,
+  tradeType,
   highestPrice,
   highestPriceDate,
   highestPriceShares,
@@ -64,18 +62,14 @@ export function TradeStats({
   averagePrice,
   totalTrades,
   totalShares,
-  totalValue,
-}: TradeStatsProps) {
-  const typeLabel = tradeType === 'sell' ? 'Sell' : tradeType === 'buy' ? 'Buy' : 'All';
+}: TimePeriodStatsProps) {
+  const typeLabel = tradeType === 'sell' ? 'Sell' : tradeType === 'buy' ? 'Buy' : 'Trade';
   const actionLabel = tradeType === 'sell' ? 'Sold' : tradeType === 'buy' ? 'Bought' : 'Traded';
 
   // Format time period for display (capitalize first letter of each word)
   const formatTimePeriod = (period: string) => {
     return period.split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
   };
-
-  // Show time period if provided, otherwise show year
-  const periodLabel = timePeriod ? formatTimePeriod(timePeriod) : String(year);
 
   const styles = {
     container: {
@@ -110,12 +104,47 @@ export function TradeStats({
     content: {
       padding: '16px',
     },
-    statsGrid: {
-      display: 'grid',
-      gridTemplateColumns: '1fr 1fr',
-      gap: '16px',
+    mainStat: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      padding: '16px',
+      borderRadius: '8px',
+      backgroundColor: colors.bgHeader,
+      marginBottom: '12px',
+    },
+    mainStatLeft: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '12px',
+    },
+    mainStatIcon: {
+      width: '40px',
+      height: '40px',
+      borderRadius: '8px',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    mainStatValue: {
+      fontSize: '24px',
+      fontWeight: 700,
+      color: colors.textPrimary,
+    },
+    mainStatLabel: {
+      fontSize: '12px',
+      color: colors.textSecondary,
+      marginTop: '2px',
+    },
+    mainStatMeta: {
+      textAlign: 'right' as const,
+    },
+    statsRow: {
+      display: 'flex',
+      gap: '12px',
     },
     statCard: {
+      flex: 1,
       padding: '12px',
       borderRadius: '8px',
       backgroundColor: colors.bgHeader,
@@ -129,21 +158,21 @@ export function TradeStats({
       color: colors.textMuted,
       textTransform: 'uppercase' as const,
       letterSpacing: '0.5px',
-      marginBottom: '8px',
+      marginBottom: '6px',
     },
     statValue: {
-      fontSize: '20px',
+      fontSize: '18px',
       fontWeight: 700,
       color: colors.textPrimary,
-      marginBottom: '4px',
     },
     statMeta: {
-      fontSize: '12px',
+      fontSize: '11px',
       color: colors.textSecondary,
+      marginTop: '4px',
     },
     footer: {
       display: 'flex',
-      justifyContent: 'space-between',
+      justifyContent: 'space-around',
       padding: '12px 16px',
       borderTop: `1px solid ${colors.border}`,
       backgroundColor: colors.bgHeader,
@@ -170,13 +199,31 @@ export function TradeStats({
     <div style={styles.container}>
       {/* Header */}
       <div style={styles.header}>
-        <span style={styles.headerTitle}>{symbol} {typeLabel} Stats ({periodLabel})</span>
-        <span style={styles.badge}>{typeLabel}</span>
+        <span style={styles.headerTitle}>{symbol} {typeLabel} Prices - {formatTimePeriod(timePeriod)}</span>
+        <span style={styles.badge}>{formatTimePeriod(timePeriod)}</span>
       </div>
 
       {/* Stats Content */}
       <div style={styles.content}>
-        <div style={styles.statsGrid}>
+        {/* Average Price - Main Stat */}
+        <div style={styles.mainStat}>
+          <div style={styles.mainStatLeft}>
+            <div style={{ ...styles.mainStatIcon, backgroundColor: 'rgba(59, 130, 246, 0.15)' }}>
+              <DollarSign size={20} color={colors.blue} />
+            </div>
+            <div>
+              <div style={styles.mainStatValue}>{formatCurrency(averagePrice)}</div>
+              <div style={styles.mainStatLabel}>Average {typeLabel} Price</div>
+            </div>
+          </div>
+          <div style={styles.mainStatMeta}>
+            <div style={{ fontSize: '14px', fontWeight: 600, color: colors.textPrimary }}>{totalTrades}</div>
+            <div style={{ fontSize: '11px', color: colors.textSecondary }}>trades</div>
+          </div>
+        </div>
+
+        {/* High/Low Row */}
+        <div style={styles.statsRow}>
           {/* Highest Price */}
           <div style={styles.statCard}>
             <div style={styles.statLabel}>
@@ -189,9 +236,9 @@ export function TradeStats({
             <div style={styles.statMeta}>
               <Calendar size={10} style={{ display: 'inline', marginRight: '4px' }} />
               {formatDate(highestPriceDate)}
-              <span style={{ marginLeft: '8px' }}>
+              <span style={{ marginLeft: '6px' }}>
                 <Hash size={10} style={{ display: 'inline', marginRight: '2px' }} />
-                {highestPriceShares} shares
+                {highestPriceShares}
               </span>
             </div>
           </div>
@@ -208,34 +255,24 @@ export function TradeStats({
             <div style={styles.statMeta}>
               <Calendar size={10} style={{ display: 'inline', marginRight: '4px' }} />
               {formatDate(lowestPriceDate)}
-              <span style={{ marginLeft: '8px' }}>
+              <span style={{ marginLeft: '6px' }}>
                 <Hash size={10} style={{ display: 'inline', marginRight: '2px' }} />
-                {lowestPriceShares} shares
+                {lowestPriceShares}
               </span>
             </div>
           </div>
         </div>
-
-        {/* Average Price */}
-        <div style={{ ...styles.statCard, marginTop: '16px' }}>
-          <div style={styles.statLabel}>Average Price</div>
-          <div style={styles.statValue}>{formatCurrency(averagePrice)}</div>
-        </div>
       </div>
 
-      {/* Footer Stats */}
+      {/* Footer */}
       <div style={styles.footer}>
         <div style={styles.footerStat}>
-          <div style={styles.footerLabel}>Trades</div>
+          <div style={styles.footerLabel}>Total Trades</div>
           <div style={styles.footerValue}>{totalTrades}</div>
         </div>
         <div style={styles.footerStat}>
-          <div style={styles.footerLabel}>Shares</div>
+          <div style={styles.footerLabel}>Total Shares</div>
           <div style={styles.footerValue}>{totalShares.toLocaleString()}</div>
-        </div>
-        <div style={styles.footerStat}>
-          <div style={styles.footerLabel}>Total Value</div>
-          <div style={styles.footerValue}>{formatCurrency(totalValue)}</div>
         </div>
       </div>
     </div>

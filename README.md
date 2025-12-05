@@ -426,8 +426,9 @@ flowchart TD
 
 | Component | Trigger Patterns | Data Displayed |
 |-----------|-----------------|----------------|
-| `ProfitableTrades` | "profitable trades", "profit of $X" | Total profit, trade count, individual trade details |
-| `TradeStats` | "highest price", "lowest sold", "average" | High/low prices with dates, averages, totals |
+| `ProfitableTrades` | "profitable trades", "profit of $X", "most profitable" | Total profit, trade count, individual trade details |
+| `TradeStats` | "highest price", "lowest sold", "average" (full year) | High/low prices with dates, averages, totals for the year |
+| `TimePeriodStats` | "highest price last month", "average price last week" | High/low/average prices for specific time periods |
 | `TradesTable` | "found X trades", "here are your trades" | Full trade history table |
 | `TradeSummary` | "X stock trades and Y option trades" | Quick trade count summary |
 | `TimeBasedTrades` | "trades last week", "executed X trades yesterday" | Time period summary, trade list with display dates |
@@ -638,7 +639,8 @@ finagent-frontend/
 │       └── generative-ui/
 │           ├── ProfitableTrades.tsx  # Profitable trades card
 │           ├── TimeBasedTrades.tsx   # Time-based trades card
-│           ├── TradeStats.tsx        # Trade statistics card
+│           ├── TimePeriodStats.tsx   # Time-period price stats card (last month, last week)
+│           ├── TradeStats.tsx        # Trade statistics card (full year)
 │           ├── TradesTable.tsx       # Full trades table
 │           └── TradeSummary.tsx      # Quick summary card
 ├── tool-config.json                  # ElevenLabs tool configuration
@@ -693,7 +695,10 @@ ngrok http 3000
 | Query | Tool Used | UI Component |
 |-------|-----------|--------------|
 | "Show my profitable trades on Google" | get_profitable_trades | ProfitableTrades |
+| "What's my most profitable Apple trade?" | get_profitable_trades | ProfitableTrades |
 | "What's the highest price I sold NVDA at?" | get_trade_stats | TradeStats |
+| "Average price I bought Apple at last month" | get_trade_stats | TimePeriodStats |
+| "Highest price I paid for GOOGL last week" | get_trade_stats | TimePeriodStats |
 | "How many AAPL trades do I have?" | get_trade_summary | TradeSummary |
 | "Show me all my Tesla trades" | get_detailed_trades | TradesTable |
 | "Show my trades from last week" | get_time_based_trades | TimeBasedTrades |

@@ -9,6 +9,7 @@ import { TradeStats } from './generative-ui/TradeStats';
 import { OptionStats } from './generative-ui/OptionStats';
 import { ProfitableTrades } from './generative-ui/ProfitableTrades';
 import { TimeBasedTrades } from './generative-ui/TimeBasedTrades';
+import { TimePeriodStats } from './generative-ui/TimePeriodStats';
 
 type InputMode = 'voice' | 'text';
 type View = 'chat' | 'history';
@@ -181,7 +182,7 @@ function detectTradeSummary(text: string): { stockTrades: number; optionTrades: 
 function detectDetailedTrades(text: string): boolean {
   // Skip if just checking/looking up
   const isJustChecking = /I'll check|let me check|checking your|retrieving|looking up|I'll help you find|I'll find|looking that up/i.test(text);
-  if (isJustChecking && !/here are|detailed|total shares|total cost|found|have/i.test(text)) return false;
+  if (isJustChecking && !/here are|detailed|total shares|total cost|found|have|trade/i.test(text)) return false;
 
   // Check for detailed trade indicators - general trade listing patterns
   const hasDetailedInfo =
@@ -195,13 +196,21 @@ function detectDetailedTrades(text: string): boolean {
     /you\s+have\s+\d+.*trades?\s+for/i.test(text) ||  // "you have 8 trades for Apple"
     /\d+\s+(stock|option)\s+trades?\s+and\s+\d+/i.test(text) ||  // "5 stock trades and 3 option"
     /trades?\s+for\s+\w+.*include/i.test(text) ||  // "trades for Apple include..."
-    /your\s+\w+\s+trades\s+include/i.test(text);  // "your Apple trades include..."
+    /your\s+\w+\s+trades\s+include/i.test(text) ||  // "your Apple trades include..."
+    // Additional patterns for trade listing responses
+    /\d+\s+trades?\s+for\s+\w+/i.test(text) ||  // "8 trades for AAPL" or "15 trades for Apple"
+    /bought\s+\d+\s+shares/i.test(text) ||  // "bought 100 shares"
+    /sold\s+\d+\s+shares/i.test(text) ||  // "sold 50 shares"
+    /\d+\s+buy\s+trades?\s+and\s+\d+\s+sell/i.test(text) ||  // "5 buy trades and 3 sell"
+    /trades\s+include.*buy.*sell/i.test(text) ||  // "trades include...buy...sell"
+    /listing.*trades/i.test(text) ||  // "listing your trades"
+    /trade\s+history/i.test(text);  // "trade history"
 
   return hasDetailedInfo;
 }
 
 // Detect if message contains trade stats results (not just "let me check")
-function detectTradeStats(text: string): { tradeType: 'buy' | 'sell' | 'all' } | null {
+function detectTradeStats(text: string): { tradeType: 'buy' | 'sell' | 'all'; timePeriod?: string } | null {
   // Skip messages that are just "checking" without actual price results
   const isJustChecking = /I'll check|let me check|checking your|retrieving|looking up|I'll help you find|I'll find|to find your|looking that up/i.test(text);
 
@@ -235,14 +244,26 @@ function detectTradeStats(text: string): { tradeType: 'buy' | 'sell' | 'all' } |
     /lowest\s+price.*\$/i,
     /dollars?\s+(?:and|per)/i,
     /cents?\s+(?:per|for)/i,
-    /statistics for \d{4}/i,
+    /statistics\s+for\s+\d{4}/i,
+    // Year-based statistics patterns (full year only)
+    /(?:this|in)\s+(?:\d{4}|year)/i,
+    /for\s+\d{4}/i,
   ];
 
   if (patterns.some(p => p.test(text))) {
     // Determine trade type
-    if (/sold|sell|sale/i.test(text)) return { tradeType: 'sell' };
-    if (/bought|buy|purchase|paid/i.test(text)) return { tradeType: 'buy' };
-    return { tradeType: 'all' };
+    let tradeType: 'buy' | 'sell' | 'all' = 'all';
+    if (/sold|sell|sale/i.test(text)) tradeType = 'sell';
+    else if (/bought|buy|purchase|paid/i.test(text)) tradeType = 'buy';
+
+    // Extract time period if present
+    let timePeriod: string | undefined;
+    const timePeriodMatch = text.match(/(?:last|past|this)\s+(?:month|week)|yesterday|today/i);
+    if (timePeriodMatch) {
+      timePeriod = timePeriodMatch[0].toLowerCase();
+    }
+
+    return { tradeType, timePeriod };
   }
   return null;
 }
@@ -264,7 +285,17 @@ function detectProfitableTrades(text: string): boolean {
     /here\s+are\s+your\s+profitable/i.test(text) || // "here are your profitable..."
     /found\s+\d+\s+profitable/i.test(text) ||  // "found 3 profitable..."
     /total\s+matched\s+trades/i.test(text) ||  // FIFO matching result
-    /profit.*from\s+matched/i.test(text);      // FIFO matched profit
+    /profit.*from\s+matched/i.test(text) ||    // FIFO matched profit
+    // "Most profitable" patterns
+    /most\s+profitable\s+trade/i.test(text) ||  // "most profitable trade"
+    /your\s+most\s+profitable/i.test(text) ||   // "your most profitable..."
+    /biggest\s+profit/i.test(text) ||           // "biggest profit"
+    /largest\s+profit/i.test(text) ||           // "largest profit"
+    /highest\s+profit/i.test(text) ||           // "highest profit"
+    /profit\s+of\s+\$[\d,]+/i.test(text) ||     // "profit of $1,234"
+    /made\s+a\s+profit\s+of/i.test(text) ||     // "made a profit of"
+    /realized\s+(?:a\s+)?profit/i.test(text) || // "realized profit" or "realized a profit"
+    /netted\s+(?:a\s+)?profit/i.test(text);     // "netted a profit"
 
   // Exclude general trade listing messages that happen to mention profit
   const isGeneralTradeListing =
@@ -281,6 +312,11 @@ function detectProfitableTrades(text: string): boolean {
 function detectTimeBasedTrades(text: string): { timePeriod: string } | null {
   // Skip messages that are just "checking" without actual results
   const isJustChecking = /I'll check|let me check|checking your|retrieving|looking up|I'll help you find|I'll find|to find your|looking that up/i.test(text);
+
+  // Skip if this is a price statistics query (should show TradeStats card instead)
+  // This prevents "average price last month" from triggering TimeBasedTrades
+  const isPriceStatisticsQuery = /(?:highest|lowest|average|max|min)\s+(?:price|premium)|statistics\s+for\s+\d{4}|price\s+(?:was|is)\s+\$/i.test(text);
+  if (isPriceStatisticsQuery) return null;
 
   // Pattern for spelled-out numbers (one through twenty)
   const numberWords = '(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|\\d+)';
@@ -375,10 +411,11 @@ const UnifiedAssistant: React.FC = () => {
         if (timeMatch) {
           // For time-based queries, check if it's portfolio-wide:
           // 1. Multiple symbols mentioned in response
-          // 2. Day-of-week queries (Monday, Tuesday, etc.) are portfolio-wide by default
+          // 2. Day-of-week queries with NO symbol are portfolio-wide
           const isPortfolioQuery = isPortfolioWideQuery(message.message);
           const isDayOfWeekQuery = /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(timeMatch.timePeriod);
-          const timeSymbol = (isPortfolioQuery || isDayOfWeekQuery) ? null : symbol;
+          // Only use null symbol if portfolio-wide OR (day-of-week AND no symbol detected)
+          const timeSymbol = (isPortfolioQuery || (isDayOfWeekQuery && !symbol)) ? null : symbol;
           const data = await fetchTradeData(timeSymbol || '', 'time-based', undefined, timeMatch.timePeriod);
           if (data) tradeUI = data;
         }
@@ -390,7 +427,7 @@ const UnifiedAssistant: React.FC = () => {
           // 4. Trade summary (count overview)
           const statsMatch = detectTradeStats(message.message);
           if (statsMatch) {
-            const data = await fetchTradeData(symbol, 'stats', statsMatch.tradeType);
+            const data = await fetchTradeData(symbol, 'stats', statsMatch.tradeType, statsMatch.timePeriod);
             if (data) tradeUI = data;
           } else if (detectProfitableTrades(message.message)) {
             const data = await fetchTradeData(symbol, 'profitable');
@@ -448,12 +485,12 @@ const UnifiedAssistant: React.FC = () => {
           fetch('/api/trade-stats', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ symbol, tradeType: tradeType || 'all' }),
+            body: JSON.stringify({ symbol, tradeType: tradeType || 'all', timePeriod }),
           }),
           fetch('/api/option-stats', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ symbol, tradeType: tradeType || 'all' }),
+            body: JSON.stringify({ symbol, tradeType: tradeType || 'all', timePeriod }),
           }),
         ]);
         const stockData = await stockRes.json();
@@ -519,10 +556,11 @@ const UnifiedAssistant: React.FC = () => {
             console.log('🔍 Time-based trades detected:', timeMatch.timePeriod);
             // For time-based queries, check if it's portfolio-wide:
             // 1. Multiple symbols mentioned in response
-            // 2. Day-of-week queries (Monday, Tuesday, etc.) are portfolio-wide by default
+            // 2. Day-of-week queries with NO symbol are portfolio-wide
             const isPortfolioQuery = isPortfolioWideQuery(message.message);
             const isDayOfWeekQuery = /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(timeMatch.timePeriod);
-            const timeSymbol = (isPortfolioQuery || isDayOfWeekQuery) ? null : symbol;
+            // Only use null symbol if portfolio-wide OR (day-of-week AND no symbol detected)
+            const timeSymbol = (isPortfolioQuery || (isDayOfWeekQuery && !symbol)) ? null : symbol;
             console.log('🔍 Portfolio-wide query:', isPortfolioQuery, 'Day-of-week:', isDayOfWeekQuery, 'Using symbol:', timeSymbol);
             const data = await fetchTradeData(timeSymbol || '', 'time-based', undefined, timeMatch.timePeriod);
             console.log('🔍 Fetched time-based data:', data);
@@ -537,7 +575,7 @@ const UnifiedAssistant: React.FC = () => {
             // 4. Trade summary (count overview)
             const statsMatch = detectTradeStats(message.message);
             if (statsMatch) {
-              const data = await fetchTradeData(symbol, 'stats', statsMatch.tradeType);
+              const data = await fetchTradeData(symbol, 'stats', statsMatch.tradeType, statsMatch.timePeriod);
               if (data) tradeUI = data;
             } else if (detectProfitableTrades(message.message)) {
               console.log('🔍 Profitable trades detected');
@@ -647,10 +685,11 @@ const UnifiedAssistant: React.FC = () => {
               if (timeMatch) {
                 // For time-based queries, check if it's portfolio-wide:
                 // 1. Multiple symbols mentioned in response
-                // 2. Day-of-week queries (Monday, Tuesday, etc.) are portfolio-wide by default
+                // 2. Day-of-week queries with NO symbol are portfolio-wide
                 const isPortfolioQuery = isPortfolioWideQuery(msg.content);
                 const isDayOfWeekQuery = /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(timeMatch.timePeriod);
-                const timeSymbol = (isPortfolioQuery || isDayOfWeekQuery) ? null : symbol;
+                // Only use null symbol if portfolio-wide OR (day-of-week AND no symbol detected)
+                const timeSymbol = (isPortfolioQuery || (isDayOfWeekQuery && !symbol)) ? null : symbol;
                 const tradeData = await fetchTradeData(timeSymbol || '', 'time-based', undefined, timeMatch.timePeriod);
                 if (tradeData) {
                   baseMessage.tradeUI = tradeData;
@@ -664,7 +703,7 @@ const UnifiedAssistant: React.FC = () => {
                 // 4. Trade summary (count overview)
                 const statsMatch = detectTradeStats(msg.content);
                 if (statsMatch) {
-                  const tradeData = await fetchTradeData(symbol, 'stats', statsMatch.tradeType);
+                  const tradeData = await fetchTradeData(symbol, 'stats', statsMatch.tradeType, statsMatch.timePeriod);
                   if (tradeData) {
                     baseMessage.tradeUI = tradeData;
                   }
@@ -975,6 +1014,7 @@ const UnifiedAssistant: React.FC = () => {
         symbol: string;
         year: number;
         tradeType: 'buy' | 'sell' | 'all';
+        timePeriod?: string | null;
         highestPrice: number;
         highestPriceDate: string;
         highestPriceShares: number;
@@ -1011,11 +1051,31 @@ const UnifiedAssistant: React.FC = () => {
 
       const hasStockStats = stockStatsData?.stats;
       const hasOptionStats = optionStatsData?.optionStats;
+      const hasTimePeriod = hasStockStats && stockStatsData.stats!.timePeriod;
 
       if (hasStockStats || hasOptionStats) {
         return (
           <div style={{ marginTop: '12px' }}>
-            {hasStockStats && (
+            {hasStockStats && hasTimePeriod && (
+              // Use TimePeriodStats for time-based queries (last month, last week, etc.)
+              <TimePeriodStats
+                symbol={stockStatsData.stats!.symbol}
+                timePeriod={stockStatsData.stats!.timePeriod!}
+                tradeType={stockStatsData.stats!.tradeType}
+                highestPrice={stockStatsData.stats!.highestPrice}
+                highestPriceDate={stockStatsData.stats!.highestPriceDate}
+                highestPriceShares={stockStatsData.stats!.highestPriceShares}
+                lowestPrice={stockStatsData.stats!.lowestPrice}
+                lowestPriceDate={stockStatsData.stats!.lowestPriceDate}
+                lowestPriceShares={stockStatsData.stats!.lowestPriceShares}
+                averagePrice={stockStatsData.stats!.averagePrice}
+                totalTrades={stockStatsData.stats!.totalTrades}
+                totalShares={stockStatsData.stats!.totalShares}
+                totalValue={stockStatsData.stats!.totalValue}
+              />
+            )}
+            {hasStockStats && !hasTimePeriod && (
+              // Use TradeStats for full year stats
               <TradeStats
                 symbol={stockStatsData.stats!.symbol}
                 year={stockStatsData.stats!.year}

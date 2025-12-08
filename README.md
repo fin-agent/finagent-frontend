@@ -428,7 +428,8 @@ flowchart TD
 |-----------|-----------------|----------------|
 | `ProfitableTrades` | "profitable trades", "profit of $X", "most profitable" | Total profit, trade count, individual trade details |
 | `TradeStats` | "highest price", "lowest sold", "average" (full year) | High/low prices with dates, averages, totals for the year |
-| `TimePeriodStats` | "highest price last month", "average price last week" | High/low/average prices for specific time periods |
+| `TimePeriodStats` | "highest price last month", "average price last week" (with high/low) | High/low/average prices for specific time periods |
+| `AveragePrice` | "average price was $X", "paid an average of $X" (simple average only) | Focused average price display with range visualization |
 | `TradesTable` | "found X trades", "here are your trades" | Full trade history table |
 | `TradeSummary` | "X stock trades and Y option trades" | Quick trade count summary |
 | `TimeBasedTrades` | "trades last week", "executed X trades yesterday" | Time period summary, trade list with display dates |
@@ -626,6 +627,7 @@ finagent-frontend/
 │   │   ├── time-trades-ui/           # UI data for time-based trades card
 │   │   ├── trade-stats/              # Trade statistics UI data
 │   │   ├── trades-ui/                # Trades table UI data
+│   │   ├── average-price/            # Average price UI data
 │   │   ├── conversations/            # Conversation CRUD
 │   │   └── messages/                 # Message CRUD
 │   ├── layout.tsx
@@ -637,6 +639,7 @@ finagent-frontend/
 │   └── components/
 │       ├── UnifiedAssistant.tsx      # Main chat/voice interface
 │       └── generative-ui/
+│           ├── AveragePrice.tsx      # Focused average price card
 │           ├── ProfitableTrades.tsx  # Profitable trades card
 │           ├── TimeBasedTrades.tsx   # Time-based trades card
 │           ├── TimePeriodStats.tsx   # Time-period price stats card (last month, last week)
@@ -697,7 +700,8 @@ ngrok http 3000
 | "Show my profitable trades on Google" | get_profitable_trades | ProfitableTrades |
 | "What's my most profitable Apple trade?" | get_profitable_trades | ProfitableTrades |
 | "What's the highest price I sold NVDA at?" | get_trade_stats | TradeStats |
-| "Average price I bought Apple at last month" | get_trade_stats | TimePeriodStats |
+| "What was the average price I bought Apple for last month?" | get_trade_stats | AveragePrice |
+| "Average price I bought Apple at last month" (with highest/lowest) | get_trade_stats | TimePeriodStats |
 | "Highest price I paid for GOOGL last week" | get_trade_stats | TimePeriodStats |
 | "How many AAPL trades do I have?" | get_trade_summary | TradeSummary |
 | "Show me all my Tesla trades" | get_detailed_trades | TradesTable |

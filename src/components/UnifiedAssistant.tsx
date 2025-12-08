@@ -10,6 +10,7 @@ import { OptionStats } from './generative-ui/OptionStats';
 import { ProfitableTrades } from './generative-ui/ProfitableTrades';
 import { TimeBasedTrades } from './generative-ui/TimeBasedTrades';
 import { TimePeriodStats } from './generative-ui/TimePeriodStats';
+import { AveragePrice } from './generative-ui/AveragePrice';
 
 type InputMode = 'voice' | 'text';
 type View = 'chat' | 'history';
@@ -22,7 +23,7 @@ interface Conversation {
 }
 
 interface TradeUIData {
-  type: 'summary' | 'detailed' | 'stats' | 'profitable' | 'time-based' | 'option-stats';
+  type: 'summary' | 'detailed' | 'stats' | 'profitable' | 'time-based' | 'option-stats' | 'average-price';
   symbol: string;
   tradeType?: 'buy' | 'sell' | 'all';
   timePeriod?: string;
@@ -371,6 +372,56 @@ function detectTimeBasedTrades(text: string): { timePeriod: string } | null {
   return null;
 }
 
+// Detect if message contains average price results (specific single average price query)
+// This is for simple queries like "what was the average price I bought Apple for?"
+function detectAveragePrice(text: string): { tradeType: 'buy' | 'sell' | 'all'; timePeriod: string } | null {
+  // Skip messages that are just "checking" without actual results
+  const isJustChecking = /I'll check|let me check|checking your|retrieving|looking up|I'll help you find|I'll find|to find your|looking that up/i.test(text);
+  if (isJustChecking) return null;
+
+  // Check if this is specifically an average price response (not general stats)
+  // Look for patterns that indicate a focused average price response
+  const isAveragePriceResponse =
+    // "The average price was $X" or "average price for X was $Y"
+    /average\s+price\s+(?:for\s+\w+\s+)?(?:trades?\s+)?(?:last\s+(?:month|week)|this\s+(?:month|week|year))?\s*was\s+\$[\d,.]+/i.test(text) ||
+    // "average price of $X"
+    /average\s+(?:buy|sell|purchase|sale|trade)?\s*price\s+(?:of|is|was)\s+\$[\d,.]+/i.test(text) ||
+    // "$X average" or "averaged $X"
+    /averaged?\s+\$[\d,.]+/i.test(text) ||
+    // "paid an average of $X"
+    /paid\s+an\s+average\s+of\s+\$[\d,.]+/i.test(text);
+
+  if (!isAveragePriceResponse) return null;
+
+  // Check if this is a detailed stats response (should use TradeStats/TimePeriodStats instead)
+  // If it mentions highest AND lowest prices, it's a full stats response
+  const isDetailedStats = /highest\s+price/i.test(text) && /lowest\s+price/i.test(text);
+  if (isDetailedStats) return null;
+
+  // Determine trade type from context
+  let tradeType: 'buy' | 'sell' | 'all' = 'all';
+  // Check buy-related terms first (more specific patterns)
+  if (/(?:bought|buy|purchase|paid\s+for)/i.test(text) && !/(?:sold|sell|sale)/i.test(text)) {
+    tradeType = 'buy';
+  } else if (/(?:sold|sell|sale)/i.test(text) && !/(?:bought|buy|purchase)/i.test(text)) {
+    tradeType = 'sell';
+  }
+  // If both "purchases and sales" are mentioned, keep as 'all'
+
+  // Extract time period
+  let timePeriod = 'this year'; // default
+  const timePeriodMatch = text.match(/(?:last|past|this)\s+(?:month|week|year)/i);
+  if (timePeriodMatch) {
+    timePeriod = timePeriodMatch[0].toLowerCase();
+  } else if (/yesterday/i.test(text)) {
+    timePeriod = 'yesterday';
+  } else if (/today/i.test(text)) {
+    timePeriod = 'today';
+  }
+
+  return { tradeType, timePeriod };
+}
+
 const UnifiedAssistant: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [inputMode, setInputMode] = useState<InputMode>('text');
@@ -421,26 +472,33 @@ const UnifiedAssistant: React.FC = () => {
           if (data) tradeUI = data;
         }
         else if (symbol) {
-          // Check detection in order of priority:
-          // 1. Trade stats (specific price queries)
-          // 2. Profitable trades (specific profit analysis) - check BEFORE detailed
-          // 3. Detailed trades (general trade listing)
-          // 4. Trade summary (count overview)
-          const statsMatch = detectTradeStats(message.message);
-          if (statsMatch) {
-            const data = await fetchTradeData(symbol, 'stats', statsMatch.tradeType, statsMatch.timePeriod);
-            if (data) tradeUI = data;
-          } else if (detectProfitableTrades(message.message)) {
-            const data = await fetchTradeData(symbol, 'profitable');
-            if (data) tradeUI = data;
-          } else if (detectDetailedTrades(message.message)) {
-            const data = await fetchTradeData(symbol, 'detailed');
+          // Check for average price queries first (simple average, not full stats)
+          const avgPriceMatch = detectAveragePrice(message.message);
+          if (avgPriceMatch) {
+            const data = await fetchTradeData(symbol, 'average-price', avgPriceMatch.tradeType, avgPriceMatch.timePeriod);
             if (data) tradeUI = data;
           } else {
-            const summaryMatch = detectTradeSummary(message.message);
-            if (summaryMatch) {
-              const data = await fetchTradeData(symbol, 'summary');
+            // Check other detection in order of priority:
+            // 1. Trade stats (specific price queries with high/low/avg)
+            // 2. Profitable trades (specific profit analysis) - check BEFORE detailed
+            // 3. Detailed trades (general trade listing)
+            // 4. Trade summary (count overview)
+            const statsMatch = detectTradeStats(message.message);
+            if (statsMatch) {
+              const data = await fetchTradeData(symbol, 'stats', statsMatch.tradeType, statsMatch.timePeriod);
               if (data) tradeUI = data;
+            } else if (detectProfitableTrades(message.message)) {
+              const data = await fetchTradeData(symbol, 'profitable');
+              if (data) tradeUI = data;
+            } else if (detectDetailedTrades(message.message)) {
+              const data = await fetchTradeData(symbol, 'detailed');
+              if (data) tradeUI = data;
+            } else {
+              const summaryMatch = detectTradeSummary(message.message);
+              if (summaryMatch) {
+                const data = await fetchTradeData(symbol, 'summary');
+                if (data) tradeUI = data;
+              }
             }
           }
         }
@@ -470,7 +528,7 @@ const UnifiedAssistant: React.FC = () => {
   // Fetch trade data for UI rendering
   const fetchTradeData = useCallback(async (
     symbol: string,
-    type: 'summary' | 'detailed' | 'stats' | 'profitable' | 'time-based' | 'option-stats',
+    type: 'summary' | 'detailed' | 'stats' | 'profitable' | 'time-based' | 'option-stats' | 'average-price',
     tradeType?: 'buy' | 'sell' | 'all',
     timePeriod?: string
   ): Promise<TradeUIData | null> => {
@@ -478,7 +536,17 @@ const UnifiedAssistant: React.FC = () => {
       let endpoint: string;
       let body: Record<string, unknown> = { symbol };
 
-      if (type === 'summary') {
+      if (type === 'average-price') {
+        endpoint = '/api/average-price';
+        body = { symbol, tradeType: tradeType || 'all', timePeriod };
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        return { type, symbol, tradeType, timePeriod, data };
+      } else if (type === 'summary') {
         endpoint = '/api/elevenlabs/trade-summary';
       } else if (type === 'stats') {
         // Fetch both stock stats and option stats
@@ -567,30 +635,39 @@ const UnifiedAssistant: React.FC = () => {
             console.log('🔍 Fetched time-based data:', data);
             if (data) tradeUI = data;
           }
-          // Check for symbol-based queries (not time-based)
+          // Check for symbol-based queries
           else if (symbol) {
-            // Check detection in order of priority:
-            // 1. Trade stats (specific price queries)
-            // 2. Profitable trades (specific profit analysis) - check BEFORE detailed
-            // 3. Detailed trades (general trade listing)
-            // 4. Trade summary (count overview)
-            const statsMatch = detectTradeStats(message.message);
-            if (statsMatch) {
-              const data = await fetchTradeData(symbol, 'stats', statsMatch.tradeType, statsMatch.timePeriod);
-              if (data) tradeUI = data;
-            } else if (detectProfitableTrades(message.message)) {
-              console.log('🔍 Profitable trades detected');
-              const data = await fetchTradeData(symbol, 'profitable');
-              if (data) tradeUI = data;
-            } else if (detectDetailedTrades(message.message)) {
-              console.log('🔍 Detailed trades detected');
-              const data = await fetchTradeData(symbol, 'detailed');
+            // Check for average price queries first (simple average, not full stats)
+            const avgPriceMatch = detectAveragePrice(message.message);
+            if (avgPriceMatch) {
+              console.log('🔍 Average price detected:', avgPriceMatch.tradeType, avgPriceMatch.timePeriod);
+              const data = await fetchTradeData(symbol, 'average-price', avgPriceMatch.tradeType, avgPriceMatch.timePeriod);
+              console.log('🔍 Fetched average price data:', data);
               if (data) tradeUI = data;
             } else {
-              const summaryMatch = detectTradeSummary(message.message);
-              if (summaryMatch) {
-                const data = await fetchTradeData(symbol, 'summary');
+              // Check other detection in order of priority:
+              // 1. Trade stats (specific price queries with high/low/avg)
+              // 2. Profitable trades (specific profit analysis) - check BEFORE detailed
+              // 3. Detailed trades (general trade listing)
+              // 4. Trade summary (count overview)
+              const statsMatch = detectTradeStats(message.message);
+              if (statsMatch) {
+                const data = await fetchTradeData(symbol, 'stats', statsMatch.tradeType, statsMatch.timePeriod);
                 if (data) tradeUI = data;
+              } else if (detectProfitableTrades(message.message)) {
+                console.log('🔍 Profitable trades detected');
+                const data = await fetchTradeData(symbol, 'profitable');
+                if (data) tradeUI = data;
+              } else if (detectDetailedTrades(message.message)) {
+                console.log('🔍 Detailed trades detected');
+                const data = await fetchTradeData(symbol, 'detailed');
+                if (data) tradeUI = data;
+              } else {
+                const summaryMatch = detectTradeSummary(message.message);
+                if (summaryMatch) {
+                  const data = await fetchTradeData(symbol, 'summary');
+                  if (data) tradeUI = data;
+                }
               }
             }
           }
@@ -697,33 +774,42 @@ const UnifiedAssistant: React.FC = () => {
                 }
               }
               else if (symbol) {
-                // Check detection in order of priority:
-                // 1. Trade stats (specific price queries)
-                // 2. Profitable trades (specific profit analysis) - check BEFORE detailed
-                // 3. Detailed trades (general trade listing)
-                // 4. Trade summary (count overview)
-                const statsMatch = detectTradeStats(msg.content);
-                if (statsMatch) {
-                  const tradeData = await fetchTradeData(symbol, 'stats', statsMatch.tradeType, statsMatch.timePeriod);
-                  if (tradeData) {
-                    baseMessage.tradeUI = tradeData;
-                  }
-                } else if (detectProfitableTrades(msg.content)) {
-                  const tradeData = await fetchTradeData(symbol, 'profitable');
-                  if (tradeData) {
-                    baseMessage.tradeUI = tradeData;
-                  }
-                } else if (detectDetailedTrades(msg.content)) {
-                  const tradeData = await fetchTradeData(symbol, 'detailed');
+                // Check for average price queries first (simple average, not full stats)
+                const avgPriceMatch = detectAveragePrice(msg.content);
+                if (avgPriceMatch) {
+                  const tradeData = await fetchTradeData(symbol, 'average-price', avgPriceMatch.tradeType, avgPriceMatch.timePeriod);
                   if (tradeData) {
                     baseMessage.tradeUI = tradeData;
                   }
                 } else {
-                  const summaryMatch = detectTradeSummary(msg.content);
-                  if (summaryMatch) {
-                    const tradeData = await fetchTradeData(symbol, 'summary');
+                  // Check other detection in order of priority:
+                  // 1. Trade stats (specific price queries with high/low/avg)
+                  // 2. Profitable trades (specific profit analysis) - check BEFORE detailed
+                  // 3. Detailed trades (general trade listing)
+                  // 4. Trade summary (count overview)
+                  const statsMatch = detectTradeStats(msg.content);
+                  if (statsMatch) {
+                    const tradeData = await fetchTradeData(symbol, 'stats', statsMatch.tradeType, statsMatch.timePeriod);
                     if (tradeData) {
                       baseMessage.tradeUI = tradeData;
+                    }
+                  } else if (detectProfitableTrades(msg.content)) {
+                    const tradeData = await fetchTradeData(symbol, 'profitable');
+                    if (tradeData) {
+                      baseMessage.tradeUI = tradeData;
+                    }
+                  } else if (detectDetailedTrades(msg.content)) {
+                    const tradeData = await fetchTradeData(symbol, 'detailed');
+                    if (tradeData) {
+                      baseMessage.tradeUI = tradeData;
+                    }
+                  } else {
+                    const summaryMatch = detectTradeSummary(msg.content);
+                    if (summaryMatch) {
+                      const tradeData = await fetchTradeData(symbol, 'summary');
+                      if (tradeData) {
+                        baseMessage.tradeUI = tradeData;
+                      }
                     }
                   }
                 }
@@ -1191,6 +1277,37 @@ const UnifiedAssistant: React.FC = () => {
               summary={timeData.summary}
               trades={timeData.trades || []}
               symbol={timeData.symbol}
+            />
+          </div>
+        );
+      }
+    }
+
+    if (type === 'average-price') {
+      console.log('🎨 Rendering average price card with data:', data);
+      const avgData = data as {
+        symbol: string;
+        averagePrice: number;
+        highestPrice?: number;
+        lowestPrice?: number;
+        totalTrades: number;
+        totalShares?: number;
+        timePeriod: string;
+        tradeType: 'buy' | 'sell' | 'all';
+      };
+
+      if (avgData.averagePrice !== null && avgData.averagePrice !== undefined) {
+        return (
+          <div style={{ marginTop: '12px' }}>
+            <AveragePrice
+              symbol={avgData.symbol}
+              averagePrice={avgData.averagePrice}
+              timePeriod={avgData.timePeriod}
+              tradeType={avgData.tradeType}
+              totalTrades={avgData.totalTrades}
+              totalShares={avgData.totalShares}
+              highestPrice={avgData.highestPrice}
+              lowestPrice={avgData.lowestPrice}
             />
           </div>
         );

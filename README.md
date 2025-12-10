@@ -234,31 +234,55 @@ const sellTrades = await supabase
   .ilike('TradeType', 'S')
   .order('Date', { ascending: true });
 
-// 2. Match by security type (Stock vs Option)
+// 2. Match by security type (Stock vs Option) using proper FIFO
 for (const secType of ['S', 'O']) {
-  const buys = buyTrades.filter(t => t.SecurityType === secType);
+  // Track which buys have been matched
+  const buys = buyTrades
+    .filter(t => t.SecurityType === secType)
+    .map(t => ({ ...t, matched: false }));
   const sells = sellTrades.filter(t => t.SecurityType === secType);
-  const matchCount = Math.min(buys.length, sells.length);
 
-  for (let i = 0; i < matchCount; i++) {
-    const buy = buys[i];
-    const sell = sells[i];
+  // For each sell, find earliest unmatched buy that occurred BEFORE the sell
+  for (const sell of sells) {
+    const sellDate = new Date(sell.Date);
 
-    // Profit = Sell proceeds + Buy cost (buy is negative)
-    const profitLoss = parseFloat(sell.NetAmount) + parseFloat(buy.NetAmount);
+    const matchingBuy = buys.find(buy =>
+      !buy.matched && new Date(buy.Date) <= sellDate
+    );
 
-    matchedTrades.push({
-      securityType: secType === 'S' ? 'Stock' : 'Option',
-      buyDate: buy.Date,
-      sellDate: sell.Date,
-      quantity: parseFloat(buy.StockShareQty),
-      buyPrice: parseFloat(buy.StockTradePrice),
-      sellPrice: parseFloat(sell.StockTradePrice),
-      profitLoss
-    });
+    if (matchingBuy) {
+      matchingBuy.matched = true;
+
+      const buyPrice = parseFloat(matchingBuy.StockTradePrice);
+      const sellPrice = parseFloat(sell.StockTradePrice);
+      const quantity = parseFloat(matchingBuy.StockShareQty);
+
+      // Profit calculated from actual prices
+      const profitLoss = (sellPrice - buyPrice) * quantity;
+
+      matchedTrades.push({
+        securityType: secType === 'S' ? 'Stock' : 'Option',
+        buyDate: matchingBuy.Date,
+        sellDate: sell.Date,
+        quantity,
+        buyPrice,
+        sellPrice,
+        profitLoss
+      });
+    }
   }
 }
+
+// Only include trades where sellPrice > buyPrice (actual profit)
+const profitableTrades = matchedTrades.filter(t => t.profitLoss > 0);
 ```
+
+### Key FIFO Rules
+
+1. **Chronological matching**: Each sell is matched with the earliest unmatched buy
+2. **Temporal constraint**: A sell can only match a buy that occurred on or before the sell date
+3. **Price-based profit**: Profit = `(sellPrice - buyPrice) × quantity`
+4. **True profitability**: Only trades where `sellPrice > buyPrice` are considered profitable
 
 ---
 

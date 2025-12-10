@@ -79,7 +79,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Match trades using FIFO by security type
+    // Match trades using proper FIFO - each sell matches with earliest unmatched buy BEFORE it
     interface MatchedTrade {
       securityType: string;
       buyDate: string;
@@ -94,29 +94,44 @@ export async function POST(req: NextRequest) {
     const securityTypes = ['S', 'O'];
 
     for (const secType of securityTypes) {
-      const buys = buyTrades.filter(t => t.SecurityType === secType);
+      const buys = buyTrades
+        .filter(t => t.SecurityType === secType)
+        .map(t => ({ ...t, matched: false }));
       const sells = sellTrades.filter(t => t.SecurityType === secType);
-      const matchCount = Math.min(buys.length, sells.length);
 
-      for (let i = 0; i < matchCount; i++) {
-        const buy = buys[i];
-        const sell = sells[i];
-        const profitLoss = (parseFloat(sell.NetAmount) || 0) + (parseFloat(buy.NetAmount) || 0);
+      // For each sell, find the earliest unmatched buy that occurred on or before the sell date
+      for (const sell of sells) {
+        const sellDate = new Date(sell.Date);
 
-        matchedTrades.push({
-          securityType: secType === 'S' ? 'Stock' : 'Option',
-          // Format dates with offset applied for display
-          buyDate: formatCalendarDate(buy.Date),
-          sellDate: formatCalendarDate(sell.Date),
-          quantity: parseFloat(buy.StockShareQty || buy.OptionContracts || '0'),
-          buyPrice: parseFloat(buy.StockTradePrice || buy.OptionTradePremium || '0'),
-          sellPrice: parseFloat(sell.StockTradePrice || sell.OptionTradePremium || '0'),
-          profitLoss,
-        });
+        // Find earliest unmatched buy before or on the sell date
+        const matchingBuy = buys.find(buy =>
+          !buy.matched && new Date(buy.Date) <= sellDate
+        );
+
+        if (matchingBuy) {
+          matchingBuy.matched = true;
+
+          const buyPrice = parseFloat(matchingBuy.StockTradePrice || matchingBuy.OptionTradePremium || '0');
+          const sellPrice = parseFloat(sell.StockTradePrice || sell.OptionTradePremium || '0');
+          const quantity = parseFloat(matchingBuy.StockShareQty || matchingBuy.OptionContracts || '0');
+
+          // Calculate profit based on actual prices: (sellPrice - buyPrice) * quantity
+          const profitLoss = (sellPrice - buyPrice) * quantity;
+
+          matchedTrades.push({
+            securityType: secType === 'S' ? 'Stock' : 'Option',
+            buyDate: formatCalendarDate(matchingBuy.Date),
+            sellDate: formatCalendarDate(sell.Date),
+            quantity,
+            buyPrice,
+            sellPrice,
+            profitLoss,
+          });
+        }
       }
     }
 
-    // Filter to only profitable and sort
+    // Filter to only profitable (sellPrice > buyPrice) and sort by profit descending
     const profitableTrades = matchedTrades
       .filter(t => t.profitLoss > 0)
       .sort((a, b) => b.profitLoss - a.profitLoss);

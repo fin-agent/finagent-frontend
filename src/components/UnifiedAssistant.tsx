@@ -2,8 +2,9 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useConversation } from '@elevenlabs/react';
-import { Mic, MessageSquare, X, Phone, Loader2, Plus, History, Send } from 'lucide-react';
-import { TradesTable } from './generative-ui/TradesTable';
+import { Mic, MessageSquare, X, Phone, Loader2, Plus, History, Send, Filter } from 'lucide-react';
+import { TradesTable, type ActiveFilters, type Aggregations } from './generative-ui/TradesTable';
+import { QueryBuilder } from './QueryBuilder';
 import { TradeSummary } from './generative-ui/TradeSummary';
 import { TradeStats } from './generative-ui/TradeStats';
 import { OptionStats } from './generative-ui/OptionStats';
@@ -11,6 +12,12 @@ import { ProfitableTrades } from './generative-ui/ProfitableTrades';
 import { TimeBasedTrades } from './generative-ui/TimeBasedTrades';
 import { TimePeriodStats } from './generative-ui/TimePeriodStats';
 import { AveragePrice } from './generative-ui/AveragePrice';
+import { AdvancedOptionsTable } from './generative-ui/AdvancedOptionsTable';
+import { HighestStrikeCard } from './generative-ui/HighestStrikeCard';
+import { TotalPremiumCard } from './generative-ui/TotalPremiumCard';
+import { ExpiringOptionsTable } from './generative-ui/ExpiringOptionsTable';
+import { LastOptionTradeCard } from './generative-ui/LastOptionTradeCard';
+import { TradeQueryCard } from './generative-ui/TradeQueryCard';
 
 type InputMode = 'voice' | 'text';
 type View = 'chat' | 'history';
@@ -23,10 +30,12 @@ interface Conversation {
 }
 
 interface TradeUIData {
-  type: 'summary' | 'detailed' | 'stats' | 'profitable' | 'time-based' | 'option-stats' | 'average-price';
+  type: 'summary' | 'detailed' | 'stats' | 'profitable' | 'time-based' | 'option-stats' | 'average-price' | 'advanced-options' | 'highest-strike' | 'total-premium' | 'expiring-options' | 'last-option' | 'query-builder-result';
   symbol: string;
   tradeType?: 'buy' | 'sell' | 'all';
   timePeriod?: string;
+  callPut?: 'call' | 'put';
+  expiration?: string;
   data: unknown;
   optionData?: unknown; // For combined stock + option stats
 }
@@ -422,6 +431,189 @@ function detectAveragePrice(text: string): { tradeType: 'buy' | 'sell' | 'all'; 
   return { tradeType, timePeriod };
 }
 
+// Detect advanced options query results (short/long calls/puts, filtered option trades)
+function detectAdvancedOptionsQuery(text: string): { tradeType?: 'buy' | 'sell'; callPut?: 'call' | 'put'; timePeriod?: string } | null {
+  // Skip messages that are just "checking" without actual results
+  const isJustChecking = /I'll check|let me check|checking your|retrieving|looking up/i.test(text);
+  if (isJustChecking && !/found|option trades?/i.test(text)) return null;
+
+  // Detect short/long call/put option trade listings
+  const isAdvancedOptions =
+    /(?:short|long)\s+(?:call|put)\s+options?/i.test(text) ||
+    /found\s+\d+\s+(?:option)?\s*trades?.*(?:call|put)/i.test(text) ||
+    /\d+\s+option\s+trades?\s+\(\d+\s+calls?,\s*\d+\s+puts?\)/i.test(text) ||
+    /(?:call|put)\s+options?\s+(?:on|for)\s+\w+/i.test(text);
+
+  if (!isAdvancedOptions) return null;
+
+  // Determine trade type
+  let tradeType: 'buy' | 'sell' | undefined;
+  if (/short|sold|sell/i.test(text)) tradeType = 'sell';
+  else if (/long|bought|buy/i.test(text)) tradeType = 'buy';
+
+  // Determine call/put
+  let callPut: 'call' | 'put' | undefined;
+  if (/\bcall\b/i.test(text) && !/\bput\b/i.test(text)) callPut = 'call';
+  else if (/\bput\b/i.test(text) && !/\bcall\b/i.test(text)) callPut = 'put';
+
+  // Extract time period
+  let timePeriod: string | undefined;
+  const periodMatch = text.match(/(?:last|past|this)\s+(?:\d+\s+)?(?:month|week|year|days?)/i);
+  if (periodMatch) timePeriod = periodMatch[0].toLowerCase();
+
+  return { tradeType, callPut, timePeriod };
+}
+
+// Detect highest/lowest strike query results
+function detectHighestStrikeQuery(text: string): { isHighest: boolean; callPut: 'call' | 'put' } | null {
+  // Skip messages that are just "checking" without actual results
+  const isJustChecking = /I'll check|let me check|checking your|retrieving|looking up/i.test(text);
+  if (isJustChecking) return null;
+
+  // Detect highest/lowest strike responses
+  const highestMatch = /(?:highest|maximum|top)\s+strike.*(?:call|put)|(?:sold|bought)\s+a\s+quantity\s+of.*\$\d+\s+strike/i.test(text);
+  const lowestMatch = /(?:lowest|minimum|bottom)\s+strike.*(?:call|put)/i.test(text);
+
+  if (!highestMatch && !lowestMatch) return null;
+
+  // Determine call/put
+  let callPut: 'call' | 'put' = 'call';
+  if (/\bput\b/i.test(text) && !/\bcall\b/i.test(text)) callPut = 'put';
+
+  return { isHighest: highestMatch, callPut };
+}
+
+// Detect total premium query results
+function detectTotalPremiumQuery(text: string): { tradeType: 'buy' | 'sell'; timePeriod: string } | null {
+  // Skip messages that are just "checking" without actual results
+  const isJustChecking = /I'll check|let me check|checking your|retrieving|looking up/i.test(text);
+  if (isJustChecking) return null;
+
+  // Detect total premium responses
+  const hasPremiumTotal = /(?:total\s+(?:of\s+)?\$[\d,]+.*(?:premium|options?))|(?:paid\s+a\s+total\s+of\s+\$[\d,]+)/i.test(text);
+  if (!hasPremiumTotal) return null;
+
+  // Determine trade type
+  let tradeType: 'buy' | 'sell' = 'buy';
+  if (/(?:collected|sold|selling|received)/i.test(text)) tradeType = 'sell';
+
+  // Extract time period
+  let timePeriod = 'last 12 months';
+  const periodMatch = text.match(/(?:last|past|over\s+the\s+last)\s+(?:\d+\s+)?(?:months?|weeks?|year)/i);
+  if (periodMatch) timePeriod = periodMatch[0].toLowerCase();
+
+  return { tradeType, timePeriod };
+}
+
+// Detect "last/most recent" option trade query results (single trade only)
+// This should NOT match bulk queries like "all options last month"
+function detectLastOptionQuery(text: string): { tradeType: 'buy' | 'sell'; callPut: 'call' | 'put' } | null {
+  // Skip messages that are just "checking" without actual results
+  const isJustChecking = /I'll check|let me check|checking your|retrieving|looking up/i.test(text);
+  if (isJustChecking && !/bought|sold|total value/i.test(text)) return null;
+
+  // IMPORTANT: Skip if this is a bulk/all trades query (multiple trades)
+  // Check for patterns indicating multiple trades across a time period
+  const isBulkQuery = /across\s+\d+\s+trades/i.test(text) ||
+                      /\d+\s+trades?\s+(?:for|on|total)/i.test(text) ||
+                      /covering\s+[\d,]+\s+shares\s+across/i.test(text);
+  if (isBulkQuery) return null;
+
+  // Only match explicit "last/most recent/latest" single trade queries
+  // NOT bulk queries like "You sold 64 call options last month"
+  const hasLastOption =
+    /(?:last|most\s+recent|latest)\s+(?:call|put)\s+options?/i.test(text) ||
+    /your\s+(?:last|most\s+recent|latest)\s+(?:call|put)/i.test(text) ||
+    /the\s+(?:last|most\s+recent|latest)\s+(?:call|put)\s+option/i.test(text);
+
+  if (!hasLastOption) return null;
+
+  // Determine trade type
+  let tradeType: 'buy' | 'sell' = 'buy';
+  if (/\bsold\b/i.test(text)) tradeType = 'sell';
+
+  // Determine call/put
+  let callPut: 'call' | 'put' = 'call';
+  if (/\bput\b/i.test(text) && !/\bcall\b/i.test(text)) callPut = 'put';
+
+  return { tradeType, callPut };
+}
+
+// Detect bulk option trade queries (show ALL trades, not just last one)
+// Triggers for queries like "show all short call options on Tesla last month"
+function detectBulkOptionsQuery(text: string): { tradeType?: 'buy' | 'sell'; callPut?: 'call' | 'put'; timePeriod?: string } | null {
+  // Skip messages that are just "checking" without actual results
+  const isJustChecking = /I'll check|let me check|checking your|retrieving|looking up/i.test(text);
+  if (isJustChecking) return null;
+
+  // Must have multiple trades pattern - check various forms of bulk trade responses
+  // 1. "across N trades" - explicitly mentions multiple trades
+  // 2. "covering N shares across" - mentions shares covered
+  // 3. "you sold N call option contracts" - mentions total contracts traded
+  // 4. "N option trades" or "N call/put trades" - mentions trade count
+  // 5. "total premium of $X" with contracts mention - bulk sale/purchase
+  const hasBulkTrades = /across\s+\d+\s+trades/i.test(text) ||
+                        /covering\s+[\d,]+\s+shares\s+across/i.test(text) ||
+                        /you\s+(?:bought|sold)\s+\d+\s+(?:call|put)\s+option\s+contracts/i.test(text) ||
+                        /\d+\s+(?:call|put)\s+option\s+contracts/i.test(text) ||
+                        /total\s+premium\s+of\s+\$[\d,]+.*contracts/i.test(text) ||
+                        /collecting\s+total\s+premium/i.test(text) ||
+                        /\d+\s+option\s+trades/i.test(text);
+
+  console.log('🔍 detectBulkOptionsQuery checking:', text.substring(0, 150));
+  console.log('🔍 hasBulkTrades patterns:', {
+    acrossNTrades: /across\s+\d+\s+trades/i.test(text),
+    coveringShares: /covering\s+[\d,]+\s+shares\s+across/i.test(text),
+    youSoldContracts: /you\s+(?:bought|sold)\s+\d+\s+(?:call|put)\s+option\s+contracts/i.test(text),
+    NContracts: /\d+\s+(?:call|put)\s+option\s+contracts/i.test(text),
+    totalPremiumContracts: /total\s+premium\s+of\s+\$[\d,]+.*contracts/i.test(text),
+    collectingTotalPremium: /collecting\s+total\s+premium/i.test(text),
+    NOptionTrades: /\d+\s+option\s+trades/i.test(text),
+  });
+  console.log('🔍 hasBulkTrades result:', hasBulkTrades);
+
+  if (!hasBulkTrades) return null;
+
+  // Determine trade type
+  let tradeType: 'buy' | 'sell' | undefined;
+  if (/\bsold\b|collecting/i.test(text)) tradeType = 'sell';
+  else if (/\bbought\b|paying/i.test(text)) tradeType = 'buy';
+
+  // Determine call/put
+  let callPut: 'call' | 'put' | undefined;
+  if (/\bcall\b/i.test(text) && !/\bput\b/i.test(text)) callPut = 'call';
+  else if (/\bput\b/i.test(text) && !/\bcall\b/i.test(text)) callPut = 'put';
+
+  // Extract time period
+  let timePeriod: string | undefined;
+  const periodMatch = text.match(/(?:last|past|this)\s+(?:month|week|year)/i);
+  if (periodMatch) timePeriod = periodMatch[0].toLowerCase();
+
+  return { tradeType, callPut, timePeriod };
+}
+
+// Detect options expiring query results
+function detectExpiringOptionsQuery(text: string): { expiration: string } | null {
+  // Skip messages that are just "checking" without actual results
+  const isJustChecking = /I'll check|let me check|checking your|retrieving|looking up/i.test(text);
+  if (isJustChecking && !/expiring|positions?/i.test(text)) return null;
+
+  // Detect expiring options responses
+  const hasExpiringOptions =
+    /options?\s+expiring\s+(?:tomorrow|this\s+week|this\s+month)/i.test(text) ||
+    /expiring\s+(?:tomorrow|this\s+week|this\s+month).*options?/i.test(text) ||
+    /\d+\s+(?:options?|positions?)\s+expir/i.test(text);
+
+  if (!hasExpiringOptions) return null;
+
+  // Extract expiration period
+  let expiration = 'tomorrow';
+  if (/this\s+week/i.test(text)) expiration = 'this week';
+  else if (/this\s+month/i.test(text)) expiration = 'this month';
+
+  return { expiration };
+}
+
 const UnifiedAssistant: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [inputMode, setInputMode] = useState<InputMode>('text');
@@ -430,6 +622,8 @@ const UnifiedAssistant: React.FC = () => {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
+  const [showQueryBuilder, setShowQueryBuilder] = useState(false);
+  const [isQueryLoading, setIsQueryLoading] = useState(false);
   const [transcript, setTranscript] = useState<TranscriptMessage[]>([]);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -458,46 +652,91 @@ const UnifiedAssistant: React.FC = () => {
         // For assistant messages, check if we should render trade UI
         const symbol = extractSymbolOrCompany(message.message);
 
-        // Check for time-based trades first
-        const timeMatch = detectTimeBasedTrades(message.message);
-        if (timeMatch) {
-          // For time-based queries, check if it's portfolio-wide:
-          // 1. Multiple symbols mentioned in response
-          // 2. Day-of-week queries with NO symbol are portfolio-wide
-          const isPortfolioQuery = isPortfolioWideQuery(message.message);
-          const isDayOfWeekQuery = /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(timeMatch.timePeriod);
-          // Only use null symbol if portfolio-wide OR (day-of-week AND no symbol detected)
-          const timeSymbol = (isPortfolioQuery || (isDayOfWeekQuery && !symbol)) ? null : symbol;
-          const data = await fetchTradeData(timeSymbol || '', 'time-based', undefined, timeMatch.timePeriod);
+        // Check for BULK option trades first (e.g., "show all short calls on Tesla last month")
+        // This must come BEFORE detectLastOptionQuery to catch multi-trade responses
+        const bulkOptionsMatch = detectBulkOptionsQuery(message.message);
+        if (bulkOptionsMatch) {
+          const data = await fetchTradeData(symbol || '', 'advanced-options', bulkOptionsMatch.tradeType, bulkOptionsMatch.timePeriod, { callPut: bulkOptionsMatch.callPut });
           if (data) tradeUI = data;
         }
-        else if (symbol) {
-          // Check for average price queries first (simple average, not full stats)
-          const avgPriceMatch = detectAveragePrice(message.message);
-          if (avgPriceMatch) {
-            const data = await fetchTradeData(symbol, 'average-price', avgPriceMatch.tradeType, avgPriceMatch.timePeriod);
+        // Check for "last/most recent" option trade queries (single trade only)
+        else {
+          const lastOptionMatch = detectLastOptionQuery(message.message);
+          if (lastOptionMatch && symbol) {
+            const data = await fetchTradeData(symbol, 'last-option', lastOptionMatch.tradeType, undefined, { callPut: lastOptionMatch.callPut });
             if (data) tradeUI = data;
-          } else {
-            // Check other detection in order of priority:
-            // 1. Trade stats (specific price queries with high/low/avg)
-            // 2. Profitable trades (specific profit analysis) - check BEFORE detailed
-            // 3. Detailed trades (general trade listing)
-            // 4. Trade summary (count overview)
-            const statsMatch = detectTradeStats(message.message);
-            if (statsMatch) {
-              const data = await fetchTradeData(symbol, 'stats', statsMatch.tradeType, statsMatch.timePeriod);
+          }
+        }
+        // Check for expiring options (highest priority for expiration queries)
+        if (!tradeUI) {
+          const expiringMatch = detectExpiringOptionsQuery(message.message);
+          if (expiringMatch) {
+            const data = await fetchTradeData(symbol || '', 'expiring-options', undefined, undefined, { expiration: expiringMatch.expiration });
+            if (data) tradeUI = data;
+          }
+        }
+        // Check for highest/lowest strike queries
+        if (!tradeUI) {
+          const strikeMatch = detectHighestStrikeQuery(message.message);
+          if (strikeMatch) {
+            const data = await fetchTradeData(symbol || '', 'highest-strike', undefined, undefined, { callPut: strikeMatch.callPut });
+            if (data) tradeUI = data;
+          }
+          // Check for total premium queries
+          else {
+            const premiumMatch = detectTotalPremiumQuery(message.message);
+            if (premiumMatch) {
+              const data = await fetchTradeData(symbol || '', 'total-premium', premiumMatch.tradeType, premiumMatch.timePeriod);
               if (data) tradeUI = data;
-            } else if (detectProfitableTrades(message.message)) {
-              const data = await fetchTradeData(symbol, 'profitable');
-              if (data) tradeUI = data;
-            } else if (detectDetailedTrades(message.message)) {
-              const data = await fetchTradeData(symbol, 'detailed');
-              if (data) tradeUI = data;
-            } else {
-              const summaryMatch = detectTradeSummary(message.message);
-              if (summaryMatch) {
-                const data = await fetchTradeData(symbol, 'summary');
+            }
+            // Check for advanced options queries (short/long calls/puts)
+            else {
+              const advancedMatch = detectAdvancedOptionsQuery(message.message);
+              if (advancedMatch) {
+                const data = await fetchTradeData(symbol || '', 'advanced-options', advancedMatch.tradeType, advancedMatch.timePeriod, { callPut: advancedMatch.callPut });
                 if (data) tradeUI = data;
+              }
+              // Check for time-based trades
+              else {
+                const timeMatch = detectTimeBasedTrades(message.message);
+                if (timeMatch) {
+                  const isPortfolioQuery = isPortfolioWideQuery(message.message);
+                  const isDayOfWeekQuery = /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(timeMatch.timePeriod);
+                  const timeSymbol = (isPortfolioQuery || (isDayOfWeekQuery && !symbol)) ? null : symbol;
+                  const data = await fetchTradeData(timeSymbol || '', 'time-based', undefined, timeMatch.timePeriod);
+                  if (data) tradeUI = data;
+                }
+                else if (symbol) {
+                  // Check for average price queries first (simple average, not full stats)
+                  const avgPriceMatch = detectAveragePrice(message.message);
+                  if (avgPriceMatch) {
+                    const data = await fetchTradeData(symbol, 'average-price', avgPriceMatch.tradeType, avgPriceMatch.timePeriod);
+                    if (data) tradeUI = data;
+                  } else {
+                    // Check other detection in order of priority:
+                    // 1. Trade stats (specific price queries with high/low/avg)
+                    // 2. Profitable trades (specific profit analysis) - check BEFORE detailed
+                    // 3. Detailed trades (general trade listing)
+                    // 4. Trade summary (count overview)
+                    const statsMatch = detectTradeStats(message.message);
+                    if (statsMatch) {
+                      const data = await fetchTradeData(symbol, 'stats', statsMatch.tradeType, statsMatch.timePeriod);
+                      if (data) tradeUI = data;
+                    } else if (detectProfitableTrades(message.message)) {
+                      const data = await fetchTradeData(symbol, 'profitable');
+                      if (data) tradeUI = data;
+                    } else if (detectDetailedTrades(message.message)) {
+                      const data = await fetchTradeData(symbol, 'detailed');
+                      if (data) tradeUI = data;
+                    } else {
+                      const summaryMatch = detectTradeSummary(message.message);
+                      if (summaryMatch) {
+                        const data = await fetchTradeData(symbol, 'summary');
+                        if (data) tradeUI = data;
+                      }
+                    }
+                  }
+                }
               }
             }
           }
@@ -528,9 +767,10 @@ const UnifiedAssistant: React.FC = () => {
   // Fetch trade data for UI rendering
   const fetchTradeData = useCallback(async (
     symbol: string,
-    type: 'summary' | 'detailed' | 'stats' | 'profitable' | 'time-based' | 'option-stats' | 'average-price',
+    type: 'summary' | 'detailed' | 'stats' | 'profitable' | 'time-based' | 'option-stats' | 'average-price' | 'advanced-options' | 'highest-strike' | 'total-premium' | 'expiring-options' | 'last-option',
     tradeType?: 'buy' | 'sell' | 'all',
-    timePeriod?: string
+    timePeriod?: string,
+    extraParams?: { callPut?: 'call' | 'put'; expiration?: string; aggregation?: string }
   ): Promise<TradeUIData | null> => {
     try {
       let endpoint: string;
@@ -546,6 +786,57 @@ const UnifiedAssistant: React.FC = () => {
         });
         const data = await res.json();
         return { type, symbol, tradeType, timePeriod, data };
+      } else if (type === 'last-option') {
+        // Fetch the most recent option trade for the symbol
+        endpoint = '/api/advanced-query-ui';
+        body = {
+          symbol: symbol || undefined,
+          securityType: 'O', // Options only
+          tradeType: tradeType === 'buy' ? 'B' : tradeType === 'sell' ? 'S' : undefined,
+          callPut: extraParams?.callPut === 'call' ? 'C' : extraParams?.callPut === 'put' ? 'P' : undefined,
+          orderBy: 'date',
+          orderDir: 'desc',
+          limit: 1,
+        };
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        return {
+          type,
+          symbol,
+          tradeType,
+          callPut: extraParams?.callPut,
+          data
+        };
+      } else if (type === 'advanced-options' || type === 'highest-strike' || type === 'total-premium' || type === 'expiring-options') {
+        // Use advanced query UI endpoint for all advanced option queries
+        endpoint = '/api/advanced-query-ui';
+        body = {
+          symbol: symbol || undefined,
+          securityType: 'O', // Options only
+          tradeType: tradeType === 'buy' ? 'B' : tradeType === 'sell' ? 'S' : undefined,
+          callPut: extraParams?.callPut === 'call' ? 'C' : extraParams?.callPut === 'put' ? 'P' : undefined,
+          fromDate: timePeriod || undefined,
+          expiration: extraParams?.expiration || undefined,
+        };
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        return {
+          type,
+          symbol,
+          tradeType,
+          timePeriod,
+          callPut: extraParams?.callPut,
+          expiration: extraParams?.expiration,
+          data
+        };
       } else if (type === 'summary') {
         endpoint = '/api/elevenlabs/trade-summary';
       } else if (type === 'stats') {
@@ -619,54 +910,100 @@ const UnifiedAssistant: React.FC = () => {
           console.log('🔍 Message:', message.message.substring(0, 100));
           console.log('🔍 Extracted symbol:', symbol);
 
-          // Check for time-based trades first (highest priority for time queries)
-          const timeMatch = detectTimeBasedTrades(message.message);
-          if (timeMatch) {
-            console.log('🔍 Time-based trades detected:', timeMatch.timePeriod);
-            // For time-based queries, check if it's portfolio-wide:
-            // 1. Multiple symbols mentioned in response
-            // 2. Day-of-week queries with NO symbol are portfolio-wide
-            const isPortfolioQuery = isPortfolioWideQuery(message.message);
-            const isDayOfWeekQuery = /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(timeMatch.timePeriod);
-            // Only use null symbol if portfolio-wide OR (day-of-week AND no symbol detected)
-            const timeSymbol = (isPortfolioQuery || (isDayOfWeekQuery && !symbol)) ? null : symbol;
-            console.log('🔍 Portfolio-wide query:', isPortfolioQuery, 'Day-of-week:', isDayOfWeekQuery, 'Using symbol:', timeSymbol);
-            const data = await fetchTradeData(timeSymbol || '', 'time-based', undefined, timeMatch.timePeriod);
-            console.log('🔍 Fetched time-based data:', data);
+          // Check for BULK option trades first (e.g., "show all short calls on Tesla last month")
+          // This must come BEFORE detectLastOptionQuery to catch multi-trade responses
+          const bulkOptionsMatch = detectBulkOptionsQuery(message.message);
+          if (bulkOptionsMatch) {
+            console.log('🔍 Bulk options query detected:', bulkOptionsMatch);
+            const data = await fetchTradeData(symbol || '', 'advanced-options', bulkOptionsMatch.tradeType, bulkOptionsMatch.timePeriod, { callPut: bulkOptionsMatch.callPut });
             if (data) tradeUI = data;
           }
-          // Check for symbol-based queries
-          else if (symbol) {
-            // Check for average price queries first (simple average, not full stats)
-            const avgPriceMatch = detectAveragePrice(message.message);
-            if (avgPriceMatch) {
-              console.log('🔍 Average price detected:', avgPriceMatch.tradeType, avgPriceMatch.timePeriod);
-              const data = await fetchTradeData(symbol, 'average-price', avgPriceMatch.tradeType, avgPriceMatch.timePeriod);
-              console.log('🔍 Fetched average price data:', data);
+          // Check for "last/most recent" option trade queries (single trade only)
+          else {
+            const lastOptionMatch = detectLastOptionQuery(message.message);
+            if (lastOptionMatch && symbol) {
+              console.log('🔍 Last option trade detected:', lastOptionMatch);
+              const data = await fetchTradeData(symbol, 'last-option', lastOptionMatch.tradeType, undefined, { callPut: lastOptionMatch.callPut });
               if (data) tradeUI = data;
-            } else {
-              // Check other detection in order of priority:
-              // 1. Trade stats (specific price queries with high/low/avg)
-              // 2. Profitable trades (specific profit analysis) - check BEFORE detailed
-              // 3. Detailed trades (general trade listing)
-              // 4. Trade summary (count overview)
-              const statsMatch = detectTradeStats(message.message);
-              if (statsMatch) {
-                const data = await fetchTradeData(symbol, 'stats', statsMatch.tradeType, statsMatch.timePeriod);
+            }
+          }
+          // Check for expiring options (highest priority for expiration queries)
+          if (!tradeUI) {
+            const expiringMatch = detectExpiringOptionsQuery(message.message);
+            if (expiringMatch) {
+              console.log('🔍 Expiring options detected:', expiringMatch.expiration);
+              const data = await fetchTradeData(symbol || '', 'expiring-options', undefined, undefined, { expiration: expiringMatch.expiration });
+              if (data) tradeUI = data;
+            }
+          }
+          // Check for highest/lowest strike queries
+          if (!tradeUI) {
+            const strikeMatch = detectHighestStrikeQuery(message.message);
+            if (strikeMatch) {
+              console.log('🔍 Highest strike detected:', strikeMatch);
+              const data = await fetchTradeData(symbol || '', 'highest-strike', undefined, undefined, { callPut: strikeMatch.callPut });
+              if (data) tradeUI = data;
+            }
+            // Check for total premium queries
+            else {
+              const premiumMatch = detectTotalPremiumQuery(message.message);
+              if (premiumMatch) {
+                console.log('🔍 Total premium detected:', premiumMatch);
+                const data = await fetchTradeData(symbol || '', 'total-premium', premiumMatch.tradeType, premiumMatch.timePeriod);
                 if (data) tradeUI = data;
-              } else if (detectProfitableTrades(message.message)) {
-                console.log('🔍 Profitable trades detected');
-                const data = await fetchTradeData(symbol, 'profitable');
-                if (data) tradeUI = data;
-              } else if (detectDetailedTrades(message.message)) {
-                console.log('🔍 Detailed trades detected');
-                const data = await fetchTradeData(symbol, 'detailed');
-                if (data) tradeUI = data;
-              } else {
-                const summaryMatch = detectTradeSummary(message.message);
-                if (summaryMatch) {
-                  const data = await fetchTradeData(symbol, 'summary');
+              }
+              // Check for advanced options queries (short/long calls/puts)
+              else {
+                const advancedMatch = detectAdvancedOptionsQuery(message.message);
+                if (advancedMatch) {
+                  console.log('🔍 Advanced options query detected:', advancedMatch);
+                  const data = await fetchTradeData(symbol || '', 'advanced-options', advancedMatch.tradeType, advancedMatch.timePeriod, { callPut: advancedMatch.callPut });
                   if (data) tradeUI = data;
+                }
+                // Check for time-based trades
+                else {
+                  const timeMatch = detectTimeBasedTrades(message.message);
+                  if (timeMatch) {
+                    console.log('🔍 Time-based trades detected:', timeMatch.timePeriod);
+                    const isPortfolioQuery = isPortfolioWideQuery(message.message);
+                    const isDayOfWeekQuery = /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(timeMatch.timePeriod);
+                    const timeSymbol = (isPortfolioQuery || (isDayOfWeekQuery && !symbol)) ? null : symbol;
+                    console.log('🔍 Portfolio-wide query:', isPortfolioQuery, 'Day-of-week:', isDayOfWeekQuery, 'Using symbol:', timeSymbol);
+                    const data = await fetchTradeData(timeSymbol || '', 'time-based', undefined, timeMatch.timePeriod);
+                    console.log('🔍 Fetched time-based data:', data);
+                    if (data) tradeUI = data;
+                  }
+                  else if (symbol) {
+                    // Check for average price queries first (simple average, not full stats)
+                    const avgPriceMatch = detectAveragePrice(message.message);
+                    if (avgPriceMatch) {
+                      console.log('🔍 Average price detected:', avgPriceMatch.tradeType, avgPriceMatch.timePeriod);
+                      const data = await fetchTradeData(symbol, 'average-price', avgPriceMatch.tradeType, avgPriceMatch.timePeriod);
+                      console.log('🔍 Fetched average price data:', data);
+                      if (data) tradeUI = data;
+                    } else {
+                      // Check other detection in order of priority
+                      const statsMatch = detectTradeStats(message.message);
+                      if (statsMatch) {
+                        const data = await fetchTradeData(symbol, 'stats', statsMatch.tradeType, statsMatch.timePeriod);
+                        if (data) tradeUI = data;
+                      } else if (detectProfitableTrades(message.message)) {
+                        console.log('🔍 Profitable trades detected');
+                        const data = await fetchTradeData(symbol, 'profitable');
+                        if (data) tradeUI = data;
+                      } else if (detectDetailedTrades(message.message)) {
+                        console.log('🔍 Detailed trades detected');
+                        const data = await fetchTradeData(symbol, 'detailed');
+                        if (data) tradeUI = data;
+                      } else {
+                        const summaryMatch = detectTradeSummary(message.message);
+                        if (summaryMatch) {
+                          const data = await fetchTradeData(symbol, 'summary');
+                          if (data) tradeUI = data;
+                        }
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -758,22 +1095,32 @@ const UnifiedAssistant: React.FC = () => {
             if (msg.role === 'assistant') {
               const symbol = extractSymbolOrCompany(msg.content);
 
-              // Check for time-based trades first
-              const timeMatch = detectTimeBasedTrades(msg.content);
-              if (timeMatch) {
-                // For time-based queries, check if it's portfolio-wide:
-                // 1. Multiple symbols mentioned in response
-                // 2. Day-of-week queries with NO symbol are portfolio-wide
-                const isPortfolioQuery = isPortfolioWideQuery(msg.content);
-                const isDayOfWeekQuery = /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(timeMatch.timePeriod);
-                // Only use null symbol if portfolio-wide OR (day-of-week AND no symbol detected)
-                const timeSymbol = (isPortfolioQuery || (isDayOfWeekQuery && !symbol)) ? null : symbol;
-                const tradeData = await fetchTradeData(timeSymbol || '', 'time-based', undefined, timeMatch.timePeriod);
+              // Check for BULK option trades first (e.g., "show all short calls on Tesla last month")
+              const bulkOptionsMatch = detectBulkOptionsQuery(msg.content);
+              if (bulkOptionsMatch) {
+                const tradeData = await fetchTradeData(symbol || '', 'advanced-options', bulkOptionsMatch.tradeType, bulkOptionsMatch.timePeriod, { callPut: bulkOptionsMatch.callPut });
                 if (tradeData) {
                   baseMessage.tradeUI = tradeData;
                 }
               }
-              else if (symbol) {
+              // Check for time-based trades
+              else {
+                const timeMatch = detectTimeBasedTrades(msg.content);
+                if (timeMatch) {
+                  // For time-based queries, check if it's portfolio-wide:
+                  // 1. Multiple symbols mentioned in response
+                  // 2. Day-of-week queries with NO symbol are portfolio-wide
+                  const isPortfolioQuery = isPortfolioWideQuery(msg.content);
+                  const isDayOfWeekQuery = /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(timeMatch.timePeriod);
+                  // Only use null symbol if portfolio-wide OR (day-of-week AND no symbol detected)
+                  const timeSymbol = (isPortfolioQuery || (isDayOfWeekQuery && !symbol)) ? null : symbol;
+                  const tradeData = await fetchTradeData(timeSymbol || '', 'time-based', undefined, timeMatch.timePeriod);
+                  if (tradeData) {
+                    baseMessage.tradeUI = tradeData;
+                  }
+                }
+              }
+              if (!baseMessage.tradeUI && symbol) {
                 // Check for average price queries first (simple average, not full stats)
                 const avgPriceMatch = detectAveragePrice(msg.content);
                 if (avgPriceMatch) {
@@ -1036,6 +1383,94 @@ const UnifiedAssistant: React.FC = () => {
     stopVoiceSession();
   }, [stopVoiceSession]);
 
+  // Handle advanced query execution from QueryBuilder
+  const handleQueryExecute = useCallback(async (filters: {
+    symbol: string;
+    securityType: 'all' | 'S' | 'O';
+    tradeType: 'all' | 'B' | 'S';
+    callPut: 'all' | 'C' | 'P';
+    fromDate: string;
+    toDate: string;
+    expiration: string;
+    strike: string;
+  }) => {
+    setIsQueryLoading(true);
+    try {
+      const res = await fetch('/api/advanced-query-ui', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          symbol: filters.symbol || undefined,
+          securityType: filters.securityType !== 'all' ? filters.securityType : undefined,
+          tradeType: filters.tradeType !== 'all' ? filters.tradeType : undefined,
+          callPut: filters.callPut !== 'all' ? filters.callPut : undefined,
+          fromDate: filters.fromDate || undefined,
+          toDate: filters.toDate || undefined,
+          expiration: filters.expiration || undefined,
+          strike: filters.strike ? parseFloat(filters.strike) : undefined,
+        }),
+      });
+      const data = await res.json();
+      setShowQueryBuilder(false);
+
+      // Add query results as a message in the transcript
+      const queryDesc = generateQueryDescription(filters);
+      const resultMsg: TranscriptMessage = {
+        id: `msg-${Date.now()}-query`,
+        role: 'assistant',
+        content: `Here are your ${queryDesc}:`,
+        timestamp: new Date(),
+        tradeUI: {
+          type: 'query-builder-result',
+          symbol: filters.symbol || 'Portfolio',
+          tradeType: filters.tradeType === 'B' ? 'buy' : filters.tradeType === 'S' ? 'sell' : undefined,
+          callPut: filters.callPut === 'C' ? 'call' : filters.callPut === 'P' ? 'put' : undefined,
+          data: {
+            ...data,
+            queryFilters: filters, // Pass the original filters for TradeQueryCard
+          },
+        },
+      };
+      setTranscript(prev => [...prev, resultMsg]);
+    } catch (error) {
+      console.error('Query execution error:', error);
+    } finally {
+      setIsQueryLoading(false);
+    }
+  }, []);
+
+  // Generate human-readable query description
+  const generateQueryDescription = (filters: {
+    symbol: string;
+    securityType: 'all' | 'S' | 'O';
+    tradeType: 'all' | 'B' | 'S';
+    callPut: 'all' | 'C' | 'P';
+    fromDate: string;
+    toDate: string;
+    expiration: string;
+    strike: string;
+  }): string => {
+    const parts: string[] = [];
+    if (filters.tradeType === 'B') parts.push('bought');
+    else if (filters.tradeType === 'S') parts.push('sold');
+
+    if (filters.securityType === 'O') {
+      if (filters.callPut === 'C') parts.push('call options');
+      else if (filters.callPut === 'P') parts.push('put options');
+      else parts.push('options');
+    } else if (filters.securityType === 'S') {
+      parts.push('stocks');
+    } else {
+      parts.push('trades');
+    }
+
+    if (filters.symbol) parts.push(`for ${filters.symbol}`);
+    if (filters.fromDate) parts.push(`from ${filters.fromDate}`);
+    if (filters.expiration) parts.push(`expiring ${filters.expiration}`);
+
+    return parts.join(' ') || 'trades';
+  };
+
   const toggleMode = useCallback(async () => {
     const newMode = inputMode === 'text' ? 'voice' : 'text';
     setInputMode(newMode);
@@ -1086,6 +1521,34 @@ const UnifiedAssistant: React.FC = () => {
     }
 
     if (type === 'detailed') {
+      // Check if data already contains trades (from QueryBuilder)
+      const queryData = data as { trades?: Array<Record<string, unknown>>; aggregations?: Aggregations; filters?: ActiveFilters };
+      if (queryData.trades && queryData.trades.length > 0) {
+        return (
+          <div style={{ marginTop: '12px' }}>
+            <TradesTable
+              trades={queryData.trades as Array<{
+                TradeID: number;
+                Date: string;
+                Symbol: string;
+                SecurityType: string;
+                TradeType: string;
+                StockTradePrice: string;
+                StockShareQty: string;
+                OptionContracts: string;
+                OptionTradePremium: string;
+                GrossAmount: string;
+                NetAmount: string;
+                Strike?: string;
+                Expiration?: string;
+                'Call/Put'?: string;
+              }>}
+              filters={queryData.filters}
+              aggregations={queryData.aggregations}
+            />
+          </div>
+        );
+      }
       // For detailed trades, we need to fetch the full data with trades array
       // The API returns a text response, but we need to call a different endpoint
       // that returns structured data for the table
@@ -1312,6 +1775,344 @@ const UnifiedAssistant: React.FC = () => {
           </div>
         );
       }
+    }
+
+    if (type === 'advanced-options') {
+      console.log('🎨 Rendering advanced options table with data:', data);
+      const advancedData = data as {
+        trades: Array<{
+          TradeID: number;
+          Date: string;
+          Symbol: string;
+          SecurityType: string;
+          TradeType: string;
+          'Call/Put': string;
+          Strike: string;
+          Expiration: string;
+          OptionContracts: string;
+          OptionTradePremium: string;
+          NetAmount: string;
+        }>;
+        aggregations?: {
+          totalTrades: number;
+          totalContracts: number;
+          totalPremium: number;
+          callCount: number;
+          putCount: number;
+        };
+        filters?: {
+          symbol?: string;
+          securityType?: string;
+          tradeType?: string;
+          callPut?: string;
+          fromDate?: string;
+          toDate?: string;
+          expiration?: string;
+          strike?: number;
+        };
+      };
+
+      // Build query description from filters
+      const queryParts: string[] = ['Show all the'];
+      if (tradeUI.tradeType === 'sell') queryParts.push('short');
+      else if (tradeUI.tradeType === 'buy') queryParts.push('long');
+      if (tradeUI.callPut) queryParts.push(tradeUI.callPut);
+      queryParts.push('options');
+      if (symbol) queryParts.push(`on ${symbol}`);
+      if (tradeUI.timePeriod) queryParts.push(`traded ${tradeUI.timePeriod}`);
+      const queryText = queryParts.join(' ');
+
+      // Build filter object for TradeQueryCard
+      const filters = advancedData.filters || {};
+      const cardFilters = {
+        fromDate: filters.fromDate,
+        toDate: filters.toDate,
+        symbol: filters.symbol || symbol,
+        securityType: filters.securityType === 'O' ? 'Option' : filters.securityType === 'S' ? 'Stock' : undefined,
+        tradeType: filters.tradeType === 'S' ? 'Sell' : filters.tradeType === 'B' ? 'Buy' : undefined,
+        callPut: filters.callPut === 'C' ? 'Call' : filters.callPut === 'P' ? 'Put' : undefined,
+        strike: filters.strike,
+        expiration: filters.expiration,
+      };
+
+      return (
+        <div style={{ marginTop: '12px' }}>
+          <TradeQueryCard
+            query={queryText}
+            filters={cardFilters}
+          />
+          {advancedData.trades && advancedData.trades.length > 0 && (
+            <AdvancedOptionsTable
+              trades={advancedData.trades}
+              symbol={symbol}
+              callPut={tradeUI.callPut}
+              tradeType={tradeUI.tradeType}
+              timePeriod={tradeUI.timePeriod}
+              aggregations={advancedData.aggregations}
+            />
+          )}
+        </div>
+      );
+    }
+
+    if (type === 'highest-strike') {
+      console.log('🎨 Rendering highest strike card with data:', data);
+      const strikeData = data as {
+        trades: Array<{
+          TradeID: number;
+          Date: string;
+          Symbol: string;
+          TradeType: string;
+          'Call/Put': string;
+          Strike: string;
+          Expiration: string;
+          OptionContracts: string;
+          OptionTradePremium: string;
+          NetAmount: string;
+        }>;
+      };
+
+      // Get the trade with highest strike
+      if (strikeData.trades && strikeData.trades.length > 0) {
+        const sortedByStrike = [...strikeData.trades].sort(
+          (a, b) => parseFloat(b.Strike) - parseFloat(a.Strike)
+        );
+        const highestStrikeTrade = sortedByStrike[0];
+
+        // Calculate total premium correctly: premium_per_share * contracts * 100
+        const premiumPerShare = parseFloat(highestStrikeTrade.OptionTradePremium || '0');
+        const contracts = parseInt(highestStrikeTrade.OptionContracts || '0');
+        const totalPremium = premiumPerShare * contracts * 100;
+
+        return (
+          <div style={{ marginTop: '12px' }}>
+            <HighestStrikeCard
+              symbol={highestStrikeTrade.Symbol}
+              strike={parseFloat(highestStrikeTrade.Strike)}
+              callPut={highestStrikeTrade['Call/Put'] === 'C' ? 'Call' : 'Put'}
+              tradeType={highestStrikeTrade.TradeType === 'B' ? 'buy' : 'sell'}
+              date={highestStrikeTrade.Date}
+              expiration={highestStrikeTrade.Expiration}
+              contracts={contracts}
+              premium={totalPremium}
+              isHighest={true}
+            />
+          </div>
+        );
+      }
+    }
+
+    if (type === 'total-premium') {
+      console.log('🎨 Rendering total premium card with data:', data);
+      const premiumData = data as {
+        trades: Array<{
+          TradeID: number;
+          Date: string;
+          Symbol: string;
+          TradeType: string;
+          'Call/Put': string;
+          Strike: string;
+          Expiration: string;
+          OptionContracts: string;
+          OptionTradePremium: string;
+          NetAmount: string;
+        }>;
+        aggregations?: {
+          totalTrades: number;
+          totalContracts: number;
+          totalPremium: number;
+          callCount: number;
+          putCount: number;
+        };
+      };
+
+      if (premiumData.aggregations) {
+        return (
+          <div style={{ marginTop: '12px' }}>
+            <TotalPremiumCard
+              symbol={symbol || 'Portfolio'}
+              totalPremium={premiumData.aggregations.totalPremium}
+              totalTrades={premiumData.aggregations.totalTrades}
+              totalContracts={premiumData.aggregations.totalContracts}
+              callCount={premiumData.aggregations.callCount}
+              putCount={premiumData.aggregations.putCount}
+              tradeType={tradeUI.tradeType || 'buy'}
+              timePeriod={tradeUI.timePeriod || 'last 12 months'}
+            />
+          </div>
+        );
+      }
+    }
+
+    if (type === 'expiring-options') {
+      console.log('🎨 Rendering expiring options table with data:', data);
+      const expiringData = data as {
+        trades: Array<{
+          TradeID: number;
+          Date: string;
+          Symbol: string;
+          SecurityType: string;
+          TradeType: string;
+          'Call/Put': string;
+          Strike: string;
+          Expiration: string;
+          OptionContracts: string;
+          OptionTradePremium: string;
+          NetAmount: string;
+        }>;
+      };
+
+      if (expiringData.trades && expiringData.trades.length > 0) {
+        return (
+          <div style={{ marginTop: '12px' }}>
+            <ExpiringOptionsTable
+              trades={expiringData.trades}
+              expirationPeriod={tradeUI.expiration || 'tomorrow'}
+            />
+          </div>
+        );
+      }
+    }
+
+    if (type === 'last-option') {
+      console.log('🎨 Rendering last option trade card with data:', data);
+      const lastOptionData = data as {
+        trades: Array<{
+          TradeID: number;
+          Date: string;
+          Symbol: string;
+          UnderlyingSymbol?: string;
+          TradeType: string;
+          'Call/Put': string;
+          Strike: string;
+          Expiration: string;
+          OptionContracts: string;
+          OptionTradePremium: string;
+          NetAmount: string;
+        }>;
+        aggregations?: {
+          totalTrades: number;
+          totalContracts: number;
+          totalPremium: number;
+          callCount: number;
+          putCount: number;
+        };
+      };
+
+      if (lastOptionData.trades && lastOptionData.trades.length > 0) {
+        const trade = lastOptionData.trades[0]; // Get the most recent trade
+        const isCall = trade['Call/Put'] === 'C';
+        const isBuy = trade.TradeType === 'B';
+        const contracts = parseInt(trade.OptionContracts || '0');
+        const premium = parseFloat(trade.OptionTradePremium || '0');
+        const totalValue = Math.abs(parseFloat(trade.NetAmount || '0'));
+        const strike = parseFloat(trade.Strike || '0');
+        // Use UnderlyingSymbol for options (e.g., "AAPL") instead of full option symbol (e.g., "AAPL251220C00195000")
+        const displaySymbol = trade.UnderlyingSymbol || trade.Symbol;
+
+        return (
+          <div style={{ marginTop: '12px' }}>
+            <LastOptionTradeCard
+              symbol={displaySymbol}
+              callPut={isCall ? 'Call' : 'Put'}
+              tradeType={isBuy ? 'buy' : 'sell'}
+              strike={strike}
+              expiration={trade.Expiration}
+              tradeDate={trade.Date}
+              contracts={contracts}
+              premium={premium}
+              totalValue={totalValue}
+              totalTrades={lastOptionData.aggregations?.totalTrades}
+              avgPremium={lastOptionData.aggregations?.totalPremium
+                ? lastOptionData.aggregations.totalPremium / (lastOptionData.aggregations.totalTrades || 1)
+                : undefined}
+            />
+          </div>
+        );
+      }
+    }
+
+    if (type === 'query-builder-result') {
+      console.log('🎨 Rendering query builder result with data:', data);
+      const queryData = data as {
+        trades: Array<{
+          TradeID: number;
+          Date: string;
+          Symbol: string;
+          SecurityType: string;
+          TradeType: string;
+          StockTradePrice: string;
+          StockShareQty: string;
+          OptionContracts: string;
+          OptionTradePremium: string;
+          GrossAmount: string;
+          NetAmount: string;
+          Strike?: string;
+          Expiration?: string;
+          'Call/Put'?: string;
+        }>;
+        aggregations?: Aggregations;
+        filters?: ActiveFilters;
+        queryFilters?: {
+          symbol: string;
+          securityType: 'all' | 'S' | 'O';
+          tradeType: 'all' | 'B' | 'S';
+          callPut: 'all' | 'C' | 'P';
+          fromDate: string;
+          toDate: string;
+          expiration: string;
+          strike: string;
+        };
+      };
+
+      // Build query description from filters
+      const filters = queryData.queryFilters || {};
+      const queryParts: string[] = ['Show'];
+      if (filters.tradeType === 'S') queryParts.push('all sold');
+      else if (filters.tradeType === 'B') queryParts.push('all bought');
+      else queryParts.push('all');
+
+      if (filters.securityType === 'O') {
+        if (filters.callPut === 'C') queryParts.push('call options');
+        else if (filters.callPut === 'P') queryParts.push('put options');
+        else queryParts.push('options');
+      } else if (filters.securityType === 'S') {
+        queryParts.push('stocks');
+      } else {
+        queryParts.push('trades');
+      }
+
+      if (filters.symbol) queryParts.push(`for ${filters.symbol}`);
+      if (filters.fromDate) queryParts.push(`from ${filters.fromDate}`);
+      const queryText = queryParts.join(' ');
+
+      // Build filter object for TradeQueryCard
+      const cardFilters = {
+        fromDate: queryData.filters?.fromDate || filters.fromDate,
+        toDate: queryData.filters?.toDate || filters.toDate,
+        symbol: queryData.filters?.symbol || filters.symbol || symbol,
+        securityType: filters.securityType === 'O' ? 'Option' : filters.securityType === 'S' ? 'Stock' : undefined,
+        tradeType: filters.tradeType === 'S' ? 'Sell' : filters.tradeType === 'B' ? 'Buy' : undefined,
+        callPut: filters.callPut === 'C' ? 'Call' : filters.callPut === 'P' ? 'Put' : undefined,
+        strike: filters.strike ? parseFloat(filters.strike) : undefined,
+        expiration: filters.expiration,
+      };
+
+      return (
+        <div style={{ marginTop: '12px' }}>
+          <TradeQueryCard
+            query={queryText}
+            filters={cardFilters}
+          />
+          {queryData.trades && queryData.trades.length > 0 && (
+            <TradesTable
+              trades={queryData.trades}
+              filters={queryData.filters}
+              aggregations={queryData.aggregations}
+            />
+          )}
+        </div>
+      );
     }
 
     return null;
@@ -1728,19 +2529,34 @@ const UnifiedAssistant: React.FC = () => {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           {currentView === 'chat' && (
-            <button onClick={toggleMode} style={styles.modeButton}>
-              {inputMode === 'text' ? (
-                <>
-                  <Mic size={14} />
-                  Voice
-                </>
-              ) : (
-                <>
-                  <MessageSquare size={14} />
-                  Chat
-                </>
-              )}
-            </button>
+            <>
+              <button
+                onClick={() => setShowQueryBuilder(true)}
+                style={{
+                  ...styles.modeButton,
+                  backgroundColor: 'rgba(0, 200, 6, 0.1)',
+                  borderColor: 'rgba(0, 200, 6, 0.3)',
+                  color: '#00c806',
+                }}
+                title="Advanced Query Builder"
+              >
+                <Filter size={14} />
+                Query
+              </button>
+              <button onClick={toggleMode} style={styles.modeButton}>
+                {inputMode === 'text' ? (
+                  <>
+                    <Mic size={14} />
+                    Voice
+                  </>
+                ) : (
+                  <>
+                    <MessageSquare size={14} />
+                    Chat
+                  </>
+                )}
+              </button>
+            </>
           )}
           <button onClick={handleClose} style={styles.iconButton}>
             <X size={20} />
@@ -2105,6 +2921,15 @@ const UnifiedAssistant: React.FC = () => {
           50% { opacity: 0.8; transform: scale(1.05); }
         }
       `}</style>
+
+      {/* Query Builder Modal */}
+      {showQueryBuilder && (
+        <QueryBuilder
+          onExecute={handleQueryExecute}
+          onClose={() => setShowQueryBuilder(false)}
+          isLoading={isQueryLoading}
+        />
+      )}
     </div>
   );
 };

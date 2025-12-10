@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Download, Maximize2, ArrowUpRight, ArrowDownRight } from 'lucide-react';
+import { Download, Maximize2, ArrowUpRight, ArrowDownRight, X, Filter } from 'lucide-react';
 
 interface Trade {
   TradeID: number;
@@ -27,9 +27,36 @@ interface TradeSummary {
   symbol: string;
 }
 
+export interface ActiveFilters {
+  symbol?: string;
+  securityType?: 'S' | 'O' | 'all';
+  tradeType?: 'B' | 'S' | 'all';
+  callPut?: 'C' | 'P' | 'all';
+  fromDate?: string;
+  toDate?: string;
+  expiration?: string;
+  strike?: number;
+}
+
+export interface Aggregations {
+  tradeCount: number;
+  totalPremium: number;
+  avgPremium: number;
+  totalQuantity: number;
+  buyCount?: number;
+  sellCount?: number;
+  stockCount?: number;
+  optionCount?: number;
+  callCount?: number;
+  putCount?: number;
+}
+
 interface TradesTableProps {
   trades: Trade[];
   summary?: TradeSummary | null;
+  filters?: ActiveFilters;
+  aggregations?: Aggregations;
+  onClearFilter?: (key: keyof ActiveFilters) => void;
 }
 
 const formatCurrency = (value: number) => {
@@ -64,13 +91,30 @@ const colors = {
   sell: '#ff5252',
 };
 
-export function TradesTable({ trades, summary }: TradesTableProps) {
+// Helper to format filter labels
+const formatFilterLabel = (key: string, value: unknown): string => {
+  if (value === 'all' || value === undefined || value === null) return '';
+
+  switch (key) {
+    case 'symbol': return `${value}`;
+    case 'securityType': return value === 'S' ? 'Stocks' : 'Options';
+    case 'tradeType': return value === 'B' ? 'Buys' : 'Sells';
+    case 'callPut': return value === 'C' ? 'Calls' : 'Puts';
+    case 'fromDate': return `From: ${value}`;
+    case 'toDate': return `To: ${value}`;
+    case 'expiration': return `Exp: ${value}`;
+    case 'strike': return `$${value} Strike`;
+    default: return String(value);
+  }
+};
+
+export function TradesTable({ trades, summary, filters, aggregations, onClearFilter }: TradesTableProps) {
   const stockTrades = trades.filter(t => t.SecurityType === 'S');
   const optionTrades = trades.filter(t => t.SecurityType === 'O');
 
   // Handle null/undefined summary
   const safeSummary = summary || {
-    symbol: stockTrades[0]?.Symbol || 'Unknown',
+    symbol: filters?.symbol || stockTrades[0]?.Symbol || optionTrades[0]?.Symbol || 'Trades',
     totalShares: 0,
     totalCost: 0,
     currentValue: 0,
@@ -78,6 +122,16 @@ export function TradesTable({ trades, summary }: TradesTableProps) {
 
   const pnl = safeSummary.currentValue - safeSummary.totalCost;
   const pnlPercent = safeSummary.totalCost > 0 ? (pnl / safeSummary.totalCost) * 100 : 0;
+
+  // Get active filter chips
+  const activeFilterChips = filters
+    ? Object.entries(filters)
+        .filter(([, value]) => value && value !== 'all')
+        .map(([key, value]) => ({
+          key: key as keyof ActiveFilters,
+          label: formatFilterLabel(key, value),
+        }))
+    : [];
 
   const styles = {
     container: {
@@ -224,6 +278,72 @@ export function TradesTable({ trades, summary }: TradesTableProps) {
     },
   };
 
+  // Additional styles for filters and aggregations
+  const filterStyles: Record<string, React.CSSProperties> = {
+    filterBar: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+      padding: '10px 16px',
+      backgroundColor: '#141414',
+      borderBottom: `1px solid ${colors.border}`,
+      flexWrap: 'wrap',
+    },
+    filterIcon: {
+      color: '#00c806',
+      marginRight: '4px',
+    },
+    filterChip: {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: '6px',
+      padding: '4px 10px',
+      backgroundColor: 'rgba(0, 200, 6, 0.1)',
+      border: '1px solid rgba(0, 200, 6, 0.3)',
+      borderRadius: '12px',
+      fontSize: '11px',
+      fontWeight: 500,
+      color: '#00c806',
+    },
+    filterChipClose: {
+      background: 'none',
+      border: 'none',
+      padding: '0',
+      cursor: 'pointer',
+      color: '#00c806',
+      display: 'flex',
+      alignItems: 'center',
+      opacity: 0.7,
+    },
+    aggregationBar: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '16px',
+      padding: '12px 16px',
+      backgroundColor: 'rgba(0, 200, 6, 0.05)',
+      borderBottom: `1px solid ${colors.border}`,
+      flexWrap: 'wrap',
+    },
+    aggregationItem: {
+      display: 'flex',
+      flexDirection: 'column' as const,
+      gap: '2px',
+    },
+    aggregationLabel: {
+      fontSize: '10px',
+      fontWeight: 600,
+      color: colors.textMuted,
+      textTransform: 'uppercase' as const,
+      letterSpacing: '0.5px',
+    },
+    aggregationValue: {
+      fontSize: '14px',
+      fontWeight: 600,
+      color: colors.textPrimary,
+      fontFamily: '"JetBrains Mono", monospace',
+    },
+  };
+
   return (
     <div style={styles.container}>
       {/* Header */}
@@ -238,6 +358,65 @@ export function TradesTable({ trades, summary }: TradesTableProps) {
           </button>
         </div>
       </div>
+
+      {/* Active Filters */}
+      {activeFilterChips.length > 0 && (
+        <div style={filterStyles.filterBar}>
+          <Filter size={14} style={filterStyles.filterIcon} />
+          {activeFilterChips.map(chip => (
+            <span key={chip.key} style={filterStyles.filterChip}>
+              {chip.label}
+              {onClearFilter && (
+                <button
+                  onClick={() => onClearFilter(chip.key)}
+                  style={filterStyles.filterChipClose}
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Aggregations Bar */}
+      {aggregations && (
+        <div style={filterStyles.aggregationBar}>
+          <div style={filterStyles.aggregationItem}>
+            <span style={filterStyles.aggregationLabel}>Trades</span>
+            <span style={filterStyles.aggregationValue}>{aggregations.tradeCount}</span>
+          </div>
+          <div style={filterStyles.aggregationItem}>
+            <span style={filterStyles.aggregationLabel}>Total Value</span>
+            <span style={filterStyles.aggregationValue}>{formatCurrency(aggregations.totalPremium)}</span>
+          </div>
+          <div style={filterStyles.aggregationItem}>
+            <span style={filterStyles.aggregationLabel}>Avg/Trade</span>
+            <span style={filterStyles.aggregationValue}>{formatCurrency(aggregations.avgPremium)}</span>
+          </div>
+          {aggregations.buyCount !== undefined && aggregations.sellCount !== undefined && (
+            <div style={filterStyles.aggregationItem}>
+              <span style={filterStyles.aggregationLabel}>Buy/Sell</span>
+              <span style={filterStyles.aggregationValue}>
+                <span style={{ color: colors.buy }}>{aggregations.buyCount}</span>
+                {' / '}
+                <span style={{ color: colors.sell }}>{aggregations.sellCount}</span>
+              </span>
+            </div>
+          )}
+          {aggregations.callCount !== undefined && aggregations.putCount !== undefined &&
+           (aggregations.callCount > 0 || aggregations.putCount > 0) && (
+            <div style={filterStyles.aggregationItem}>
+              <span style={filterStyles.aggregationLabel}>Call/Put</span>
+              <span style={filterStyles.aggregationValue}>
+                <span style={{ color: '#4da6ff' }}>{aggregations.callCount}</span>
+                {' / '}
+                <span style={{ color: '#ffa64d' }}>{aggregations.putCount}</span>
+              </span>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Summary */}
       <div style={styles.summarySection}>

@@ -30,10 +30,11 @@ For webhook testing with ElevenLabs, use ngrok: `ngrok http 3000`
 
 ### Key Directories
 
-- `app/api/elevenlabs/` - Webhook endpoints called by ElevenLabs agent (tools, profitable-trades, trade-summary, detailed-trades)
-- `app/api/` - UI data endpoints (profitable-trades-ui, trade-stats, trades-ui, conversations, messages)
-- `src/components/generative-ui/` - Dynamic UI cards (ProfitableTrades, TradeStats, TradesTable, TradeSummary)
+- `app/api/elevenlabs/` - Webhook endpoints called by ElevenLabs agent (tools, profitable-trades, trade-summary, detailed-trades, advanced-query)
+- `app/api/` - UI data endpoints (profitable-trades-ui, trade-stats, trades-ui, advanced-query-ui, conversations, messages)
+- `src/components/generative-ui/` - Dynamic UI cards (ProfitableTrades, TradeStats, TradesTable, TradeSummary, AdvancedOptionsTable, TradeQueryCard, etc.)
 - `src/components/UnifiedAssistant.tsx` - Main chat/voice interface
+- `src/components/QueryBuilder.tsx` - Manual advanced query builder UI
 
 ### Database Tables
 
@@ -71,6 +72,19 @@ UI components are triggered by pattern matching on agent messages:
 - "highest price" / "lowest sold" / "average" → TradeStats card
 - "found X trades" → TradesTable card
 - "X stock trades and Y option trades" → TradeSummary card
+- "X call/put option contracts" / "across N trades" → AdvancedOptionsTable (bulk options)
+- "last/most recent call/put" → LastOptionTradeCard (single trade)
+- "options expiring tomorrow/this week" → ExpiringOptionsTable
+- "highest strike" → HighestStrikeCard
+- "total premium" → TotalPremiumCard
+
+### Bulk vs Single Trade Detection
+
+The `detectBulkOptionsQuery` function distinguishes between:
+- **Bulk queries** ("show all short calls on Tesla last month") → Shows ALL trades in table
+- **Single queries** ("show the last call option I bought") → Shows single trade card
+
+Detection priority: Bulk options are checked FIRST before "last option" to prevent "last month" from triggering single-trade card.
 
 ## Environment Variables
 
@@ -89,6 +103,7 @@ NEXT_PUBLIC_ELEVENLABS_AGENT_ID=
 | `get_trade_stats` | Highest/lowest prices, averages |
 | `get_profitable_trades` | FIFO-matched profitable trades |
 | `get_time_based_trades` | Trades for specific time periods |
+| `advanced_query` | Flexible option queries (short/long calls/puts, by date/expiration/strike) |
 
 ## Testing
 

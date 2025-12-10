@@ -33,9 +33,11 @@ flowchart TB
         Tools["/api/elevenlabs/tools"]
         PT["/api/elevenlabs/profitable-trades"]
         TT["/api/elevenlabs/time-trades"]
+        AQ["/api/elevenlabs/advanced-query"]
         TS["/api/trade-stats"]
         TUI["/api/profitable-trades-ui"]
         TTUI["/api/time-trades-ui"]
+        AQUI["/api/advanced-query-ui"]
         Conv["/api/conversations"]
         Msg["/api/messages"]
     end
@@ -52,7 +54,9 @@ flowchart TB
     Agent -->|Webhook| Tools
     Agent -->|Webhook| PT
     Agent -->|Webhook| TT
+    Agent -->|Webhook| AQ
     UA -->|REST| TUI
+    UA -->|REST| AQUI
     UA -->|REST| TTUI
     UA -->|REST| TS
     UA -->|REST| Conv
@@ -61,8 +65,10 @@ flowchart TB
     Tools --> TD
     PT --> TD
     TT --> TD
+    AQ --> TD
     TUI --> TD
     TTUI --> TD
+    AQUI --> TD
     TS --> TD
     Conv --> C
     Msg --> M
@@ -147,6 +153,7 @@ The ElevenLabs agent has access to webhook tools that query trade data:
 | `get_trade_stats` | `/api/elevenlabs/trade-stats` | Get highest/lowest prices, averages for a symbol |
 | `get_profitable_trades` | `/api/elevenlabs/profitable-trades` | Calculate profitable trades using FIFO matching |
 | `get_time_based_trades` | `/api/elevenlabs/time-trades` | Get trades for a time period (last week, yesterday, Nov 18th) |
+| `advanced_query` | `/api/elevenlabs/advanced-query` | Flexible option queries (short/long calls/puts, by date/expiration/strike) |
 
 #### Tool Usage Guidelines (from System Prompt)
 
@@ -157,6 +164,7 @@ The ElevenLabs agent has access to webhook tools that query trade data:
 | `get_trade_stats` | Price extremes, averages | "Highest price I sold NVDA at?", "Average sell price for Apple?" |
 | `get_profitable_trades` | Realized gains, profit | "Show profitable trades on Apple", "How much profit on NVDA?" |
 | `get_time_based_trades` | Trades for a time period | "Show trades for last week", "Yesterday's trades", "Trades on November 18th" |
+| `advanced_query` | Option-specific queries | "Show all short calls on Tesla last month", "What's my highest strike put?" |
 
 **Important**: The agent is instructed to always pass ticker symbols (AAPL, GOOGL) not company names to tools.
 
@@ -457,6 +465,12 @@ flowchart TD
 | `TradesTable` | "found X trades", "here are your trades" | Full trade history table |
 | `TradeSummary` | "X stock trades and Y option trades" | Quick trade count summary |
 | `TimeBasedTrades` | "trades last week", "executed X trades yesterday" | Time period summary, trade list with display dates |
+| `AdvancedOptionsTable` | "sold N call option contracts", "across N trades" (bulk options) | Options table with strike, expiration, premium, aggregations |
+| `TradeQueryCard` | Displayed with query results | Shows active filters (symbol, date range, call/put, etc.) |
+| `HighestStrikeCard` | "highest strike", "maximum strike" | Single highest/lowest strike trade details |
+| `TotalPremiumCard` | "total premium", "collected/paid total" | Total premium aggregated across trades |
+| `ExpiringOptionsTable` | "options expiring tomorrow/this week" | Options grouped by expiration date |
+| `LastOptionTradeCard` | "last/most recent call/put option" (single trade) | Most recent option trade details |
 
 ---
 
@@ -644,11 +658,13 @@ finagent-frontend/
 │   │   │   ├── profitable-trades/    # Profitable trades webhook
 │   │   │   ├── time-trades/          # Time-based trades webhook
 │   │   │   ├── trade-stats/          # Trade statistics webhook
+│   │   │   ├── advanced-query/       # Advanced options query webhook
 │   │   │   ├── tools/                # Multi-tool webhook endpoint
 │   │   │   ├── trade-summary/        # Trade summary endpoint
 │   │   │   └── detailed-trades/      # Detailed trades endpoint
 │   │   ├── profitable-trades-ui/     # UI data for profitable trades card
 │   │   ├── time-trades-ui/           # UI data for time-based trades card
+│   │   ├── advanced-query-ui/        # UI data for advanced options queries
 │   │   ├── trade-stats/              # Trade statistics UI data
 │   │   ├── trades-ui/                # Trades table UI data
 │   │   ├── average-price/            # Average price UI data
@@ -662,14 +678,21 @@ finagent-frontend/
 │   │   └── date-parser.ts            # Natural language date parsing
 │   └── components/
 │       ├── UnifiedAssistant.tsx      # Main chat/voice interface
+│       ├── QueryBuilder.tsx          # Manual query builder modal
 │       └── generative-ui/
-│           ├── AveragePrice.tsx      # Focused average price card
-│           ├── ProfitableTrades.tsx  # Profitable trades card
-│           ├── TimeBasedTrades.tsx   # Time-based trades card
-│           ├── TimePeriodStats.tsx   # Time-period price stats card (last month, last week)
-│           ├── TradeStats.tsx        # Trade statistics card (full year)
-│           ├── TradesTable.tsx       # Full trades table
-│           └── TradeSummary.tsx      # Quick summary card
+│           ├── AdvancedOptionsTable.tsx  # Bulk options trades table
+│           ├── AveragePrice.tsx          # Focused average price card
+│           ├── ExpiringOptionsTable.tsx  # Options expiring soon table
+│           ├── HighestStrikeCard.tsx     # Highest/lowest strike card
+│           ├── LastOptionTradeCard.tsx   # Most recent option trade card
+│           ├── ProfitableTrades.tsx      # Profitable trades card
+│           ├── TimeBasedTrades.tsx       # Time-based trades card
+│           ├── TimePeriodStats.tsx       # Time-period price stats card
+│           ├── TotalPremiumCard.tsx      # Total premium aggregation card
+│           ├── TradeQueryCard.tsx        # Query filter display card
+│           ├── TradeStats.tsx            # Trade statistics card (full year)
+│           ├── TradesTable.tsx           # Full trades table
+│           └── TradeSummary.tsx          # Quick summary card
 ├── tool-config.json                  # ElevenLabs tool configuration
 └── package.json
 ```
@@ -733,6 +756,12 @@ ngrok http 3000
 | "What trades did I make yesterday?" | get_time_based_trades | TimeBasedTrades |
 | "GOOGL trades on November 18th" | get_time_based_trades | TimeBasedTrades |
 | "Show trades for the past 5 days" | get_time_based_trades | TimeBasedTrades |
+| "Show all short call options on Tesla last month" | advanced_query | AdvancedOptionsTable |
+| "What's my highest strike put option?" | advanced_query | HighestStrikeCard |
+| "How much premium did I collect selling calls?" | advanced_query | TotalPremiumCard |
+| "What options are expiring this week?" | advanced_query | ExpiringOptionsTable |
+| "What was my last call option trade?" | advanced_query | LastOptionTradeCard |
+| "Show all long puts on Apple" | advanced_query | AdvancedOptionsTable |
 
 ---
 

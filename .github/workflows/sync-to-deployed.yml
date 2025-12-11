@@ -15,18 +15,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Debug token
-        env:
-          DEPLOY_TOKEN: ${{ secrets.DEPLOY_PAT }}
-        run: |
-          echo "Token length: ${#DEPLOY_TOKEN}"
-          echo "Token prefix: ${DEPLOY_TOKEN:0:4}"
-
       - name: Push to finagent-deployed
-        env:
-          DEPLOY_TOKEN: ${{ secrets.DEPLOY_PAT }}
         run: |
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git config user.name "github-actions[bot]"
-          git remote add target "https://x-access-token:${DEPLOY_TOKEN}@github.com/saeedjabbar/finagent-deployed.git"
+          git config --local credential.helper '!f() { echo "username=x-access-token"; echo "password=${{ secrets.DEPLOY_PAT }}"; }; f'
+          git remote add target https://github.com/saeedjabbar/finagent-deployed.git
           git push --force target main

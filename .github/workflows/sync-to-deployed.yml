@@ -15,6 +15,13 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Debug token
+        env:
+          DEPLOY_TOKEN: ${{ secrets.DEPLOY_PAT }}
+        run: |
+          echo "Token length: ${#DEPLOY_TOKEN}"
+          echo "Token prefix: ${DEPLOY_TOKEN:0:4}"
+
       - name: Push to finagent-deployed
         env:
           DEPLOY_TOKEN: ${{ secrets.DEPLOY_PAT }}

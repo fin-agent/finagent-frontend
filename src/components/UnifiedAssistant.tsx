@@ -2120,7 +2120,16 @@ const UnifiedAssistant: React.FC = () => {
       };
 
       // Build query description from filters
-      const filters = queryData.queryFilters || {};
+      const filters = (queryData.queryFilters || {}) as {
+        tradeType?: string;
+        securityType?: string;
+        callPut?: string;
+        symbol?: string;
+        fromDate?: string;
+        toDate?: string;
+        strike?: string;
+        expiration?: string;
+      };
       const queryParts: string[] = ['Show'];
       if (filters.tradeType === 'S') queryParts.push('all sold');
       else if (filters.tradeType === 'B') queryParts.push('all bought');

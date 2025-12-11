@@ -15,12 +15,21 @@ jobs:
         with:
           fetch-depth: 0 # Fetch all history for proper sync
 
-      - name: Push to finagent-deployed
-        uses: cpina/github-action-push-to-another-repository@main
+      - name: Debug - Check if secret exists
+        run: |
+          if [ -z "${{ secrets.DEPLOY_PAT }}" ]; then
+            echo "DEPLOY_PAT is empty or not set"
+          else
+            echo "DEPLOY_PAT is set (length: ${#DEPLOY_PAT_VALUE})"
+          fi
         env:
-          API_TOKEN_GITHUB: ${{ secrets.DEPL0Y_PAT }}
-        with:
-          source-directory: '.'
-          destination-github-username: 'saeedjabbar'
-          destination-repository-name: 'finagent-deployed'
-          target-branch: main
+          DEPLOY_PAT_VALUE: ${{ secrets.DEPLOY_PAT }}
+
+      - name: Push to finagent-deployed
+        env:
+          PAT: ${{ secrets.DEPLOY_PAT }}
+        run: |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          git remote set-url origin https://x-access-token:${PAT}@github.com/saeedjabbar/finagent-deployed.git
+          git push --force origin main

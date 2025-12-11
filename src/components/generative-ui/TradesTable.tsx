@@ -1,7 +1,7 @@
 'use client';
 
-import React from 'react';
-import { Download, Maximize2, ArrowUpRight, ArrowDownRight, X, Filter } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { Download, Maximize2, ArrowUpRight, ArrowDownRight, X, Filter, ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface Trade {
   TradeID: number;
@@ -57,7 +57,10 @@ interface TradesTableProps {
   filters?: ActiveFilters;
   aggregations?: Aggregations;
   onClearFilter?: (key: keyof ActiveFilters) => void;
+  pageSize?: number;
 }
+
+const ITEMS_PER_PAGE = 10;
 
 const formatCurrency = (value: number) => {
   return new Intl.NumberFormat('en-US', {
@@ -108,9 +111,26 @@ const formatFilterLabel = (key: string, value: unknown): string => {
   }
 };
 
-export function TradesTable({ trades, summary, filters, aggregations, onClearFilter }: TradesTableProps) {
-  const stockTrades = trades.filter(t => t.SecurityType === 'S');
-  const optionTrades = trades.filter(t => t.SecurityType === 'O');
+export function TradesTable({ trades, summary, filters, aggregations, onClearFilter, pageSize = ITEMS_PER_PAGE }: TradesTableProps) {
+  const [stockPage, setStockPage] = useState(1);
+  const [optionPage, setOptionPage] = useState(1);
+
+  const stockTrades = useMemo(() => trades.filter(t => t.SecurityType === 'S'), [trades]);
+  const optionTrades = useMemo(() => trades.filter(t => t.SecurityType === 'O'), [trades]);
+
+  // Pagination calculations
+  const stockTotalPages = Math.ceil(stockTrades.length / pageSize);
+  const optionTotalPages = Math.ceil(optionTrades.length / pageSize);
+
+  const paginatedStockTrades = useMemo(() => {
+    const start = (stockPage - 1) * pageSize;
+    return stockTrades.slice(start, start + pageSize);
+  }, [stockTrades, stockPage, pageSize]);
+
+  const paginatedOptionTrades = useMemo(() => {
+    const start = (optionPage - 1) * pageSize;
+    return optionTrades.slice(start, start + pageSize);
+  }, [optionTrades, optionPage, pageSize]);
 
   // Handle null/undefined summary
   const safeSummary = summary || {
@@ -344,6 +364,88 @@ export function TradesTable({ trades, summary, filters, aggregations, onClearFil
     },
   };
 
+  // Pagination styles
+  const paginationStyles: Record<string, React.CSSProperties> = {
+    container: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: '8px',
+      padding: '12px 16px',
+      backgroundColor: colors.bgHeader,
+      borderTop: `1px solid ${colors.border}`,
+    },
+    button: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: '32px',
+      height: '32px',
+      backgroundColor: 'transparent',
+      border: `1px solid ${colors.border}`,
+      borderRadius: '6px',
+      color: colors.textSecondary,
+      cursor: 'pointer',
+    },
+    buttonDisabled: {
+      opacity: 0.4,
+      cursor: 'not-allowed',
+    },
+    pageInfo: {
+      fontSize: '12px',
+      color: colors.textSecondary,
+      minWidth: '80px',
+      textAlign: 'center' as const,
+    },
+  };
+
+  // Pagination component
+  const PaginationControls = ({
+    currentPage,
+    totalPages,
+    onPageChange,
+    totalItems,
+    label,
+  }: {
+    currentPage: number;
+    totalPages: number;
+    onPageChange: (page: number) => void;
+    totalItems: number;
+    label: string;
+  }) => {
+    if (totalPages <= 1) return null;
+
+    return (
+      <div style={paginationStyles.container}>
+        <button
+          style={{
+            ...paginationStyles.button,
+            ...(currentPage === 1 ? paginationStyles.buttonDisabled : {}),
+          }}
+          onClick={() => onPageChange(currentPage - 1)}
+          disabled={currentPage === 1}
+          title="Previous page"
+        >
+          <ChevronLeft size={16} />
+        </button>
+        <span style={paginationStyles.pageInfo}>
+          {label}: {currentPage} / {totalPages} ({totalItems})
+        </span>
+        <button
+          style={{
+            ...paginationStyles.button,
+            ...(currentPage === totalPages ? paginationStyles.buttonDisabled : {}),
+          }}
+          onClick={() => onPageChange(currentPage + 1)}
+          disabled={currentPage === totalPages}
+          title="Next page"
+        >
+          <ChevronRight size={16} />
+        </button>
+      </div>
+    );
+  };
+
   return (
     <div style={styles.container}>
       {/* Header */}
@@ -455,11 +557,12 @@ export function TradesTable({ trades, summary, filters, aggregations, onClearFil
                 </tr>
               </thead>
               <tbody>
-                {stockTrades.map((trade, index) => {
+                {paginatedStockTrades.map((trade, index) => {
                   const netAmount = parseFloat(trade.NetAmount || '0');
+                  const globalIndex = (stockPage - 1) * pageSize + index;
                   return (
                     <tr key={trade.TradeID} style={{ backgroundColor: index % 2 === 0 ? colors.bgRow : colors.bgRowAlt }}>
-                      <td style={{ ...styles.td, ...styles.tdCenter, ...styles.rowNum }}>{index + 1}</td>
+                      <td style={{ ...styles.td, ...styles.tdCenter, ...styles.rowNum }}>{globalIndex + 1}</td>
                       <td style={styles.td}>{formatDate(trade.Date)}</td>
                       <td style={{ ...styles.td, ...styles.tdCenter }}>
                         {trade.TradeType === 'B' ? (
@@ -492,6 +595,13 @@ export function TradesTable({ trades, summary, filters, aggregations, onClearFil
               </tbody>
             </table>
           </div>
+          <PaginationControls
+            currentPage={stockPage}
+            totalPages={stockTotalPages}
+            onPageChange={setStockPage}
+            totalItems={stockTrades.length}
+            label="Stocks"
+          />
         </>
       )}
 
@@ -516,11 +626,12 @@ export function TradesTable({ trades, summary, filters, aggregations, onClearFil
                 </tr>
               </thead>
               <tbody>
-                {optionTrades.map((trade, index) => {
+                {paginatedOptionTrades.map((trade, index) => {
                   const netAmount = parseFloat(trade.NetAmount || '0');
+                  const globalIndex = (optionPage - 1) * pageSize + index;
                   return (
                     <tr key={trade.TradeID} style={{ backgroundColor: index % 2 === 0 ? colors.bgRow : colors.bgRowAlt }}>
-                      <td style={{ ...styles.td, ...styles.tdCenter, ...styles.rowNum }}>{index + 1}</td>
+                      <td style={{ ...styles.td, ...styles.tdCenter, ...styles.rowNum }}>{globalIndex + 1}</td>
                       <td style={styles.td}>{formatDate(trade.Date)}</td>
                       <td style={{ ...styles.td, ...styles.tdCenter }}>
                         {trade.TradeType === 'B' ? (
@@ -560,6 +671,13 @@ export function TradesTable({ trades, summary, filters, aggregations, onClearFil
               </tbody>
             </table>
           </div>
+          <PaginationControls
+            currentPage={optionPage}
+            totalPages={optionTotalPages}
+            onPageChange={setOptionPage}
+            totalItems={optionTrades.length}
+            label="Options"
+          />
         </>
       )}
     </div>

@@ -554,6 +554,23 @@ function detectLastOptionQuery(text: string): { tradeType: 'buy' | 'sell'; callP
   return { tradeType, callPut };
 }
 
+// Detect "all trades" queries that mention BOTH stocks AND options
+// This must run BEFORE detectBulkOptionsQuery to prevent options-only rendering
+function detectAllTradesQuery(text: string): boolean {
+  // Skip messages that are just "checking" without actual results
+  const isJustChecking = /I'll check|let me check|checking your|retrieving|looking up/i.test(text);
+  if (isJustChecking) return false;
+
+  // Check if message mentions BOTH stock trades AND option trades
+  // Pattern: "X stock trades and Y option trades" or "X stock and Y option trades"
+  const hasBothStocksAndOptions = /\d+\s+stock\s+trades?\s+and\s+\d+\s+option\s+trades?/i.test(text) ||
+                                   /\d+\s+stock\s+and\s+\d+\s+option\s+trades?/i.test(text) ||
+                                   /includes?\s+\d+\s+stock\s+trades?\s+and\s+\d+\s+option\s+trades?/i.test(text);
+
+  console.log('🔍 detectAllTradesQuery:', hasBothStocksAndOptions, text.substring(0, 150));
+  return hasBothStocksAndOptions;
+}
+
 // Detect bulk option trade queries (show ALL trades, not just last one)
 // Triggers for queries like "show all short call options on Tesla last month"
 function detectBulkOptionsQuery(text: string): { tradeType?: 'buy' | 'sell'; callPut?: 'call' | 'put'; timePeriod?: string } | null {
@@ -683,6 +700,12 @@ const UnifiedAssistant: React.FC = () => {
         const expiringMatch = detectExpiringOptionsQuery(message.message);
         if (expiringMatch) {
           const data = await fetchTradeData(symbol || '', 'expiring-options', expiringMatch.tradeType, undefined, { expiration: expiringMatch.expiration });
+          if (data) tradeUI = data;
+        }
+        // Check for ALL TRADES (both stocks AND options) - must come BEFORE bulk options
+        // This prevents "15 stock trades and 11 option trades" from showing only options
+        if (!tradeUI && detectAllTradesQuery(message.message) && symbol) {
+          const data = await fetchTradeData(symbol, 'detailed');
           if (data) tradeUI = data;
         }
         // Check for BULK option trades (e.g., "show all short calls on Tesla last month")
@@ -945,6 +968,13 @@ const UnifiedAssistant: React.FC = () => {
             const data = await fetchTradeData(symbol || '', 'expiring-options', expiringMatch.tradeType, undefined, { expiration: expiringMatch.expiration });
             if (data) tradeUI = data;
           }
+          // Check for ALL TRADES (both stocks AND options) - must come BEFORE bulk options
+          // This prevents "15 stock trades and 11 option trades" from showing only options
+          if (!tradeUI && detectAllTradesQuery(message.message) && symbol) {
+            console.log('🔍 All trades query detected (both stocks and options)');
+            const data = await fetchTradeData(symbol, 'detailed');
+            if (data) tradeUI = data;
+          }
           // Check for BULK option trades (e.g., "show all short calls on Tesla last month")
           // This must come BEFORE detectLastOptionQuery to catch multi-trade responses
           if (!tradeUI) {
@@ -1128,6 +1158,14 @@ const UnifiedAssistant: React.FC = () => {
               const expiringMatch = detectExpiringOptionsQuery(msg.content);
               if (expiringMatch) {
                 const tradeData = await fetchTradeData(symbol || '', 'expiring-options', expiringMatch.tradeType, undefined, { expiration: expiringMatch.expiration });
+                if (tradeData) {
+                  baseMessage.tradeUI = tradeData;
+                }
+              }
+              // Check for ALL TRADES (both stocks AND options) - must come BEFORE bulk options
+              // This prevents "15 stock trades and 11 option trades" from showing only options
+              if (!baseMessage.tradeUI && detectAllTradesQuery(msg.content) && symbol) {
+                const tradeData = await fetchTradeData(symbol, 'detailed');
                 if (tradeData) {
                   baseMessage.tradeUI = tradeData;
                 }

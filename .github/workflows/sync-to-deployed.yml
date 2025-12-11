@@ -16,8 +16,10 @@ jobs:
           fetch-depth: 0
 
       - name: Push to finagent-deployed
+        env:
+          DEPLOY_TOKEN: ${{ secrets.DEPLOY_PAT }}
         run: |
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git config user.name "github-actions[bot]"
-          git remote add target "https://x-access-token:${{ secrets.DEPLOY_PAT }}@github.com/saeedjabbar/finagent-deployed.git"
+          git remote add target "https://x-access-token:${DEPLOY_TOKEN}@github.com/saeedjabbar/finagent-deployed.git"
           git push --force target main

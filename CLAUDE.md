@@ -15,7 +15,24 @@ npm run build        # Build for production
 npm run lint         # Run ESLint
 ```
 
-For webhook testing with ElevenLabs, use ngrok: `ngrok http 3000`
+## Deployment
+
+### Production
+- **URL**: `https://finagent-deployed.vercel.app`
+- ElevenLabs webhook tools point to production Vercel URLs
+- Vercel auto-deploys on push to main branch
+
+### Local Development Workflow
+ElevenLabs webhooks are configured with production URLs. For local API testing:
+
+```bash
+# Test endpoints directly with curl
+curl -X POST http://localhost:3000/api/elevenlabs/detailed-trades \
+  -H "Content-Type: application/json" \
+  -d '{"symbol": "TSLA"}'
+```
+
+The full voice agent flow uses production webhooks. Test API logic locally with curl/Postman before deploying.
 
 ## Architecture
 
@@ -41,7 +58,19 @@ For webhook testing with ElevenLabs, use ngrok: `ngrok http 3000`
 - **TradeData** - Trade records with TradeType (B=Buy, S=Sell), SecurityType (S=Stock, O=Option), Symbol, prices, quantities
 - **AccountBalance** - Daily account balances and equity
 - **AccountInfo** - Account metadata
+- **FeesAndInterest** - Transaction fees and interest charges
 - **conversations/messages** - Chat history persistence
+
+### Data Explorer (`/data`)
+
+The Data Explorer page provides a retro-futuristic database browser:
+- Browse all database tables with pagination
+- Search/filter data within tables
+- Export to CSV
+- Date offset toggle (converts demo dates to display relative to today)
+
+**API Route**: `app/api/data-explorer/route.ts`
+**Component**: `src/components/DataExplorer.tsx`
 
 ### Symbol Normalization (Dual-Layer)
 

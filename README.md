@@ -895,17 +895,41 @@ npm install
 
 # Run development server
 npm run dev
-
-# For webhook testing, use ngrok
-ngrok http 3000
 ```
 
-### Configuring ElevenLabs Tools
+---
 
-1. Go to ElevenLabs Agent Dashboard
-2. Add webhook tools with your ngrok URL:
-   - `get_profitable_trades` → `https://your-ngrok.app/api/elevenlabs/profitable-trades`
-   - `get_trade_stats` → `https://your-ngrok.app/api/elevenlabs/tools`
+## Deployment
+
+### Production (Vercel)
+
+The application is deployed to Vercel at: `https://finagent-deployed.vercel.app`
+
+**ElevenLabs Webhook URLs (Production):**
+| Tool | Production URL |
+|------|----------------|
+| get_trade_summary | `https://finagent-deployed.vercel.app/api/elevenlabs/trade-summary` |
+| get_detailed_trades | `https://finagent-deployed.vercel.app/api/elevenlabs/detailed-trades` |
+| get_trade_stats | `https://finagent-deployed.vercel.app/api/elevenlabs/trade-stats` |
+| get_profitable_trades | `https://finagent-deployed.vercel.app/api/elevenlabs/profitable-trades` |
+| get_time_based_trades | `https://finagent-deployed.vercel.app/api/elevenlabs/time-trades` |
+| advanced_query | `https://finagent-deployed.vercel.app/api/elevenlabs/advanced-query` |
+
+### Local Development
+
+For local development, test API endpoints directly without the ElevenLabs agent:
+
+```bash
+# Start dev server
+npm run dev
+
+# Test an endpoint with curl
+curl -X POST http://localhost:3000/api/elevenlabs/detailed-trades \
+  -H "Content-Type: application/json" \
+  -d '{"symbol": "TSLA"}'
+```
+
+**Note:** ElevenLabs webhook tools are configured with production Vercel URLs. The full voice agent flow uses production webhooks. For local API testing, use curl/Postman to test endpoints directly.
 
 ---
 

@@ -357,8 +357,6 @@ export async function POST(req: NextRequest) {
 
       if (optionTrades.length > 0 && stockTrades.length === 0) {
         // Pure option query - use precise language
-        const _calls = optionTrades.filter(t => t['Call/Put'] === 'C');
-        const _puts = optionTrades.filter(t => t['Call/Put'] === 'P');
         const optionType = callPut === 'call' ? 'call' : callPut === 'put' ? 'put' : '';
 
         response = `You ${action} ${totalContracts} ${optionType} option contracts`;

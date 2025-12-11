@@ -62,12 +62,19 @@ export async function GET(req: NextRequest) {
       .from(table)
       .select('*', { count: 'exact', head: true });
 
+    // Determine order column based on table
+    const orderColumn = table === 'TradeData' ? 'Date'
+      : table === 'conversations' ? 'created_at'
+      : table === 'messages' ? 'created_at'
+      : table === 'AccountBalance' ? 'Date'
+      : 'id';
+
     // Fetch data with pagination
     const { data, error } = await supabase
       .from(table)
       .select('*')
       .range(offset, offset + limit - 1)
-      .order(table === 'TradeData' ? 'Date' : table === 'conversations' ? 'created_at' : table === 'messages' ? 'created_at' : 'Date' in (data?.[0] || {}) ? 'Date' : Object.keys(data?.[0] || {})[0], { ascending: false });
+      .order(orderColumn, { ascending: false });
 
     if (error) {
       console.error('Supabase error:', error);

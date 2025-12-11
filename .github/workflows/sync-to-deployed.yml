@@ -1,0 +1,21 @@
+name: Sync to finagent-deployed
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Fetch all history for proper sync
+
+      - name: Push to finagent-deployed
+        run: |
+          git remote add deployed https://${{ secrets.DEPLOY_PAT }}@github.com/saeedjabbar/finagent-deployed.git
+          git push deployed main --force

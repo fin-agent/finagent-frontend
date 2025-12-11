@@ -19,6 +19,7 @@ interface TableData {
   totalCount: number;
   limit: number;
   offset: number;
+  error?: string;
 }
 
 // Retro-futuristic color palette
@@ -132,13 +133,13 @@ const DataExplorer: React.FC = () => {
   };
 
   // Filter data by search query
-  const filteredData = tableData?.data.filter(row => {
+  const filteredData = (tableData?.data ?? []).filter(row => {
     if (!searchQuery) return true;
     const query = searchQuery.toLowerCase();
     return Object.values(row).some(val =>
       String(val).toLowerCase().includes(query)
     );
-  }) || [];
+  });
 
   const totalPages = tableData ? Math.ceil(tableData.totalCount / pageSize) : 0;
 
@@ -524,6 +525,49 @@ const DataExplorer: React.FC = () => {
                 <Loader2 size={32} style={{ color: colors.accent, animation: 'spin 1s linear infinite' }} />
                 <div style={{ fontSize: '12px', color: colors.textMuted, letterSpacing: '2px' }}>
                   FETCHING DATA...
+                </div>
+              </motion.div>
+            ) : tableData?.error ? (
+              // Error state
+              <motion.div
+                key="error"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                style={{
+                  flex: 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexDirection: 'column',
+                  gap: '16px',
+                }}
+              >
+                <div style={{
+                  width: '80px',
+                  height: '80px',
+                  borderRadius: '50%',
+                  background: `${colors.error}20`,
+                  border: `2px solid ${colors.error}40`,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '32px',
+                }}>
+                  ⚠
+                </div>
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{
+                    fontSize: '14px',
+                    color: colors.error,
+                    letterSpacing: '1px',
+                    marginBottom: '8px',
+                  }}>
+                    FAILED TO LOAD TABLE
+                  </div>
+                  <div style={{ fontSize: '12px', color: colors.textMuted }}>
+                    {tableData.error}
+                  </div>
                 </div>
               </motion.div>
             ) : tableData ? (

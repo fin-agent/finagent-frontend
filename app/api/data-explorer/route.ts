@@ -67,6 +67,8 @@ export async function GET(req: NextRequest) {
       : table === 'conversations' ? 'created_at'
       : table === 'messages' ? 'created_at'
       : table === 'AccountBalance' ? 'Date'
+      : table === 'AccountInfo' ? 'AccountCode'
+      : table === 'FeesAndInterest' ? 'Date'
       : 'id';
 
     // Fetch data with pagination

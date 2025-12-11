@@ -162,6 +162,17 @@ function extractSymbolOrCompany(text: string): string | null {
   return null;
 }
 
+// Parse OCC option symbol to extract underlying ticker
+// Format: AAPL251017C00220000 -> AAPL
+function parseOptionSymbol(symbol: string): string {
+  // OCC format: 1-6 char ticker + 6 digit date + C/P + 8 digit strike
+  const match = symbol.match(/^([A-Z]+)/);
+  if (match) {
+    return match[1];
+  }
+  return symbol;
+}
+
 // Detect if message contains trade summary data (brief count)
 function detectTradeSummary(text: string): { stockTrades: number; optionTrades: number } | null {
   // Skip if just checking/looking up
@@ -471,7 +482,11 @@ function detectHighestStrikeQuery(text: string): { isHighest: boolean; callPut: 
   if (isJustChecking) return null;
 
   // Detect highest/lowest strike responses
-  const highestMatch = /(?:highest|maximum|top)\s+strike.*(?:call|put)|(?:sold|bought)\s+a\s+quantity\s+of.*\$\d+\s+strike/i.test(text);
+  // Matches patterns like:
+  // - "highest strike call/put"
+  // - "sold a quantity of ... $220 strike"
+  // - "sold 15 contracts of $220 strike" (common agent response format)
+  const highestMatch = /(?:highest|maximum|top)\s+strike.*(?:call|put)|(?:sold|bought)\s+(?:a\s+quantity\s+of|\d+\s+contracts?\s+of).*\$\d+\s+strike/i.test(text);
   const lowestMatch = /(?:lowest|minimum|bottom)\s+strike.*(?:call|put)/i.test(text);
 
   if (!highestMatch && !lowestMatch) return null;
@@ -1911,7 +1926,7 @@ const UnifiedAssistant: React.FC = () => {
         return (
           <div style={{ marginTop: '12px' }}>
             <HighestStrikeCard
-              symbol={highestStrikeTrade.Symbol}
+              symbol={parseOptionSymbol(highestStrikeTrade.Symbol)}
               strike={parseFloat(highestStrikeTrade.Strike)}
               callPut={highestStrikeTrade['Call/Put'] === 'C' ? 'Call' : 'Put'}
               tradeType={highestStrikeTrade.TradeType === 'B' ? 'buy' : 'sell'}

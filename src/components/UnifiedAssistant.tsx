@@ -593,16 +593,25 @@ function detectBulkOptionsQuery(text: string): { tradeType?: 'buy' | 'sell'; cal
 }
 
 // Detect options expiring query results
-function detectExpiringOptionsQuery(text: string): { expiration: string } | null {
+// NOTE: We intentionally do NOT extract tradeType here because the webhook queries ALL options
+// (both bought and sold) but describes them using "bought" or "sold" language based on the majority.
+// If we extracted tradeType from the response text, the UI would filter incorrectly.
+function detectExpiringOptionsQuery(text: string): { expiration: string; tradeType?: 'buy' | 'sell' } | null {
   // Skip messages that are just "checking" without actual results
   const isJustChecking = /I'll check|let me check|checking your|retrieving|looking up/i.test(text);
   if (isJustChecking && !/expiring|positions?/i.test(text)) return null;
 
   // Detect expiring options responses
+  // Patterns:
+  // - "options expiring tomorrow" / "option contracts expiring tomorrow"
+  // - "expiring tomorrow...options"
+  // - "226 option contracts expiring tomorrow"
+  // - "contracts expiring tomorrow"
   const hasExpiringOptions =
-    /options?\s+expiring\s+(?:tomorrow|this\s+week|this\s+month)/i.test(text) ||
+    /options?\s+(?:contracts?\s+)?expiring\s+(?:tomorrow|this\s+week|this\s+month)/i.test(text) ||
+    /contracts?\s+expiring\s+(?:tomorrow|this\s+week|this\s+month)/i.test(text) ||
     /expiring\s+(?:tomorrow|this\s+week|this\s+month).*options?/i.test(text) ||
-    /\d+\s+(?:options?|positions?)\s+expir/i.test(text);
+    /\d+\s+(?:options?|positions?|contracts?)\s+expir/i.test(text);
 
   if (!hasExpiringOptions) return null;
 
@@ -611,7 +620,9 @@ function detectExpiringOptionsQuery(text: string): { expiration: string } | null
   if (/this\s+week/i.test(text)) expiration = 'this week';
   else if (/this\s+month/i.test(text)) expiration = 'this month';
 
-  return { expiration };
+  // DO NOT extract tradeType - the webhook returns ALL expiring options regardless of buy/sell
+  // The response text may say "that you bought" based on majority, but we want ALL options
+  return { expiration, tradeType: undefined };
 }
 
 const UnifiedAssistant: React.FC = () => {
@@ -652,27 +663,28 @@ const UnifiedAssistant: React.FC = () => {
         // For assistant messages, check if we should render trade UI
         const symbol = extractSymbolOrCompany(message.message);
 
-        // Check for BULK option trades first (e.g., "show all short calls on Tesla last month")
-        // This must come BEFORE detectLastOptionQuery to catch multi-trade responses
-        const bulkOptionsMatch = detectBulkOptionsQuery(message.message);
-        if (bulkOptionsMatch) {
-          const data = await fetchTradeData(symbol || '', 'advanced-options', bulkOptionsMatch.tradeType, bulkOptionsMatch.timePeriod, { callPut: bulkOptionsMatch.callPut });
+        // Check for expiring options FIRST (highest priority for "expiring tomorrow" queries)
+        // Must check before bulk options since expiring responses also contain "across N trades"
+        const expiringMatch = detectExpiringOptionsQuery(message.message);
+        if (expiringMatch) {
+          const data = await fetchTradeData(symbol || '', 'expiring-options', expiringMatch.tradeType, undefined, { expiration: expiringMatch.expiration });
           if (data) tradeUI = data;
         }
-        // Check for "last/most recent" option trade queries (single trade only)
-        else {
-          const lastOptionMatch = detectLastOptionQuery(message.message);
-          if (lastOptionMatch && symbol) {
-            const data = await fetchTradeData(symbol, 'last-option', lastOptionMatch.tradeType, undefined, { callPut: lastOptionMatch.callPut });
+        // Check for BULK option trades (e.g., "show all short calls on Tesla last month")
+        // This must come BEFORE detectLastOptionQuery to catch multi-trade responses
+        if (!tradeUI) {
+          const bulkOptionsMatch = detectBulkOptionsQuery(message.message);
+          if (bulkOptionsMatch) {
+            const data = await fetchTradeData(symbol || '', 'advanced-options', bulkOptionsMatch.tradeType, bulkOptionsMatch.timePeriod, { callPut: bulkOptionsMatch.callPut });
             if (data) tradeUI = data;
           }
-        }
-        // Check for expiring options (highest priority for expiration queries)
-        if (!tradeUI) {
-          const expiringMatch = detectExpiringOptionsQuery(message.message);
-          if (expiringMatch) {
-            const data = await fetchTradeData(symbol || '', 'expiring-options', undefined, undefined, { expiration: expiringMatch.expiration });
-            if (data) tradeUI = data;
+          // Check for "last/most recent" option trade queries (single trade only)
+          else {
+            const lastOptionMatch = detectLastOptionQuery(message.message);
+            if (lastOptionMatch && symbol) {
+              const data = await fetchTradeData(symbol, 'last-option', lastOptionMatch.tradeType, undefined, { callPut: lastOptionMatch.callPut });
+              if (data) tradeUI = data;
+            }
           }
         }
         // Check for highest/lowest strike queries
@@ -910,30 +922,31 @@ const UnifiedAssistant: React.FC = () => {
           console.log('🔍 Message:', message.message.substring(0, 100));
           console.log('🔍 Extracted symbol:', symbol);
 
-          // Check for BULK option trades first (e.g., "show all short calls on Tesla last month")
-          // This must come BEFORE detectLastOptionQuery to catch multi-trade responses
-          const bulkOptionsMatch = detectBulkOptionsQuery(message.message);
-          if (bulkOptionsMatch) {
-            console.log('🔍 Bulk options query detected:', bulkOptionsMatch);
-            const data = await fetchTradeData(symbol || '', 'advanced-options', bulkOptionsMatch.tradeType, bulkOptionsMatch.timePeriod, { callPut: bulkOptionsMatch.callPut });
+          // Check for expiring options FIRST (highest priority for "expiring tomorrow" queries)
+          // Must check before bulk options since expiring responses also contain "across N trades"
+          const expiringMatch = detectExpiringOptionsQuery(message.message);
+          if (expiringMatch) {
+            console.log('🔍 Expiring options detected:', expiringMatch.expiration);
+            const data = await fetchTradeData(symbol || '', 'expiring-options', expiringMatch.tradeType, undefined, { expiration: expiringMatch.expiration });
             if (data) tradeUI = data;
           }
-          // Check for "last/most recent" option trade queries (single trade only)
-          else {
-            const lastOptionMatch = detectLastOptionQuery(message.message);
-            if (lastOptionMatch && symbol) {
-              console.log('🔍 Last option trade detected:', lastOptionMatch);
-              const data = await fetchTradeData(symbol, 'last-option', lastOptionMatch.tradeType, undefined, { callPut: lastOptionMatch.callPut });
+          // Check for BULK option trades (e.g., "show all short calls on Tesla last month")
+          // This must come BEFORE detectLastOptionQuery to catch multi-trade responses
+          if (!tradeUI) {
+            const bulkOptionsMatch = detectBulkOptionsQuery(message.message);
+            if (bulkOptionsMatch) {
+              console.log('🔍 Bulk options query detected:', bulkOptionsMatch);
+              const data = await fetchTradeData(symbol || '', 'advanced-options', bulkOptionsMatch.tradeType, bulkOptionsMatch.timePeriod, { callPut: bulkOptionsMatch.callPut });
               if (data) tradeUI = data;
             }
-          }
-          // Check for expiring options (highest priority for expiration queries)
-          if (!tradeUI) {
-            const expiringMatch = detectExpiringOptionsQuery(message.message);
-            if (expiringMatch) {
-              console.log('🔍 Expiring options detected:', expiringMatch.expiration);
-              const data = await fetchTradeData(symbol || '', 'expiring-options', undefined, undefined, { expiration: expiringMatch.expiration });
-              if (data) tradeUI = data;
+            // Check for "last/most recent" option trade queries (single trade only)
+            else {
+              const lastOptionMatch = detectLastOptionQuery(message.message);
+              if (lastOptionMatch && symbol) {
+                console.log('🔍 Last option trade detected:', lastOptionMatch);
+                const data = await fetchTradeData(symbol, 'last-option', lastOptionMatch.tradeType, undefined, { callPut: lastOptionMatch.callPut });
+                if (data) tradeUI = data;
+              }
             }
           }
           // Check for highest/lowest strike queries
@@ -1095,28 +1108,39 @@ const UnifiedAssistant: React.FC = () => {
             if (msg.role === 'assistant') {
               const symbol = extractSymbolOrCompany(msg.content);
 
-              // Check for BULK option trades first (e.g., "show all short calls on Tesla last month")
-              const bulkOptionsMatch = detectBulkOptionsQuery(msg.content);
-              if (bulkOptionsMatch) {
-                const tradeData = await fetchTradeData(symbol || '', 'advanced-options', bulkOptionsMatch.tradeType, bulkOptionsMatch.timePeriod, { callPut: bulkOptionsMatch.callPut });
+              // Check for expiring options FIRST (highest priority for "expiring tomorrow" queries)
+              // Must check before bulk options since expiring responses also contain "across N trades"
+              const expiringMatch = detectExpiringOptionsQuery(msg.content);
+              if (expiringMatch) {
+                const tradeData = await fetchTradeData(symbol || '', 'expiring-options', expiringMatch.tradeType, undefined, { expiration: expiringMatch.expiration });
                 if (tradeData) {
                   baseMessage.tradeUI = tradeData;
                 }
               }
-              // Check for time-based trades
-              else {
-                const timeMatch = detectTimeBasedTrades(msg.content);
-                if (timeMatch) {
-                  // For time-based queries, check if it's portfolio-wide:
-                  // 1. Multiple symbols mentioned in response
-                  // 2. Day-of-week queries with NO symbol are portfolio-wide
-                  const isPortfolioQuery = isPortfolioWideQuery(msg.content);
-                  const isDayOfWeekQuery = /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(timeMatch.timePeriod);
-                  // Only use null symbol if portfolio-wide OR (day-of-week AND no symbol detected)
-                  const timeSymbol = (isPortfolioQuery || (isDayOfWeekQuery && !symbol)) ? null : symbol;
-                  const tradeData = await fetchTradeData(timeSymbol || '', 'time-based', undefined, timeMatch.timePeriod);
+              // Check for BULK option trades (e.g., "show all short calls on Tesla last month")
+              if (!baseMessage.tradeUI) {
+                const bulkOptionsMatch = detectBulkOptionsQuery(msg.content);
+                if (bulkOptionsMatch) {
+                  const tradeData = await fetchTradeData(symbol || '', 'advanced-options', bulkOptionsMatch.tradeType, bulkOptionsMatch.timePeriod, { callPut: bulkOptionsMatch.callPut });
                   if (tradeData) {
                     baseMessage.tradeUI = tradeData;
+                  }
+                }
+                // Check for time-based trades
+                else {
+                  const timeMatch = detectTimeBasedTrades(msg.content);
+                  if (timeMatch) {
+                    // For time-based queries, check if it's portfolio-wide:
+                    // 1. Multiple symbols mentioned in response
+                    // 2. Day-of-week queries with NO symbol are portfolio-wide
+                    const isPortfolioQuery = isPortfolioWideQuery(msg.content);
+                    const isDayOfWeekQuery = /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(timeMatch.timePeriod);
+                    // Only use null symbol if portfolio-wide OR (day-of-week AND no symbol detected)
+                    const timeSymbol = (isPortfolioQuery || (isDayOfWeekQuery && !symbol)) ? null : symbol;
+                    const tradeData = await fetchTradeData(timeSymbol || '', 'time-based', undefined, timeMatch.timePeriod);
+                    if (tradeData) {
+                      baseMessage.tradeUI = tradeData;
+                    }
                   }
                 }
               }
@@ -1960,6 +1984,14 @@ const UnifiedAssistant: React.FC = () => {
           OptionTradePremium: string;
           NetAmount: string;
         }>;
+        aggregations?: {
+          tradeCount?: number;
+          totalPremium?: number;
+          totalNetAmount?: number;
+          callCount?: number;
+          putCount?: number;
+          totalContracts?: number;
+        };
       };
 
       if (expiringData.trades && expiringData.trades.length > 0) {
@@ -1968,6 +2000,13 @@ const UnifiedAssistant: React.FC = () => {
             <ExpiringOptionsTable
               trades={expiringData.trades}
               expirationPeriod={tradeUI.expiration || 'tomorrow'}
+              aggregations={expiringData.aggregations ? {
+                tradeCount: expiringData.aggregations.tradeCount,
+                totalPremium: expiringData.aggregations.totalNetAmount, // Use net amount for "Total Value"
+                callCount: expiringData.aggregations.callCount,
+                putCount: expiringData.aggregations.putCount,
+                totalContracts: expiringData.aggregations.totalContracts,
+              } : undefined}
             />
           </div>
         );

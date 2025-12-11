@@ -313,9 +313,9 @@ export async function POST(req: NextRequest) {
       return sum + Math.abs(parseFloat(t.GrossAmount || '0'));
     }, 0);
 
-    // Average premium per contract (not per trade)
-    const avgPremiumPerContract = totalContracts > 0
-      ? totalGrossPremium / totalContracts / 100  // Per-share premium averaged
+    // Average premium per share (totalPremium / totalContracts / 100 shares per contract)
+    const avgPremiumPerShare = totalContracts > 0
+      ? totalGrossPremium / totalContracts / 100
       : 0;
 
     // Build response based on aggregation type
@@ -365,7 +365,7 @@ export async function POST(req: NextRequest) {
         if (normalizedSymbol) response += ` on ${normalizedSymbol}`;
         if (fromDate) response += ` ${fromDate}`;
         response += `, ${premiumAction} total premium of $${totalNetAmount.toFixed(2)}`;
-        response += `. The average premium per contract was $${avgPremiumPerContract.toFixed(2)}`;
+        response += `. The average premium per share was $${avgPremiumPerShare.toFixed(2)}`;
         response += `, covering ${sharesCovered.toLocaleString()} shares across ${tradeCount} trades.`;
       } else {
         // Mixed or stock-only query
@@ -400,7 +400,7 @@ export async function POST(req: NextRequest) {
         sharesCovered,  // contracts * 100 for options
         totalNetAmount,  // Actual amount received/paid (after fees)
         totalGrossPremium,  // premium * contracts * 100
-        avgPremiumPerContract,  // Average per-contract premium
+        avgPremiumPerShare,  // Average premium per share
         filters: {
           symbol: normalizedSymbol || undefined,
           securityType,

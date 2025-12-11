@@ -174,7 +174,7 @@ export interface AdvancedQueryResult {
     totalTrades: number;
     totalPremium: number;        // Gross premium (premium * contracts * 100 for options)
     totalNetAmount: number;      // Net amount after fees
-    avgPremium: number;          // Average premium per contract (for options)
+    avgPremium: number;          // Average premium per share (for options)
     totalQuantity: number;
     totalContracts: number;      // Total option contracts
     totalShares: number;         // Total stock shares
@@ -302,9 +302,9 @@ export async function POST(req: NextRequest) {
     // Net amount (what was actually received/paid after fees)
     const totalNetAmount = trades.reduce((sum, t) => sum + Math.abs(parseFloat(t.NetAmount || '0')), 0);
 
-    // Average premium per contract (for options only)
-    // This is the average per-share premium
-    const avgPremiumPerContract = totalContracts > 0
+    // Average premium per share (for options only)
+    // totalGrossPremium / totalContracts / 100 shares per contract
+    const avgPremiumPerShare = totalContracts > 0
       ? totalGrossPremium / totalContracts / 100
       : 0;
 
@@ -313,7 +313,7 @@ export async function POST(req: NextRequest) {
       totalTrades: trades.length,
       totalPremium: totalGrossPremium,       // Gross premium (premium * contracts * 100)
       totalNetAmount,                         // Net amount after fees
-      avgPremium: avgPremiumPerContract,      // Average premium per contract
+      avgPremium: avgPremiumPerShare,          // Average premium per share
       totalQuantity: trades.reduce((sum, t) => {
         const qty = t.SecurityType === 'O'
           ? parseFloat(t.OptionContracts || '0')

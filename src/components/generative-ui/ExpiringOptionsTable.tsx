@@ -1,7 +1,7 @@
 'use client';
 
-import React from 'react';
-import { Clock, AlertTriangle, ArrowUpRight, ArrowDownRight, Flame } from 'lucide-react';
+import React, { useState } from 'react';
+import { Clock, ArrowUpRight, ArrowDownRight, Flame, ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface ExpiringOption {
   TradeID: number;
@@ -45,6 +45,18 @@ const formatDate = (dateStr: string) => {
   });
 };
 
+// Parse OCC option symbol to extract underlying ticker
+// Format: AAPL251121P00175000 -> AAPL
+const parseOptionSymbol = (symbol: string): string => {
+  // OCC format: 1-6 char ticker + 6 digit date + C/P + 8 digit strike
+  // Match letters at the start (the ticker)
+  const match = symbol.match(/^([A-Z]+)/);
+  if (match) {
+    return match[1];
+  }
+  return symbol;
+};
+
 // Calculate days until expiration
 const getDaysUntil = (expirationStr: string): number => {
   const exp = new Date(expirationStr);
@@ -77,13 +89,22 @@ const colors = {
   put: '#ffa64d',
 };
 
+const ITEMS_PER_PAGE = 10;
+
 export function ExpiringOptionsTable({
   trades,
   expirationPeriod,
   aggregations: externalAggregations,
 }: ExpiringOptionsTableProps) {
+  const [currentPage, setCurrentPage] = useState(1);
   const isUrgent = expirationPeriod.toLowerCase() === 'tomorrow';
   const accentColor = isUrgent ? colors.urgent : colors.warning;
+
+  // Pagination calculations
+  const totalPages = Math.ceil(trades.length / ITEMS_PER_PAGE);
+  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+  const endIndex = startIndex + ITEMS_PER_PAGE;
+  const currentTrades = trades.slice(startIndex, endIndex);
 
   // Calculate aggregations from trades if not provided
   const aggregations = {
@@ -346,12 +367,6 @@ export function ExpiringOptionsTable({
           <div style={styles.headerText}>
             <span style={styles.headerTitle}>
               Options Expiring {expirationPeriod}
-              {isUrgent && (
-                <span style={styles.urgentBadge}>
-                  <AlertTriangle size={10} />
-                  Urgent
-                </span>
-              )}
             </span>
             <span style={styles.headerSubtitle}>
               {aggregations.tradeCount} position{aggregations.tradeCount !== 1 ? 's' : ''} require attention
@@ -359,8 +374,8 @@ export function ExpiringOptionsTable({
           </div>
         </div>
         <div style={styles.countBadge}>
-          {aggregations.tradeCount}
-          <span style={styles.countLabel}>expiring</span>
+          {aggregations.totalContracts}
+          <span style={styles.countLabel}>contracts</span>
         </div>
       </div>
 
@@ -405,7 +420,7 @@ export function ExpiringOptionsTable({
             </tr>
           </thead>
           <tbody>
-            {trades.slice(0, 10).map((trade, index) => {
+            {currentTrades.map((trade, index) => {
               const netAmount = parseFloat(trade.NetAmount || '0');
               const contracts = parseFloat(trade.OptionContracts || '0');
               const strike = parseFloat(trade.Strike || '0');
@@ -432,7 +447,7 @@ export function ExpiringOptionsTable({
                     backgroundColor: index % 2 === 0 ? colors.bgCard : colors.bgElevated,
                   }}
                 >
-                  <td style={{ ...styles.td, fontWeight: 600 }}>{trade.Symbol}</td>
+                  <td style={{ ...styles.td, fontWeight: 600 }}>{parseOptionSymbol(trade.Symbol)}</td>
                   <td style={{ ...styles.td, textAlign: 'center' }}>
                     <span style={{
                       ...styles.badge,
@@ -486,16 +501,178 @@ export function ExpiringOptionsTable({
         </table>
       </div>
 
-      {trades.length > 10 && (
+      {/* Pagination */}
+      {totalPages > 1 && (
         <div style={{
-          padding: '12px 16px',
-          textAlign: 'center',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '14px 20px',
           borderTop: `1px solid ${colors.border}`,
           backgroundColor: colors.bgElevated,
-          fontSize: '12px',
-          color: colors.textMuted,
         }}>
-          Showing 10 of {trades.length} options
+          {/* Page info */}
+          <div style={{
+            fontFamily: '"JetBrains Mono", monospace',
+            fontSize: '11px',
+            color: colors.textMuted,
+            letterSpacing: '0.3px',
+          }}>
+            <span style={{ color: colors.textSecondary }}>{startIndex + 1}-{Math.min(endIndex, trades.length)}</span>
+            <span> of </span>
+            <span style={{ color: colors.textSecondary }}>{trades.length}</span>
+            <span> options</span>
+          </div>
+
+          {/* Navigation controls */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+          }}>
+            {/* Previous button */}
+            <button
+              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: '32px',
+                height: '32px',
+                borderRadius: '8px',
+                border: `1px solid ${currentPage === 1 ? colors.border : colors.textMuted}`,
+                backgroundColor: currentPage === 1 ? colors.bgCard : colors.bgHeader,
+                color: currentPage === 1 ? colors.textMuted : colors.textPrimary,
+                cursor: currentPage === 1 ? 'not-allowed' : 'pointer',
+                transition: 'all 0.15s ease',
+                opacity: currentPage === 1 ? 0.5 : 1,
+              }}
+              onMouseEnter={(e) => {
+                if (currentPage !== 1) {
+                  e.currentTarget.style.backgroundColor = colors.bgSurface;
+                  e.currentTarget.style.borderColor = accentColor;
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (currentPage !== 1) {
+                  e.currentTarget.style.backgroundColor = colors.bgHeader;
+                  e.currentTarget.style.borderColor = colors.textMuted;
+                }
+              }}
+            >
+              <ChevronLeft size={16} />
+            </button>
+
+            {/* Page indicators */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              padding: '0 8px',
+            }}>
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => {
+                // Show limited page numbers with ellipsis for many pages
+                const showPage = page === 1 ||
+                  page === totalPages ||
+                  Math.abs(page - currentPage) <= 1;
+                const showEllipsis = page === 2 && currentPage > 3 ||
+                  page === totalPages - 1 && currentPage < totalPages - 2;
+
+                if (!showPage && !showEllipsis) return null;
+
+                if (showEllipsis && !showPage) {
+                  return (
+                    <span
+                      key={`ellipsis-${page}`}
+                      style={{
+                        fontFamily: '"JetBrains Mono", monospace',
+                        fontSize: '11px',
+                        color: colors.textMuted,
+                        padding: '0 2px',
+                      }}
+                    >
+                      ···
+                    </span>
+                  );
+                }
+
+                return (
+                  <button
+                    key={page}
+                    onClick={() => setCurrentPage(page)}
+                    style={{
+                      fontFamily: '"JetBrains Mono", monospace',
+                      fontSize: '11px',
+                      fontWeight: page === currentPage ? 700 : 500,
+                      minWidth: '28px',
+                      height: '28px',
+                      borderRadius: '6px',
+                      border: page === currentPage
+                        ? `1px solid ${accentColor}`
+                        : '1px solid transparent',
+                      backgroundColor: page === currentPage
+                        ? `${accentColor}20`
+                        : 'transparent',
+                      color: page === currentPage
+                        ? accentColor
+                        : colors.textMuted,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (page !== currentPage) {
+                        e.currentTarget.style.backgroundColor = colors.bgHeader;
+                        e.currentTarget.style.color = colors.textPrimary;
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (page !== currentPage) {
+                        e.currentTarget.style.backgroundColor = 'transparent';
+                        e.currentTarget.style.color = colors.textMuted;
+                      }
+                    }}
+                  >
+                    {page}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Next button */}
+            <button
+              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+              disabled={currentPage === totalPages}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: '32px',
+                height: '32px',
+                borderRadius: '8px',
+                border: `1px solid ${currentPage === totalPages ? colors.border : colors.textMuted}`,
+                backgroundColor: currentPage === totalPages ? colors.bgCard : colors.bgHeader,
+                color: currentPage === totalPages ? colors.textMuted : colors.textPrimary,
+                cursor: currentPage === totalPages ? 'not-allowed' : 'pointer',
+                transition: 'all 0.15s ease',
+                opacity: currentPage === totalPages ? 0.5 : 1,
+              }}
+              onMouseEnter={(e) => {
+                if (currentPage !== totalPages) {
+                  e.currentTarget.style.backgroundColor = colors.bgSurface;
+                  e.currentTarget.style.borderColor = accentColor;
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (currentPage !== totalPages) {
+                  e.currentTarget.style.backgroundColor = colors.bgHeader;
+                  e.currentTarget.style.borderColor = colors.textMuted;
+                }
+              }}
+            >
+              <ChevronRight size={16} />
+            </button>
+          </div>
         </div>
       )}
 

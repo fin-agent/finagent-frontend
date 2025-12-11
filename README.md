@@ -294,6 +294,26 @@ const profitableTrades = matchedTrades.filter(t => t.profitLoss > 0);
 
 ---
 
+## Option Premium Math
+
+Option calculations follow standard options math where **1 contract = 100 shares**:
+
+### Key Calculations
+
+| Metric | Formula | Example |
+|--------|---------|---------|
+| **Total Premium** | `premium_per_share × contracts × 100` | $3.69 × 226 × 100 = $83,394 |
+| **Shares Covered** | `contracts × 100` | 226 contracts = 22,600 shares |
+| **Average Premium per Share** | `total_premium / contracts / 100` | $83,509 / 226 / 100 = $3.69 |
+
+### Important Distinction
+
+- **OptionTradePremium** in the database is the **per-share price** (e.g., $3.69)
+- **Per-contract premium** = per-share price × 100 (e.g., $3.69 × 100 = $369)
+- The agent response says "average premium **per share**" to be precise
+
+---
+
 ## Date Utilities & Demo Data Mapping
 
 The application uses **demo trade data** with future dates (2025) that are dynamically mapped to display as recent dates relative to today. This allows the demo to always show relevant "recent" trades.
@@ -469,7 +489,7 @@ flowchart TD
 | `TradeQueryCard` | Displayed with query results | Shows active filters (symbol, date range, call/put, etc.) |
 | `HighestStrikeCard` | "highest strike", "maximum strike" | Single highest/lowest strike trade details |
 | `TotalPremiumCard` | "total premium", "collected/paid total" | Total premium aggregated across trades |
-| `ExpiringOptionsTable` | "options expiring tomorrow/this week" | Options grouped by expiration date |
+| `ExpiringOptionsTable` | "options expiring tomorrow/this week" | Options grouped by expiration with pagination, parsed symbols, urgency indicators |
 | `LastOptionTradeCard` | "last/most recent call/put option" (single trade) | Most recent option trade details |
 
 ---

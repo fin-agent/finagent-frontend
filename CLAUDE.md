@@ -86,6 +86,22 @@ The `detectBulkOptionsQuery` function distinguishes between:
 
 Detection priority: Bulk options are checked FIRST before "last option" to prevent "last month" from triggering single-trade card.
 
+### Option Premium Math
+
+Options follow standard math where 1 contract = 100 shares:
+- **Total Premium** = `premium_per_share × contracts × 100`
+- **Shares Covered** = `contracts × 100`
+- **Avg Premium per Share** = `total_premium / contracts / 100`
+
+The `OptionTradePremium` field in the database is per-share price. The agent says "average premium per share" (not "per contract") to be precise.
+
+### ExpiringOptionsTable Features
+
+- **OCC Symbol Parsing**: `parseOptionSymbol()` extracts ticker from OCC symbols (e.g., `AAPL251121P00175000` → `AAPL`)
+- **Pagination**: 10 items per page with navigation controls
+- **Urgency Indicators**: "Tomorrow" expirations show urgent styling (red pulse)
+- **Days Until**: Each row shows countdown to expiration
+
 ## Environment Variables
 
 ```env
@@ -107,11 +123,19 @@ NEXT_PUBLIC_ELEVENLABS_AGENT_ID=
 
 ## Testing
 
-Use Chrome DevTools MCP to test UI features:
-- Navigate pages with `mcp__chrome-devtools__navigate_page`
-- Take snapshots with `mcp__chrome-devtools__take_snapshot`
-- Click elements with `mcp__chrome-devtools__click`
-- Fill forms with `mcp__chrome-devtools__fill`
-- Check console for errors with `mcp__chrome-devtools__list_console_messages`
+Use Playwright MCP to test UI features:
+- Navigate pages with `mcp__playwright__browser_navigate`
+- Take snapshots with `mcp__playwright__browser_snapshot`
+- Click elements with `mcp__playwright__browser_click`
+- Type in inputs with `mcp__playwright__browser_type`
+- Wait for responses with `mcp__playwright__browser_wait_for`
+
+When testing voice agent features:
+1. Navigate to localhost:3000
+2. Click "Ask anything" button to open chat
+3. Type query in textbox and submit
+4. Wait for ElevenLabs agent response
+5. Verify UI component renders correctly
+6. End call when done testing
 
 **IMPORTANT:** Dev server MUST always run on port 3000. Kill any process using port 3000 before starting (`lsof -ti:3000 | xargs kill -9`). ngrok is configured to forward port 3000 for ElevenLabs webhooks - webhooks will fail if using a different port.

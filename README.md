@@ -316,9 +316,20 @@ Option calculations follow standard options math where **1 contract = 100 shares
 
 ## Date Utilities & Demo Data Mapping
 
-The application uses **demo trade data** with future dates (2025) that are dynamically mapped to display as recent dates relative to today. This allows the demo to always show relevant "recent" trades.
+The application uses **demo trade data** with future dates (2025) that are dynamically mapped to display as recent dates relative to today. This allows the demo to always show relevant "recent" trades without needing to update the database.
+
+### Why Demo Dates?
+
+The demo database contains trade data with dates centered around `2025-11-20`. Without date mapping:
+- "Yesterday's trades" would return nothing (the actual date doesn't exist in demo data)
+- "Last week" would show ancient trades or nothing at all
+- Time-based queries would be useless for demos
+
+The date utility system solves this by creating a **bidirectional mapping** between real dates and demo dates.
 
 ### Date Offset System
+
+The core concept is a **date offset** - the number of days between the demo "today" (`2025-11-20`) and the actual current date.
 
 ```mermaid
 flowchart LR
@@ -327,42 +338,132 @@ flowchart LR
     end
 
     subgraph Offset["Date Offset Calculation"]
-        CALC["offset = DEMO_TODAY - TODAY<br/>~351 days"]
+        CALC["offset = DEMO_TODAY - TODAY<br/>e.g., ~351 days"]
     end
 
     subgraph Display["User Display"]
-        DISP["Dec 4, 2024<br/>(Today)"]
+        DISP["Dec 4, 2024<br/>(Actual Today)"]
     end
 
     DB --> CALC --> DISP
 ```
 
-### Key Functions (`src/lib/date-utils.ts`)
+**How it works:**
+1. `DEMO_TODAY` is set to `2025-11-20` (the "today" in the demo timeline)
+2. The offset is calculated: `offset = DEMO_TODAY - actualToday`
+3. **For queries**: Add offset to real dates → get DB dates
+4. **For display**: Subtract offset from DB dates → get display dates
+
+### Bidirectional Date Conversion
+
+```mermaid
+flowchart TB
+    subgraph UserQuery["User Query: 'trades yesterday'"]
+        REAL["Actual Yesterday<br/>Dec 3, 2024"]
+    end
+
+    subgraph Conversion["Date Conversion"]
+        ADD["+ 351 days offset"]
+        SUB["- 351 days offset"]
+    end
+
+    subgraph Database["Database Query"]
+        DEMO["Demo Date<br/>2025-11-19"]
+    end
+
+    subgraph Display["UI Display"]
+        DISP["Shows: 'Yesterday'<br/>Dec 3, 2024"]
+    end
+
+    REAL -->|realDateToDemoDate| ADD --> DEMO
+    DEMO -->|demoDateToRealDate| SUB --> DISP
+```
+
+### Core Functions (`src/lib/date-utils.ts`)
+
+| Function | Purpose | Example |
+|----------|---------|---------|
+| `getDateOffset()` | Calculate days between `DEMO_TODAY` and actual today | Returns `351` if actual today is Dec 4, 2024 |
+| `realDateToDemoDate(date)` | Convert real date → DB date (add offset) | Dec 3, 2024 → 2025-11-19 |
+| `demoDateToRealDate(dbDate)` | Convert DB date → real date (subtract offset) | 2025-11-19 → Dec 3, 2024 |
+| `formatDisplayDate(dbDate)` | Format DB date as relative string | 2025-11-19 → "Yesterday" |
+| `formatCalendarDate(dbDate)` | Format DB date as calendar string | 2025-11-19 → "Dec 3, 2024" |
+| `formatDateRange(start, end)` | Format DB date range for display | "Nov 27 - Dec 3" |
+| `getDayOfWeek(dbDate)` | Get day name from DB date | 2025-11-18 → "Monday" |
+| `getDemoToday()` | Get the `DEMO_TODAY` constant | "2025-11-20" |
+| `formatDateForDB(date)` | Format a Date object as YYYY-MM-DD | Date → "2025-11-20" |
+
+### Implementation Details
+
+```typescript
+// The anchor date in demo database representing "today"
+const DEMO_TODAY = '2025-11-20';
+
+// Calculate offset (positive when demo is in future)
+export function getDateOffset(): number {
+  const actualToday = new Date();
+  const [year, month, day] = DEMO_TODAY.split('-').map(Number);
+  const demoToday = new Date(year, month - 1, day);
+  const diffMs = demoToday.getTime() - actualToday.getTime();
+  return Math.round(diffMs / (1000 * 60 * 60 * 24));
+}
+
+// Convert real date → DB date (for queries)
+export function realDateToDemoDate(realDate: Date): Date {
+  const offset = getDateOffset();
+  const demoDate = new Date(realDate);
+  demoDate.setDate(demoDate.getDate() + offset); // ADD offset
+  return demoDate;
+}
+
+// Convert DB date → display date (for UI)
+export function demoDateToRealDate(demoDateStr: string): Date {
+  const offset = getDateOffset();
+  const [year, month, day] = demoDateStr.split('-').map(Number);
+  const demoDate = new Date(year, month - 1, day);
+  demoDate.setDate(demoDate.getDate() - offset); // SUBTRACT offset
+  return demoDate;
+}
+```
+
+### Natural Language Date Parsing (`src/lib/date-parser.ts`)
+
+The date parser converts natural language time expressions into database-ready date ranges.
+
+#### Supported Time Expressions
+
+| Category | Examples | Parsed Result |
+|----------|----------|---------------|
+| **Relative Days** | "today", "yesterday" | Single date range |
+| **Relative Ranges** | "last week", "this week", "last month", "this month" | Multi-day range |
+| **N Days** | "last 5 days", "past 10 days" | N-day range ending today |
+| **Trading Days** | "last 3 trading days", "past five trading days" | Approximated calendar range (×7/5) |
+| **Day Names** | "Monday", "Tuesday", "last Friday" | Most recent occurrence |
+| **Specific Dates** | "November 18th", "Nov 18", "December 3rd" | Exact calendar date |
+| **Spelled Numbers** | "last five days", "past twenty days" | Converts words to numbers |
+
+#### Key Functions
 
 | Function | Purpose |
 |----------|---------|
-| `getDateOffset()` | Calculate days between demo "today" (2025-11-20) and actual today |
-| `realDateToDemoDate(date)` | Convert real date → DB date (add offset for queries) |
-| `demoDateToRealDate(dbDate)` | Convert DB date → real date (subtract offset for display) |
-| `formatDisplayDate(dbDate)` | Format as relative date ("Yesterday", "2 days ago") |
-| `formatCalendarDate(dbDate)` | Format as calendar date ("Dec 4, 2024") |
-| `formatDateRange(start, end)` | Format date range ("Nov 27 - Dec 3") |
+| `parseTimeExpression(expr)` | Parse natural language → DateRange with DB-adjusted dates |
+| `extractTimePeriodFromQuery(query)` | Extract time portion from a full query ("trades for last week" → "last week") |
+| `isTimeBasedQuery(query)` | Check if query contains a time expression |
 
-### Time-Based Trade Queries
+#### DateRange Interface
 
-The application supports natural language time expressions for querying trades:
+```typescript
+interface DateRange {
+  startDate: string;   // YYYY-MM-DD (DB-adjusted)
+  endDate: string;     // YYYY-MM-DD (DB-adjusted)
+  description: string; // Human-readable ("last week")
+  tradingDays: number; // Calendar days in range
+}
+```
 
-#### Supported Time Expressions (`src/lib/date-parser.ts`)
+### Time-Based Query Flow
 
-| Category | Examples |
-|----------|----------|
-| **Relative Days** | "today", "yesterday" |
-| **Relative Ranges** | "last week", "this week", "last month", "this month" |
-| **N Days** | "last 5 days", "past 10 days", "last 3 trading days" |
-| **Day Names** | "Monday", "Tuesday", "last Friday" |
-| **Specific Dates** | "November 18th", "Nov 18", "December 3rd" |
-
-#### Time-Based Query Flow
+Complete flow from user query to displayed results:
 
 ```mermaid
 sequenceDiagram
@@ -370,18 +471,66 @@ sequenceDiagram
     participant Agent as ElevenLabs Agent
     participant API as /api/elevenlabs/time-trades
     participant Parser as date-parser.ts
+    participant Utils as date-utils.ts
     participant DB as Supabase
 
     User->>Agent: "Show trades for last week"
     Agent->>API: POST {time_period: "last week", symbol: "GOOGL"}
+
+    Note over API,Parser: Step 1: Parse time expression
     API->>Parser: parseTimeExpression("last week")
-    Parser-->>API: {startDate: "2025-11-13", endDate: "2025-11-19", description: "last week"}
-    API->>DB: Query trades WHERE Date BETWEEN startDate AND endDate
-    DB-->>API: trades[]
-    API->>API: Format dates with offset for display
-    API-->>Agent: {response: "You executed 5 trades last week", data: {...}}
-    Agent-->>User: Voice response with correct dates
+    Parser->>Utils: getDateOffset() → 351
+    Parser->>Parser: Calculate real dates (Dec 4-10)
+    Parser->>Parser: Add offset → demo dates
+    Parser-->>API: {startDate: "2025-11-13", endDate: "2025-11-19"}
+
+    Note over API,DB: Step 2: Query database
+    API->>DB: SELECT * WHERE Date BETWEEN '2025-11-13' AND '2025-11-19'
+    DB-->>API: trades[] (with demo dates)
+
+    Note over API,Utils: Step 3: Format for display
+    API->>Utils: formatDateRange("2025-11-13", "2025-11-19")
+    Utils-->>API: "Nov 27 - Dec 3"
+    API->>Utils: formatDisplayDate(trade.Date)
+    Utils-->>API: "3 days ago"
+
+    Note over API,User: Step 4: Return response
+    API-->>Agent: {response: "5 trades last week", displayRange: "Nov 27 - Dec 3"}
+    Agent-->>User: Voice: "You executed 5 trades last week"
 ```
+
+### Usage Examples
+
+#### Querying with Time Expressions
+```typescript
+// User asks: "Show my Apple trades from last week"
+const parsed = parseTimeExpression("last week");
+// Returns: { startDate: "2025-11-13", endDate: "2025-11-19", ... }
+
+// Query database with demo dates
+const trades = await supabase
+  .from('TradeData')
+  .select('*')
+  .gte('Date', parsed.dateRange.startDate)
+  .lte('Date', parsed.dateRange.endDate);
+```
+
+#### Displaying Dates to Users
+```typescript
+// Trade from database has: Date = "2025-11-18"
+const displayDate = formatDisplayDate("2025-11-18");
+// Returns: "2 days ago" (when actual today is Dec 6, 2024)
+
+const calendarDate = formatCalendarDate("2025-11-18");
+// Returns: "Dec 4, 2024"
+```
+
+### Important Notes
+
+1. **Timezone Handling**: All dates are parsed as local dates (not UTC) to avoid timezone-related off-by-one errors
+2. **Future Date Logic**: When parsing "November 18th", if that date is in the future, the parser assumes the user means last year
+3. **Trading Days**: "Last 5 trading days" approximates to ~7 calendar days (5 × 7/5) since the DB doesn't track market holidays
+4. **Offset Recalculation**: The offset is recalculated on each call to handle date changes during long sessions
 
 ---
 

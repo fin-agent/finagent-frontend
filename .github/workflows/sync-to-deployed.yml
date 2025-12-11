@@ -13,21 +13,12 @@ jobs:
       - name: Checkout source repo
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Fetch all history for proper sync
-
-      - name: Debug - Check if secret exists
-        run: |
-          if [ -z "${{ secrets.DEPLOY_PAT }}" ]; then
-            echo "DEPLOY_PAT is empty or not set"
-          else
-            echo "DEPLOY_PAT is set (length: ${#DEPLOY_PAT_VALUE})"
-          fi
-        env:
-          DEPLOY_PAT_VALUE: ${{ secrets.DEPLOY_PAT }}
+          fetch-depth: 0
 
       - name: Push to finagent-deployed
-        run: |
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git config --global user.name "github-actions[bot]"
-          git remote add target "https://x-access-token:${{ secrets.DEPLOY_PAT }}@github.com/saeedjabbar/finagent-deployed.git"
-          git push --force target main
+        uses: ad-m/github-push-action@master
+        with:
+          github_token: ${{ secrets.DEPLOY_PAT }}
+          repository: saeedjabbar/finagent-deployed
+          branch: main
+          force: true

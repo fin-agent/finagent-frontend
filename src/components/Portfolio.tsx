@@ -16,6 +16,7 @@ const Portfolio: React.FC = () => {
 
   useEffect(() => {
     fetchChartData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [period]);
 
   const fetchPortfolioData = async () => {

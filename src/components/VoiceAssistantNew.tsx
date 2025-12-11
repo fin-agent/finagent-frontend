@@ -64,6 +64,7 @@ const VoiceAssistantNew: React.FC = () => {
         conversation.endSession();
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Auto-scroll to bottom when conversation history changes

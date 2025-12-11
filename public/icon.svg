@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <!-- Glow filter for neon effect -->
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="8" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Stronger glow for accent elements -->
+    <filter id="strongGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="12" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Gradient for depth -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0f1014"/>
+      <stop offset="100%" style="stop-color:#0a0a0c"/>
+    </linearGradient>
+
+    <!-- Accent gradient -->
+    <linearGradient id="accentGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#00ff88"/>
+      <stop offset="100%" style="stop-color:#00d4ff"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background with rounded corners -->
+  <rect width="512" height="512" rx="96" fill="url(#bgGrad)"/>
+
+  <!-- Subtle grid pattern -->
+  <g opacity="0.1">
+    <line x1="128" y1="0" x2="128" y2="512" stroke="#00ff88" stroke-width="1"/>
+    <line x1="256" y1="0" x2="256" y2="512" stroke="#00ff88" stroke-width="1"/>
+    <line x1="384" y1="0" x2="384" y2="512" stroke="#00ff88" stroke-width="1"/>
+    <line x1="0" y1="128" x2="512" y2="128" stroke="#00ff88" stroke-width="1"/>
+    <line x1="0" y1="256" x2="512" y2="256" stroke="#00ff88" stroke-width="1"/>
+    <line x1="0" y1="384" x2="512" y2="384" stroke="#00ff88" stroke-width="1"/>
+  </g>
+
+  <!-- Terminal frame border -->
+  <rect x="64" y="64" width="384" height="384" rx="24" fill="none" stroke="#2a2d35" stroke-width="3"/>
+
+  <!-- Inner terminal screen -->
+  <rect x="80" y="80" width="352" height="352" rx="16" fill="#0a0a0c"/>
+
+  <!-- Trading chart line (stylized upward trend) -->
+  <polyline
+    points="120,340 180,300 220,320 280,220 340,180 392,140"
+    fill="none"
+    stroke="url(#accentGrad)"
+    stroke-width="8"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    filter="url(#strongGlow)"
+  />
+
+  <!-- Data points on the chart -->
+  <circle cx="120" cy="340" r="10" fill="#00ff88" filter="url(#glow)"/>
+  <circle cx="180" cy="300" r="8" fill="#00ff88" filter="url(#glow)"/>
+  <circle cx="220" cy="320" r="8" fill="#00ff88" filter="url(#glow)"/>
+  <circle cx="280" cy="220" r="10" fill="#00ff88" filter="url(#glow)"/>
+  <circle cx="340" cy="180" r="8" fill="#00ff88" filter="url(#glow)"/>
+  <circle cx="392" cy="140" r="12" fill="#00d4ff" filter="url(#strongGlow)"/>
+
+  <!-- Stylized "F" letterform overlay -->
+  <g filter="url(#glow)" opacity="0.15">
+    <path
+      d="M200,380 L200,160 L340,160 L340,190 L240,190 L240,250 L320,250 L320,280 L240,280 L240,380 Z"
+      fill="#00ff88"
+    />
+  </g>
+
+  <!-- Top status bar dots (terminal style) -->
+  <circle cx="104" cy="104" r="8" fill="#ff4444"/>
+  <circle cx="132" cy="104" r="8" fill="#ffc107"/>
+  <circle cx="160" cy="104" r="8" fill="#00ff88"/>
+
+  <!-- Corner accent marks -->
+  <path d="M64,128 L64,64 L128,64" fill="none" stroke="#00ff88" stroke-width="4" stroke-linecap="round" opacity="0.6"/>
+  <path d="M448,384 L448,448 L384,448" fill="none" stroke="#00ff88" stroke-width="4" stroke-linecap="round" opacity="0.6"/>
+</svg>

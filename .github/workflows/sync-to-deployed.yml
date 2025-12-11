@@ -26,10 +26,8 @@ jobs:
           DEPLOY_PAT_VALUE: ${{ secrets.DEPLOY_PAT }}
 
       - name: Push to finagent-deployed
-        env:
-          PAT: ${{ secrets.DEPLOY_PAT }}
         run: |
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git config --global user.name "github-actions[bot]"
-          git remote set-url origin https://x-access-token:${PAT}@github.com/saeedjabbar/finagent-deployed.git
+          git remote set-url origin "https://x-access-token:${{ secrets.DEPLOY_PAT }}@github.com/saeedjabbar/finagent-deployed.git"
           git push --force origin main

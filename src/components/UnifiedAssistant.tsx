@@ -762,8 +762,8 @@ function detectFeesQuery(text: string): { feeType: FeeType; symbol?: string; tim
     return { feeType: 'credit_interest', timePeriod };
   }
 
-  // Debit interest patterns
-  if (/debit\s+interest|interest\s+(?:paid|you\s+paid)|margin\s+interest/i.test(text)) {
+  // Debit interest patterns (includes "short interest" and "debit balance charges")
+  if (/debit\s+interest|interest\s+(?:paid|you\s+paid)|margin\s+interest|short\s+interest|debit\s+balance\s+charge/i.test(text)) {
     return { feeType: 'debit_interest', timePeriod };
   }
 

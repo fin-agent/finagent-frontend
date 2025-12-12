@@ -801,18 +801,26 @@ const UnifiedAssistant: React.FC = () => {
 
         // For assistant messages, check if we should render trade UI
         const symbol = extractSymbolOrCompany(message.message);
+        console.log('🔍 [Text Mode] Message:', message.message.substring(0, 150));
+        console.log('🔍 [Text Mode] Extracted symbol:', symbol);
 
         // Check for account balance queries FIRST (highest priority)
         const accountMatch = detectAccountBalanceQuery(message.message);
+        console.log('🔍 [Text Mode] Account balance match:', accountMatch);
         if (accountMatch) {
+          console.log('🔍 [Text Mode] Account balance query detected:', accountMatch.queryType);
           const data = await fetchTradeData('', 'account-balance', undefined, accountMatch.timePeriod, { accountQueryType: accountMatch.queryType });
+          console.log('🔍 [Text Mode] Account balance data:', data);
           if (data) tradeUI = data;
         }
         // Check for fees/commissions queries
         if (!tradeUI) {
           const feesMatch = detectFeesQuery(message.message);
+          console.log('🔍 [Text Mode] Fees match:', feesMatch);
           if (feesMatch) {
+            console.log('🔍 [Text Mode] Fees query detected:', feesMatch.feeType);
             const data = await fetchTradeData(feesMatch.symbol || '', 'fees', undefined, feesMatch.timePeriod, { feeType: feesMatch.feeType });
+            console.log('🔍 [Text Mode] Fees data:', data);
             if (data) tradeUI = data;
           }
         }

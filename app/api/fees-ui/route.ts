@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
+import { formatCalendarDate, realDateToDemoDate, formatDateForDB } from '@/src/lib/date-utils';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -38,37 +39,44 @@ export interface FeesUIData {
   }>;
 }
 
-function getDateRange(timePeriod: string): { fromDate: Date; toDate: Date } {
+function getDateRange(timePeriod: string): { fromDate: string; toDate: string } {
   const today = new Date();
+  today.setHours(0, 0, 0, 0);
   const lowerPeriod = timePeriod.toLowerCase();
+
+  // Convert real dates to demo dates for DB queries
+  const toDBDateStr = (date: Date): string => {
+    const demoDate = realDateToDemoDate(date);
+    return formatDateForDB(demoDate);
+  };
 
   if (lowerPeriod.includes('last month') || lowerPeriod.includes('past month')) {
     const fromDate = new Date(today.getFullYear(), today.getMonth() - 1, 1);
     const toDate = new Date(today.getFullYear(), today.getMonth(), 0);
-    return { fromDate, toDate };
+    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(toDate) };
   }
 
   if (lowerPeriod.includes('this month')) {
     const fromDate = new Date(today.getFullYear(), today.getMonth(), 1);
-    return { fromDate, toDate: today };
+    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today) };
   }
 
   if (lowerPeriod.includes('last week') || lowerPeriod.includes('past week')) {
     const fromDate = new Date(today);
     fromDate.setDate(today.getDate() - 7);
-    return { fromDate, toDate: today };
+    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today) };
   }
 
   if (lowerPeriod.includes('this week')) {
     const dayOfWeek = today.getDay();
     const fromDate = new Date(today);
     fromDate.setDate(today.getDate() - dayOfWeek);
-    return { fromDate, toDate: today };
+    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today) };
   }
 
   if (lowerPeriod.includes('this year') || lowerPeriod.includes('since the beginning of the year')) {
     const fromDate = new Date(today.getFullYear(), 0, 1);
-    return { fromDate, toDate: today };
+    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today) };
   }
 
   // Check for month names
@@ -79,14 +87,14 @@ function getDateRange(timePeriod: string): { fromDate: Date; toDate: Date } {
       const year = lowerPeriod.includes('last year') ? today.getFullYear() - 1 : today.getFullYear();
       const fromDate = new Date(year, i, 1);
       const toDate = new Date(year, i + 1, 0);
-      return { fromDate, toDate };
+      return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(toDate) };
     }
   }
 
   // Default to last 30 days
   const fromDate = new Date(today);
   fromDate.setDate(today.getDate() - 30);
-  return { fromDate, toDate: today };
+  return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today) };
 }
 
 export async function POST(req: NextRequest) {
@@ -104,8 +112,8 @@ export async function POST(req: NextRequest) {
         .from('TradeData')
         .select('Commission, Date, Symbol')
         .eq('AccountCode', ACCOUNT_CODE)
-        .gte('Date', fromDate.toISOString().split('T')[0])
-        .lte('Date', toDate.toISOString().split('T')[0])
+        .gte('Date', fromDate)
+        .lte('Date', toDate)
         .order('Date', { ascending: false });
 
       if (error || !data) {
@@ -120,7 +128,7 @@ export async function POST(req: NextRequest) {
         transactionCount: data.length,
         timePeriod,
         breakdown: data.slice(0, 10).map(t => ({
-          date: t.Date,
+          date: formatCalendarDate(t.Date),
           amount: Math.abs(t.Commission || 0),
           symbol: t.Symbol,
         })),
@@ -140,8 +148,8 @@ export async function POST(req: NextRequest) {
       .from('FeesAndInterest')
       .select('*')
       .eq('Type', dbFeeType)
-      .gte('Date', fromDate.toISOString().split('T')[0])
-      .lte('Date', toDate.toISOString().split('T')[0])
+      .gte('Date', fromDate)
+      .lte('Date', toDate)
       .order('Date', { ascending: false });
 
     if (feeType === 'locate_fee' && symbol) {
@@ -164,7 +172,7 @@ export async function POST(req: NextRequest) {
       timePeriod,
       symbol: symbol ? normalizeSymbol(symbol) : undefined,
       breakdown: data.slice(0, 10).map(f => ({
-        date: f.Date,
+        date: formatCalendarDate(f.Date),
         amount: Math.abs(f.Amount || 0),
         symbol: f.Symbol,
       })),

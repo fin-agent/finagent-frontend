@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
+import { formatCalendarDate, formatDisplayDate, realDateToDemoDate, formatDateForDB } from '@/src/lib/date-utils';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -35,8 +36,9 @@ export interface AccountBalanceUIData {
   };
 }
 
-function getDateRange(timePeriod?: string): { fromDate?: Date; toDate?: Date } {
+function getDateRange(timePeriod?: string): { fromDate?: string; toDate?: string } {
   const today = new Date();
+  today.setHours(0, 0, 0, 0);
 
   if (!timePeriod || timePeriod === 'latest') {
     return {};
@@ -44,26 +46,32 @@ function getDateRange(timePeriod?: string): { fromDate?: Date; toDate?: Date } {
 
   const lowerPeriod = timePeriod.toLowerCase();
 
+  // Convert real dates to demo dates for DB queries
+  const toDBDateStr = (date: Date): string => {
+    const demoDate = realDateToDemoDate(date);
+    return formatDateForDB(demoDate);
+  };
+
   if (lowerPeriod.includes('last month') || lowerPeriod.includes('past month')) {
     const fromDate = new Date(today.getFullYear(), today.getMonth() - 1, 1);
     const toDate = new Date(today.getFullYear(), today.getMonth(), 0);
-    return { fromDate, toDate };
+    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(toDate) };
   }
 
   if (lowerPeriod.includes('this month')) {
     const fromDate = new Date(today.getFullYear(), today.getMonth(), 1);
-    return { fromDate, toDate: today };
+    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today) };
   }
 
   if (lowerPeriod.includes('last week') || lowerPeriod.includes('past week')) {
     const fromDate = new Date(today);
     fromDate.setDate(today.getDate() - 7);
-    return { fromDate, toDate: today };
+    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today) };
   }
 
   if (lowerPeriod.includes('this year')) {
     const fromDate = new Date(today.getFullYear(), 0, 1);
-    return { fromDate, toDate: today };
+    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today) };
   }
 
   return {};
@@ -86,10 +94,10 @@ export async function POST(req: NextRequest) {
         .order('Date', { ascending: false });
 
       if (fromDate) {
-        query = query.gte('Date', fromDate.toISOString().split('T')[0]);
+        query = query.gte('Date', fromDate);
       }
       if (toDate) {
-        query = query.lte('Date', toDate.toISOString().split('T')[0]);
+        query = query.lte('Date', toDate);
       }
 
       const { data, error } = await query;
@@ -108,13 +116,13 @@ export async function POST(req: NextRequest) {
 
       return NextResponse.json({
         queryType,
-        date: data[0].Date,
+        date: formatDisplayDate(data[0].Date),
         balanceTrend: {
           average: avg,
           highest: max,
-          highestDate: maxDate,
+          highestDate: formatCalendarDate(maxDate),
           lowest: min,
-          lowestDate: minDate,
+          lowestDate: formatCalendarDate(minDate),
           period: timePeriod || 'available period',
         },
       });
@@ -135,7 +143,7 @@ export async function POST(req: NextRequest) {
 
     const result: AccountBalanceUIData = {
       queryType,
-      date: data.Date,
+      date: formatDisplayDate(data.Date),
       cashBalance: data.CashBalance,
       accountEquity: data['Account Equity'],
       dayTradingBP: data.DayTradingBP,

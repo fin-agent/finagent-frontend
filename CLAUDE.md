@@ -47,9 +47,9 @@ The full voice agent flow uses production webhooks. Test API logic locally with 
 
 ### Key Directories
 
-- `app/api/elevenlabs/` - Webhook endpoints called by ElevenLabs agent (tools, profitable-trades, trade-summary, detailed-trades, advanced-query)
-- `app/api/` - UI data endpoints (profitable-trades-ui, trade-stats, trades-ui, advanced-query-ui, conversations, messages)
-- `src/components/generative-ui/` - Dynamic UI cards (ProfitableTrades, TradeStats, TradesTable, TradeSummary, AdvancedOptionsTable, TradeQueryCard, etc.)
+- `app/api/elevenlabs/` - Webhook endpoints called by ElevenLabs agent (tools, profitable-trades, trade-summary, detailed-trades, advanced-query, account-balance, fees)
+- `app/api/` - UI data endpoints (profitable-trades-ui, trade-stats, trades-ui, advanced-query-ui, account-balance-ui, fees-ui, conversations, messages)
+- `src/components/generative-ui/` - Dynamic UI cards (ProfitableTrades, TradeStats, TradesTable, TradeSummary, AdvancedOptionsTable, TradeQueryCard, AccountSummary, FeesSummary, etc.)
 - `src/components/UnifiedAssistant.tsx` - Main chat/voice interface
 - `src/components/QueryBuilder.tsx` - Manual advanced query builder UI
 
@@ -106,6 +106,8 @@ UI components are triggered by pattern matching on agent messages:
 - "options expiring tomorrow/this week" → ExpiringOptionsTable
 - "highest strike" → HighestStrikeCard
 - "total premium" → TotalPremiumCard
+- "cash balance" / "buying power" / "account equity" / "margin" → AccountSummary card
+- "commission" / "fees" / "interest" → FeesSummary card
 
 ### Bulk vs Single Trade Detection
 
@@ -131,6 +133,38 @@ The `OptionTradePremium` field in the database is per-share price. The agent say
 - **Urgency Indicators**: "Tomorrow" expirations show urgent styling (red pulse)
 - **Days Until**: Each row shows countdown to expiration
 
+### Demo Date Utilities (`src/lib/date-utils.ts`)
+
+The database contains demo data with fixed dates. Date utilities convert between real dates and demo dates:
+
+- **DEMO_TODAY**: `'2025-11-20'` - The "today" date in the demo database
+- **realDateToDemoDate(date)**: Converts real date to equivalent demo date for DB queries
+- **demoDateToRealDate(demoDate)**: Converts demo date to real date for display
+- **formatDisplayDate(demoDateStr)**: Returns relative dates ("Today", "Yesterday", "3 days ago") or formatted date
+- **formatCalendarDate(demoDateStr)**: Returns "Dec 11, 2025" format
+- **formatDateForDB(date)**: Returns "YYYY-MM-DD" format for Supabase queries
+
+**Usage in UI endpoints**: Import from `@/src/lib/date-utils` (note: `@` alias maps to project root, not `src/`)
+
+### Account Balance & Fees Queries
+
+**Account Query Types** (`detectAccountBalanceQuery`):
+- `cash_balance` - Cash available in account
+- `buying_power` - Day trading buying power
+- `account_summary` - Full account overview (default)
+- `nlv` - Net liquidation value
+- `overnight_margin` - Overnight margin requirement
+- `market_value` - Total market value of positions
+- `debit_balances` / `credit_balances` - Account balances
+
+**Fee Types** (`detectFeesQuery`):
+- `commission` - Trading commissions (from TradeData table)
+- `credit_interest` - Interest earned on credit balance
+- `debit_interest` - Interest charged on margin
+- `locate_fee` - Short locate fees
+
+Both support time period parameters: "today", "this week", "last month", "this year", specific months, etc.
+
 ## Environment Variables
 
 ```env
@@ -149,6 +183,8 @@ NEXT_PUBLIC_ELEVENLABS_AGENT_ID=
 | `get_profitable_trades` | FIFO-matched profitable trades |
 | `get_time_based_trades` | Trades for specific time periods |
 | `advanced_query` | Flexible option queries (short/long calls/puts, by date/expiration/strike) |
+| `get_account_balance` | Account balance, equity, buying power, margin info |
+| `get_fees` | Commissions, interest charges, and locate fees |
 
 ## Testing
 

@@ -18,6 +18,8 @@ import { TotalPremiumCard } from './generative-ui/TotalPremiumCard';
 import { ExpiringOptionsTable } from './generative-ui/ExpiringOptionsTable';
 import { LastOptionTradeCard } from './generative-ui/LastOptionTradeCard';
 import { TradeQueryCard } from './generative-ui/TradeQueryCard';
+import { AccountSummary, type AccountQueryType } from './generative-ui/AccountSummary';
+import { FeesSummary, type FeeType } from './generative-ui/FeesSummary';
 
 type InputMode = 'voice' | 'text';
 type View = 'chat' | 'history';
@@ -30,7 +32,7 @@ interface Conversation {
 }
 
 interface TradeUIData {
-  type: 'summary' | 'detailed' | 'stats' | 'profitable' | 'time-based' | 'option-stats' | 'average-price' | 'advanced-options' | 'highest-strike' | 'total-premium' | 'expiring-options' | 'last-option' | 'query-builder-result';
+  type: 'summary' | 'detailed' | 'stats' | 'profitable' | 'time-based' | 'option-stats' | 'average-price' | 'advanced-options' | 'highest-strike' | 'total-premium' | 'expiring-options' | 'last-option' | 'query-builder-result' | 'account-balance' | 'fees';
   symbol: string;
   tradeType?: 'buy' | 'sell' | 'all';
   timePeriod?: string;
@@ -38,6 +40,8 @@ interface TradeUIData {
   expiration?: string;
   data: unknown;
   optionData?: unknown; // For combined stock + option stats
+  accountQueryType?: AccountQueryType; // For account balance queries
+  feeType?: FeeType; // For fees queries
 }
 
 interface TranscriptMessage {
@@ -657,6 +661,109 @@ function detectExpiringOptionsQuery(text: string): { expiration: string; tradeTy
   return { expiration, tradeType: undefined };
 }
 
+// Detect account balance query results
+function detectAccountBalanceQuery(text: string): { queryType: AccountQueryType; timePeriod?: string } | null {
+  // Skip messages that are just "checking" without actual results
+  const isJustChecking = /I'll check|let me check|checking your|retrieving|looking up/i.test(text);
+  if (isJustChecking && !/balance|equity|buying power|margin/i.test(text)) return null;
+
+  // Must have actual balance data (currency amounts)
+  const hasBalanceData = /\$[\d,]+\.?\d*/i.test(text);
+  if (!hasBalanceData) return null;
+
+  // Extract time period if present
+  let timePeriod: string | undefined;
+  const periodMatch = text.match(/(?:for|during|in)\s+(?:the\s+)?(?:last|past|this)\s+(?:month|week|year)/i);
+  if (periodMatch) timePeriod = periodMatch[0].toLowerCase();
+
+  // Detect query type based on patterns
+  // Cash balance patterns
+  if (/cash\s+balance|available\s+(?:cash|funds)|can\s+(?:you\s+)?withdraw/i.test(text)) {
+    return { queryType: 'cash_balance', timePeriod };
+  }
+
+  // Buying power patterns
+  if (/buying\s+power|day\s+trading\s+(?:bp|buying\s+power)/i.test(text)) {
+    return { queryType: 'buying_power', timePeriod };
+  }
+
+  // NLV patterns
+  if (/\bNLV\b|net\s+liquidation|account\s+equity(?!\s+is)/i.test(text)) {
+    return { queryType: 'nlv', timePeriod };
+  }
+
+  // Margin patterns
+  if (/overnight\s+margin|house\s+requirement|margin\s+(?:status|requirement)|fed(?:eral)?\s+requirement/i.test(text)) {
+    return { queryType: 'overnight_margin', timePeriod };
+  }
+
+  // Market value patterns
+  if (/market\s+value.*position|position.*market\s+value|stock\s+(?:long|short)|options?\s+(?:long|short)/i.test(text)) {
+    return { queryType: 'market_value', timePeriod };
+  }
+
+  // Debit balance patterns
+  if (/debit\s+balance/i.test(text)) {
+    return { queryType: 'debit_balances', timePeriod };
+  }
+
+  // Credit balance patterns
+  if (/credit\s+balance/i.test(text)) {
+    return { queryType: 'credit_balances', timePeriod };
+  }
+
+  // Account summary patterns
+  if (/account\s+summary|your\s+account\s+as\s+of/i.test(text)) {
+    return { queryType: 'account_summary', timePeriod };
+  }
+
+  return null;
+}
+
+// Detect fees and commissions query results
+function detectFeesQuery(text: string): { feeType: FeeType; symbol?: string; timePeriod?: string } | null {
+  // Skip messages that are just "checking" without actual results
+  const isJustChecking = /I'll check|let me check|checking your|retrieving|looking up/i.test(text);
+  if (isJustChecking && !/commission|interest|locate\s+fee/i.test(text)) return null;
+
+  // Must have actual fee data (currency amounts)
+  const hasAmount = /\$[\d,]+\.?\d*/i.test(text);
+  if (!hasAmount) return null;
+
+  // Extract time period
+  let timePeriod: string | undefined;
+  const periodMatch = text.match(/(?:for|during|in)\s+(?:the\s+)?(?:month\s+of\s+)?(?:january|february|march|april|may|june|july|august|september|october|november|december|last|past|this)\s*(?:month|week|year)?/i);
+  if (periodMatch) timePeriod = periodMatch[0].toLowerCase();
+
+  // Extract symbol for locate fees
+  let symbol: string | undefined;
+  const symbolMatch = text.match(/(?:for\s+(?:stock\s+)?|borrowing\s+)([A-Z]{2,5})\b/i);
+  if (symbolMatch) symbol = symbolMatch[1].toUpperCase();
+
+  // Detect fee type
+  // Commission patterns
+  if (/commission(?:s)?(?:\s+you\s+paid|\s+paid|\s+total)/i.test(text)) {
+    return { feeType: 'commission', timePeriod };
+  }
+
+  // Credit interest patterns
+  if (/credit\s+interest|interest\s+(?:earned|credit)/i.test(text)) {
+    return { feeType: 'credit_interest', timePeriod };
+  }
+
+  // Debit interest patterns
+  if (/debit\s+interest|interest\s+(?:paid|you\s+paid)|margin\s+interest/i.test(text)) {
+    return { feeType: 'debit_interest', timePeriod };
+  }
+
+  // Locate fee patterns
+  if (/locate\s+fee|borrow(?:ing)?\s+(?:stock|fee)|stock\s+borrow/i.test(text)) {
+    return { feeType: 'locate_fee', symbol, timePeriod };
+  }
+
+  return null;
+}
+
 const UnifiedAssistant: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [inputMode, setInputMode] = useState<InputMode>('text');
@@ -695,12 +802,28 @@ const UnifiedAssistant: React.FC = () => {
         // For assistant messages, check if we should render trade UI
         const symbol = extractSymbolOrCompany(message.message);
 
-        // Check for expiring options FIRST (highest priority for "expiring tomorrow" queries)
-        // Must check before bulk options since expiring responses also contain "across N trades"
-        const expiringMatch = detectExpiringOptionsQuery(message.message);
-        if (expiringMatch) {
-          const data = await fetchTradeData(symbol || '', 'expiring-options', expiringMatch.tradeType, undefined, { expiration: expiringMatch.expiration });
+        // Check for account balance queries FIRST (highest priority)
+        const accountMatch = detectAccountBalanceQuery(message.message);
+        if (accountMatch) {
+          const data = await fetchTradeData('', 'account-balance', undefined, accountMatch.timePeriod, { accountQueryType: accountMatch.queryType });
           if (data) tradeUI = data;
+        }
+        // Check for fees/commissions queries
+        if (!tradeUI) {
+          const feesMatch = detectFeesQuery(message.message);
+          if (feesMatch) {
+            const data = await fetchTradeData(feesMatch.symbol || '', 'fees', undefined, feesMatch.timePeriod, { feeType: feesMatch.feeType });
+            if (data) tradeUI = data;
+          }
+        }
+        // Check for expiring options (high priority for "expiring tomorrow" queries)
+        // Must check before bulk options since expiring responses also contain "across N trades"
+        if (!tradeUI) {
+          const expiringMatch = detectExpiringOptionsQuery(message.message);
+          if (expiringMatch) {
+            const data = await fetchTradeData(symbol || '', 'expiring-options', expiringMatch.tradeType, undefined, { expiration: expiringMatch.expiration });
+            if (data) tradeUI = data;
+          }
         }
         // Check for ALL TRADES (both stocks AND options) - must come BEFORE bulk options
         // This prevents "15 stock trades and 11 option trades" from showing only options
@@ -817,16 +940,36 @@ const UnifiedAssistant: React.FC = () => {
   // Fetch trade data for UI rendering
   const fetchTradeData = useCallback(async (
     symbol: string,
-    type: 'summary' | 'detailed' | 'stats' | 'profitable' | 'time-based' | 'option-stats' | 'average-price' | 'advanced-options' | 'highest-strike' | 'total-premium' | 'expiring-options' | 'last-option',
+    type: 'summary' | 'detailed' | 'stats' | 'profitable' | 'time-based' | 'option-stats' | 'average-price' | 'advanced-options' | 'highest-strike' | 'total-premium' | 'expiring-options' | 'last-option' | 'account-balance' | 'fees',
     tradeType?: 'buy' | 'sell' | 'all',
     timePeriod?: string,
-    extraParams?: { callPut?: 'call' | 'put'; expiration?: string; aggregation?: string }
+    extraParams?: { callPut?: 'call' | 'put'; expiration?: string; aggregation?: string; accountQueryType?: AccountQueryType; feeType?: FeeType }
   ): Promise<TradeUIData | null> => {
     try {
       let endpoint: string;
       let body: Record<string, unknown> = { symbol };
 
-      if (type === 'average-price') {
+      if (type === 'account-balance') {
+        endpoint = '/api/account-balance-ui';
+        body = { queryType: extraParams?.accountQueryType, timePeriod };
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        return { type, symbol: '', accountQueryType: extraParams?.accountQueryType, data };
+      } else if (type === 'fees') {
+        endpoint = '/api/fees-ui';
+        body = { feeType: extraParams?.feeType, timePeriod, symbol: symbol || undefined };
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        return { type, symbol, feeType: extraParams?.feeType, timePeriod, data };
+      } else if (type === 'average-price') {
         endpoint = '/api/average-price';
         body = { symbol, tradeType: tradeType || 'all', timePeriod };
         const res = await fetch(endpoint, {
@@ -960,13 +1103,31 @@ const UnifiedAssistant: React.FC = () => {
           console.log('🔍 Message:', message.message.substring(0, 100));
           console.log('🔍 Extracted symbol:', symbol);
 
-          // Check for expiring options FIRST (highest priority for "expiring tomorrow" queries)
-          // Must check before bulk options since expiring responses also contain "across N trades"
-          const expiringMatch = detectExpiringOptionsQuery(message.message);
-          if (expiringMatch) {
-            console.log('🔍 Expiring options detected:', expiringMatch.expiration);
-            const data = await fetchTradeData(symbol || '', 'expiring-options', expiringMatch.tradeType, undefined, { expiration: expiringMatch.expiration });
+          // Check for account balance queries FIRST (highest priority)
+          const accountMatch = detectAccountBalanceQuery(message.message);
+          if (accountMatch) {
+            console.log('🔍 Account balance query detected:', accountMatch.queryType);
+            const data = await fetchTradeData('', 'account-balance', undefined, accountMatch.timePeriod, { accountQueryType: accountMatch.queryType });
             if (data) tradeUI = data;
+          }
+          // Check for fees/commissions queries
+          if (!tradeUI) {
+            const feesMatch = detectFeesQuery(message.message);
+            if (feesMatch) {
+              console.log('🔍 Fees query detected:', feesMatch.feeType);
+              const data = await fetchTradeData(feesMatch.symbol || '', 'fees', undefined, feesMatch.timePeriod, { feeType: feesMatch.feeType });
+              if (data) tradeUI = data;
+            }
+          }
+          // Check for expiring options (high priority for "expiring tomorrow" queries)
+          // Must check before bulk options since expiring responses also contain "across N trades"
+          if (!tradeUI) {
+            const expiringMatch = detectExpiringOptionsQuery(message.message);
+            if (expiringMatch) {
+              console.log('🔍 Expiring options detected:', expiringMatch.expiration);
+              const data = await fetchTradeData(symbol || '', 'expiring-options', expiringMatch.tradeType, undefined, { expiration: expiringMatch.expiration });
+              if (data) tradeUI = data;
+            }
           }
           // Check for ALL TRADES (both stocks AND options) - must come BEFORE bulk options
           // This prevents "15 stock trades and 11 option trades" from showing only options
@@ -1153,13 +1314,33 @@ const UnifiedAssistant: React.FC = () => {
             if (msg.role === 'assistant') {
               const symbol = extractSymbolOrCompany(msg.content);
 
-              // Check for expiring options FIRST (highest priority for "expiring tomorrow" queries)
-              // Must check before bulk options since expiring responses also contain "across N trades"
-              const expiringMatch = detectExpiringOptionsQuery(msg.content);
-              if (expiringMatch) {
-                const tradeData = await fetchTradeData(symbol || '', 'expiring-options', expiringMatch.tradeType, undefined, { expiration: expiringMatch.expiration });
+              // Check for account balance queries FIRST (highest priority)
+              const accountMatch = detectAccountBalanceQuery(msg.content);
+              if (accountMatch) {
+                const tradeData = await fetchTradeData('', 'account-balance', undefined, accountMatch.timePeriod, { accountQueryType: accountMatch.queryType });
                 if (tradeData) {
                   baseMessage.tradeUI = tradeData;
+                }
+              }
+              // Check for fees/commissions queries
+              if (!baseMessage.tradeUI) {
+                const feesMatch = detectFeesQuery(msg.content);
+                if (feesMatch) {
+                  const tradeData = await fetchTradeData(feesMatch.symbol || '', 'fees', undefined, feesMatch.timePeriod, { feeType: feesMatch.feeType });
+                  if (tradeData) {
+                    baseMessage.tradeUI = tradeData;
+                  }
+                }
+              }
+              // Check for expiring options (high priority for "expiring tomorrow" queries)
+              // Must check before bulk options since expiring responses also contain "across N trades"
+              if (!baseMessage.tradeUI) {
+                const expiringMatch = detectExpiringOptionsQuery(msg.content);
+                if (expiringMatch) {
+                  const tradeData = await fetchTradeData(symbol || '', 'expiring-options', expiringMatch.tradeType, undefined, { expiration: expiringMatch.expiration });
+                  if (tradeData) {
+                    baseMessage.tradeUI = tradeData;
+                  }
                 }
               }
               // Check for ALL TRADES (both stocks AND options) - must come BEFORE bulk options
@@ -2214,6 +2395,91 @@ const UnifiedAssistant: React.FC = () => {
           )}
         </div>
       );
+    }
+
+    if (type === 'account-balance') {
+      console.log('🎨 Rendering account balance card with data:', data);
+      const accountData = data as {
+        queryType: AccountQueryType;
+        date: string;
+        cashBalance?: number;
+        accountEquity?: number;
+        dayTradingBP?: number;
+        stockLMV?: number;
+        stockSMV?: number;
+        optionsLMV?: number;
+        optionsSMV?: number;
+        creditBalance?: number;
+        debitBalance?: number;
+        houseRequirement?: number;
+        houseExcessDeficit?: number;
+        fedRequirement?: number;
+        fedExcessDeficit?: number;
+        balanceTrend?: {
+          average: number;
+          highest: number;
+          highestDate: string;
+          lowest: number;
+          lowestDate: string;
+          period: string;
+        };
+      };
+
+      if (accountData.date) {
+        return (
+          <div style={{ marginTop: '12px' }}>
+            <AccountSummary
+              queryType={tradeUI.accountQueryType || accountData.queryType || 'account_summary'}
+              date={accountData.date}
+              cashBalance={accountData.cashBalance}
+              accountEquity={accountData.accountEquity}
+              dayTradingBP={accountData.dayTradingBP}
+              stockLMV={accountData.stockLMV}
+              stockSMV={accountData.stockSMV}
+              optionsLMV={accountData.optionsLMV}
+              optionsSMV={accountData.optionsSMV}
+              creditBalance={accountData.creditBalance}
+              debitBalance={accountData.debitBalance}
+              houseRequirement={accountData.houseRequirement}
+              houseExcessDeficit={accountData.houseExcessDeficit}
+              fedRequirement={accountData.fedRequirement}
+              fedExcessDeficit={accountData.fedExcessDeficit}
+              balanceTrend={accountData.balanceTrend}
+            />
+          </div>
+        );
+      }
+    }
+
+    if (type === 'fees') {
+      console.log('🎨 Rendering fees summary card with data:', data);
+      const feesData = data as {
+        feeType: FeeType;
+        totalAmount: number;
+        transactionCount: number;
+        timePeriod: string;
+        symbol?: string;
+        breakdown?: Array<{
+          date: string;
+          amount: number;
+          symbol?: string;
+        }>;
+      };
+
+      if (feesData.feeType && feesData.totalAmount !== undefined) {
+        return (
+          <div style={{ marginTop: '12px' }}>
+            <FeesSummary
+              feeType={tradeUI.feeType || feesData.feeType}
+              totalAmount={feesData.totalAmount}
+              transactionCount={feesData.transactionCount}
+              timePeriod={feesData.timePeriod}
+              symbol={feesData.symbol}
+              breakdown={feesData.breakdown}
+            />
+          </div>
+        );
+      }
     }
 
     return null;

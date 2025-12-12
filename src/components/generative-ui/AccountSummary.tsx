@@ -73,13 +73,6 @@ const formatCurrency = (value: number | undefined, compact = false) => {
   }).format(value);
 };
 
-const formatNumber = (value: number | undefined) => {
-  if (value === undefined || value === null) return '—';
-  return new Intl.NumberFormat('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(value);
-};
 
 // Card container style
 const cardStyle: React.CSSProperties = {

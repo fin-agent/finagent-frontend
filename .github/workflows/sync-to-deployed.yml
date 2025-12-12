@@ -16,11 +16,17 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Push to finagent-deployed
+      - name: Remove workflow folder and push to finagent-deployed
         env:
           DEPLOY_TOKEN: ${{ secrets.DEPLOY_PAT }}
         run: |
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git config user.name "github-actions[bot]"
+
+          # Remove .github folder so workflow doesn't run in destination repo
+          rm -rf .github
+          git add -A
+          git commit -m "Remove .github folder for deployment" --allow-empty
+
           git remote add target "https://x-access-token:${DEPLOY_TOKEN}@github.com/saeedjabbar/finagent-deployed.git"
           git push --force target main

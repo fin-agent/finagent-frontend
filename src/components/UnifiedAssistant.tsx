@@ -677,32 +677,33 @@ function detectAccountBalanceQuery(text: string): { queryType: AccountQueryType;
   if (periodMatch) timePeriod = periodMatch[0].toLowerCase();
 
   // Detect query type based on patterns
-  // Cash balance patterns
-  if (/cash\s+balance|available\s+(?:cash|funds)|can\s+(?:you\s+)?withdraw/i.test(text)) {
-    return { queryType: 'cash_balance', timePeriod };
+  // IMPORTANT: Check account_summary FIRST since it contains multiple fields (cash, equity, buying power, etc.)
+  // If we detect "account summary" or multiple balance fields mentioned together, it's a full summary
+  const hasAccountSummary = /account\s+summary/i.test(text);
+  const hasMultipleFields = (
+    /cash\s+balance/i.test(text) &&
+    /account\s+equity/i.test(text) &&
+    /buying\s+power/i.test(text)
+  );
+  if (hasAccountSummary || hasMultipleFields) {
+    return { queryType: 'account_summary', timePeriod };
   }
 
-  // Buying power patterns
-  if (/buying\s+power|day\s+trading\s+(?:bp|buying\s+power)/i.test(text)) {
-    return { queryType: 'buying_power', timePeriod };
-  }
-
-  // NLV patterns
-  if (/\bNLV\b|net\s+liquidation|account\s+equity(?!\s+is)/i.test(text)) {
-    return { queryType: 'nlv', timePeriod };
-  }
-
-  // Margin patterns
+  // Margin patterns (check before market value since margin responses may mention stock values)
   if (/overnight\s+margin|house\s+requirement|margin\s+(?:status|requirement)|fed(?:eral)?\s+requirement/i.test(text)) {
     return { queryType: 'overnight_margin', timePeriod };
   }
 
-  // Market value patterns
-  if (/market\s+value.*position|position.*market\s+value|stock\s+(?:long|short)|options?\s+(?:long|short)/i.test(text)) {
+  // Market value patterns (check before cash/buying power since it mentions stock/options long/short)
+  if (/market\s+value.*position|position.*market\s+value/i.test(text)) {
+    return { queryType: 'market_value', timePeriod };
+  }
+  // Also detect when response lists stock AND option long/short values together
+  if (/stock\s+long.*stock\s+short|options?\s+long.*options?\s+short/i.test(text)) {
     return { queryType: 'market_value', timePeriod };
   }
 
-  // Debit balance patterns
+  // Debit balance patterns (check before cash since "debit balance" is more specific)
   if (/debit\s+balance/i.test(text)) {
     return { queryType: 'debit_balances', timePeriod };
   }
@@ -712,9 +713,19 @@ function detectAccountBalanceQuery(text: string): { queryType: AccountQueryType;
     return { queryType: 'credit_balances', timePeriod };
   }
 
-  // Account summary patterns
-  if (/account\s+summary|your\s+account\s+as\s+of/i.test(text)) {
-    return { queryType: 'account_summary', timePeriod };
+  // Buying power patterns
+  if (/buying\s+power|day\s+trading\s+(?:bp|buying\s+power)/i.test(text)) {
+    return { queryType: 'buying_power', timePeriod };
+  }
+
+  // NLV patterns
+  if (/\bNLV\b|net\s+liquidation/i.test(text)) {
+    return { queryType: 'nlv', timePeriod };
+  }
+
+  // Cash balance patterns (checked last among specific queries)
+  if (/cash\s+balance|available\s+(?:cash|funds)|can\s+(?:you\s+)?withdraw/i.test(text)) {
+    return { queryType: 'cash_balance', timePeriod };
   }
 
   return null;

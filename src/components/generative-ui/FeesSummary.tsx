@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Receipt, CreditCard, Percent, MapPin, TrendingDown, Calendar } from 'lucide-react';
+import { formatCalendarDate } from '@/src/lib/date-utils';
 
 export type FeeType = 'commission' | 'credit_interest' | 'debit_interest' | 'locate_fee';
 
@@ -18,6 +18,25 @@ export interface FeesSummaryProps {
   }>;
 }
 
+// Colors for the premium theme
+const colors = {
+  bgCard: '#0a0a0f',
+  bgCardVia: '#12121a',
+  bgMetric: '#0d0d14',
+  bgMetricHover: '#0f0f18',
+  border: '#2a2a35',
+  borderLight: '#1f1f2a',
+  borderHeader: '#1a1a25',
+  textMuted: '#5a5a6e',
+  textLabel: '#6b6b7e',
+  textTitle: '#8b8b9e',
+  gold: '#f0c674',
+  green: '#50fa7b',
+  red: '#ff5555',
+  purple: '#bd93f9',
+  white: '#ffffff',
+};
+
 const formatCurrency = (value: number) => {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
@@ -26,127 +45,286 @@ const formatCurrency = (value: number) => {
   }).format(value);
 };
 
-const formatDate = (dateStr: string) => {
-  const date = new Date(dateStr);
-  return date.toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-  });
+// Fee type configuration
+const feeConfig: Record<FeeType, {
+  title: string;
+  description: string;
+  icon: string;
+  accentColor: string;
+  gradientFrom: string;
+  isCredit: boolean;
+}> = {
+  commission: {
+    title: 'Trading Commissions',
+    description: 'Total fees paid on executed trades',
+    icon: '📊',
+    accentColor: colors.gold,
+    gradientFrom: '#1a1510',
+    isCredit: false,
+  },
+  credit_interest: {
+    title: 'Credit Interest',
+    description: 'Interest earned on credit balance',
+    icon: '💰',
+    accentColor: colors.green,
+    gradientFrom: '#0f1a0f',
+    isCredit: true,
+  },
+  debit_interest: {
+    title: 'Debit Interest',
+    description: 'Interest paid on margin balance',
+    icon: '📉',
+    accentColor: colors.red,
+    gradientFrom: '#1a0f0f',
+    isCredit: false,
+  },
+  locate_fee: {
+    title: 'Locate Fees',
+    description: 'Fees for borrowing shares to short',
+    icon: '🔍',
+    accentColor: colors.purple,
+    gradientFrom: '#150f1a',
+    isCredit: false,
+  },
 };
 
-const getTitle = (feeType: FeeType, symbol?: string): string => {
-  switch (feeType) {
-    case 'commission': return 'Trading Commissions';
-    case 'credit_interest': return 'Credit Interest Earned';
-    case 'debit_interest': return 'Debit Interest Paid';
-    case 'locate_fee': return symbol ? `Locate Fees for ${symbol}` : 'Locate Fees';
-    default: return 'Fees & Interest';
-  }
+// Inline styles
+const cardStyle: React.CSSProperties = {
+  position: 'relative',
+  overflow: 'hidden',
+  borderRadius: '16px',
+  background: `linear-gradient(to bottom right, ${colors.bgCard}, ${colors.bgCardVia}, ${colors.bgCard})`,
+  border: `1px solid ${colors.border}`,
+  boxShadow: '0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.03)',
 };
 
-const getIcon = (feeType: FeeType) => {
-  switch (feeType) {
-    case 'commission': return Receipt;
-    case 'credit_interest': return Percent;
-    case 'debit_interest': return TrendingDown;
-    case 'locate_fee': return MapPin;
-    default: return CreditCard;
-  }
+const headerStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  padding: '16px 20px',
+  borderBottom: `1px solid ${colors.borderHeader}`,
+  background: `linear-gradient(to right, transparent, ${colors.bgCardVia}, transparent)`,
 };
 
-const getAccentColor = (feeType: FeeType): string => {
-  switch (feeType) {
-    case 'commission': return 'text-orange-400';
-    case 'credit_interest': return 'text-emerald-400';
-    case 'debit_interest': return 'text-red-400';
-    case 'locate_fee': return 'text-purple-400';
-    default: return 'text-slate-400';
-  }
+const titleStyle: React.CSSProperties = {
+  fontSize: '14px',
+  fontWeight: 500,
+  letterSpacing: '0.2em',
+  textTransform: 'uppercase',
+  color: colors.textTitle,
+  margin: 0,
 };
 
-const getBgAccent = (feeType: FeeType): string => {
-  switch (feeType) {
-    case 'commission': return 'bg-orange-500/10';
-    case 'credit_interest': return 'bg-emerald-500/10';
-    case 'debit_interest': return 'bg-red-500/10';
-    case 'locate_fee': return 'bg-purple-500/10';
-    default: return 'bg-slate-500/10';
-  }
+const periodBadgeStyle: React.CSSProperties = {
+  fontSize: '12px',
+  fontFamily: 'monospace',
+  letterSpacing: '0.05em',
+  color: colors.textMuted,
+  padding: '4px 12px',
+  borderRadius: '20px',
+  backgroundColor: colors.borderHeader,
+  border: `1px solid ${colors.border}`,
 };
 
-const getDescription = (feeType: FeeType): string => {
-  switch (feeType) {
-    case 'commission': return 'Total commissions paid on trades';
-    case 'credit_interest': return 'Interest earned on credit balance';
-    case 'debit_interest': return 'Interest paid on margin/debit';
-    case 'locate_fee': return 'Fees for borrowing stock to short';
-    default: return '';
-  }
+const labelStyle: React.CSSProperties = {
+  fontSize: '10px',
+  fontWeight: 600,
+  letterSpacing: '0.15em',
+  textTransform: 'uppercase',
+  color: colors.textLabel,
 };
+
+const metricBoxStyle: React.CSSProperties = {
+  position: 'relative',
+  padding: '16px',
+  borderRadius: '12px',
+  backgroundColor: colors.bgMetric,
+  border: `1px solid ${colors.borderLight}`,
+  transition: 'all 0.3s ease',
+};
+
+const metricValueStyle: React.CSSProperties = {
+  fontFamily: 'monospace',
+  fontSize: '20px',
+  fontWeight: 600,
+  color: colors.white,
+};
+
+const heroValueStyle = (color: string): React.CSSProperties => ({
+  fontFamily: 'monospace',
+  fontSize: '36px',
+  fontWeight: 700,
+  letterSpacing: '-0.02em',
+  background: `linear-gradient(90deg, ${color}, ${color}cc, ${color})`,
+  WebkitBackgroundClip: 'text',
+  WebkitTextFillColor: 'transparent',
+  margin: 0,
+});
+
+// Decorative background pattern
+const BackgroundPattern = ({ accentColor }: { accentColor: string }) => (
+  <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none' }}>
+    <div
+      style={{
+        position: 'absolute',
+        inset: 0,
+        opacity: 0.02,
+        backgroundImage: `linear-gradient(to right, #fff 1px, transparent 1px), linear-gradient(to bottom, #fff 1px, transparent 1px)`,
+        backgroundSize: '20px 20px',
+      }}
+    />
+    <div
+      style={{
+        position: 'absolute',
+        top: 0,
+        right: 0,
+        width: '192px',
+        height: '192px',
+        opacity: 0.2,
+        background: `radial-gradient(circle at center, ${accentColor}25 0%, transparent 70%)`,
+      }}
+    />
+  </div>
+);
+
+// Icon badge component
+const IconBadge = ({ icon, color }: { icon: string; color: string }) => (
+  <div
+    style={{
+      width: '40px',
+      height: '40px',
+      borderRadius: '12px',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      fontSize: '18px',
+      background: `linear-gradient(135deg, ${color}20 0%, ${color}10 100%)`,
+      border: `1px solid ${color}30`,
+      boxShadow: `0 0 20px ${color}15`,
+    }}
+  >
+    {icon}
+  </div>
+);
 
 export function FeesSummary({ feeType, totalAmount, transactionCount, timePeriod, symbol, breakdown }: FeesSummaryProps) {
-  const Icon = getIcon(feeType);
-  const title = getTitle(feeType, symbol);
-  const accentColor = getAccentColor(feeType);
-  const bgAccent = getBgAccent(feeType);
-  const description = getDescription(feeType);
+  const config = feeConfig[feeType];
+  const averageAmount = transactionCount > 0 ? totalAmount / transactionCount : 0;
+  const displayTitle = feeType === 'locate_fee' && symbol ? `Locate Fees — ${symbol}` : config.title;
 
   return (
-    <div className="bg-gradient-to-r from-slate-800 to-slate-900 rounded-xl p-6 border border-slate-700 shadow-lg">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-lg font-semibold text-white flex items-center gap-2">
-          <Icon className={`w-5 h-5 ${accentColor}`} />
-          {title}
-        </h3>
-        <span className="text-sm text-slate-400 flex items-center gap-1">
-          <Calendar className="w-3 h-3" />
-          {timePeriod}
-        </span>
-      </div>
+    <div style={cardStyle}>
+      <BackgroundPattern accentColor={config.accentColor} />
 
-      {/* Main Amount Display */}
-      <div className={`${bgAccent} rounded-lg p-4 border border-slate-600 mb-4`}>
-        <div className="text-center">
-          <p className={`text-3xl font-bold ${accentColor}`}>{formatCurrency(totalAmount)}</p>
-          <p className="text-sm text-slate-400 mt-1">{description}</p>
-        </div>
-      </div>
-
-      {/* Stats Row */}
-      <div className="grid grid-cols-2 gap-4 mb-4">
-        <div className="bg-slate-800/50 rounded-lg p-3 border border-slate-600">
-          <span className="text-xs text-slate-400 uppercase tracking-wider">Transactions</span>
-          <p className="text-xl font-bold text-white mt-1">{transactionCount}</p>
-        </div>
-        <div className="bg-slate-800/50 rounded-lg p-3 border border-slate-600">
-          <span className="text-xs text-slate-400 uppercase tracking-wider">Average</span>
-          <p className="text-xl font-bold text-white mt-1">
-            {transactionCount > 0 ? formatCurrency(totalAmount / transactionCount) : '-'}
-          </p>
-        </div>
-      </div>
-
-      {/* Recent Breakdown */}
-      {breakdown && breakdown.length > 0 && (
-        <div className="border-t border-slate-700 pt-4">
-          <p className="text-xs text-slate-400 uppercase tracking-wider mb-2">Recent Transactions</p>
-          <div className="space-y-2 max-h-32 overflow-y-auto">
-            {breakdown.slice(0, 5).map((item, index) => (
-              <div key={index} className="flex items-center justify-between text-sm">
-                <div className="flex items-center gap-2">
-                  <span className="text-slate-400">{formatDate(item.date)}</span>
-                  {item.symbol && (
-                    <span className="text-xs bg-slate-700 px-2 py-0.5 rounded text-slate-300">
-                      {item.symbol}
-                    </span>
-                  )}
-                </div>
-                <span className={accentColor}>{formatCurrency(item.amount)}</span>
-              </div>
-            ))}
+      {/* Header */}
+      <div style={headerStyle}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <IconBadge icon={config.icon} color={config.accentColor} />
+          <div>
+            <h3 style={titleStyle}>{displayTitle}</h3>
+            <p style={{ fontSize: '12px', color: colors.textMuted, margin: '4px 0 0 0' }}>{config.description}</p>
           </div>
         </div>
-      )}
+        <span style={periodBadgeStyle}>{timePeriod}</span>
+      </div>
+
+      {/* Main content */}
+      <div style={{ position: 'relative', padding: '24px' }}>
+        {/* Hero amount */}
+        <div
+          style={{
+            ...metricBoxStyle,
+            marginBottom: '24px',
+            textAlign: 'center',
+            padding: '24px',
+            background: `linear-gradient(135deg, ${config.gradientFrom} 0%, ${colors.bgMetric} 100%)`,
+            borderTop: `2px solid ${config.accentColor}`,
+          }}
+        >
+          <span style={labelStyle}>
+            {config.isCredit ? 'Total Earned' : 'Total Paid'}
+          </span>
+          <p style={{ ...heroValueStyle(config.accentColor), marginTop: '12px' }}>
+            {formatCurrency(Math.abs(totalAmount))}
+          </p>
+        </div>
+
+        {/* Stats grid */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px', marginBottom: '24px' }}>
+          <div style={metricBoxStyle}>
+            <span style={labelStyle}>Transactions</span>
+            <p style={{ ...metricValueStyle, marginTop: '8px' }}>
+              {transactionCount.toLocaleString()}
+            </p>
+          </div>
+          <div style={metricBoxStyle}>
+            <span style={labelStyle}>Average per Transaction</span>
+            <p style={{ ...metricValueStyle, marginTop: '8px' }}>
+              {formatCurrency(Math.abs(averageAmount))}
+            </p>
+          </div>
+        </div>
+
+        {/* Breakdown section */}
+        {breakdown && breakdown.length > 0 && (
+          <div style={{ borderTop: `1px solid ${colors.borderHeader}`, paddingTop: '20px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+              <span style={labelStyle}>Recent Activity</span>
+              <span style={{ fontSize: '10px', color: colors.textMuted }}>
+                Showing {Math.min(5, breakdown.length)} of {breakdown.length}
+              </span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '144px', overflowY: 'auto' }}>
+              {breakdown.slice(0, 5).map((item, index) => (
+                <div
+                  key={index}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '12px',
+                    borderRadius: '8px',
+                    backgroundColor: colors.bgMetric,
+                    border: `1px solid ${colors.borderHeader}`,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <span style={{ fontSize: '12px', fontFamily: 'monospace', color: colors.textLabel }}>
+                      {formatCalendarDate(item.date)}
+                    </span>
+                    {item.symbol && (
+                      <span
+                        style={{
+                          fontSize: '12px',
+                          fontFamily: 'monospace',
+                          padding: '2px 8px',
+                          borderRadius: '4px',
+                          background: `${config.accentColor}15`,
+                          color: config.accentColor,
+                          border: `1px solid ${config.accentColor}30`,
+                        }}
+                      >
+                        {item.symbol}
+                      </span>
+                    )}
+                  </div>
+                  <span
+                    style={{
+                      fontFamily: 'monospace',
+                      fontSize: '14px',
+                      fontWeight: 500,
+                      color: config.accentColor,
+                    }}
+                  >
+                    {formatCurrency(Math.abs(item.amount))}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

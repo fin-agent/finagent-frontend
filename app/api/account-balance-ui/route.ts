@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
-import { formatCalendarDate, formatDisplayDate, realDateToDemoDate, formatDateForDB } from '@/src/lib/date-utils';
+import { realDateToDemoDate, formatDateForDB } from '@/src/lib/date-utils';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -116,13 +116,13 @@ export async function POST(req: NextRequest) {
 
       return NextResponse.json({
         queryType,
-        date: formatDisplayDate(data[0].Date),
+        date: data[0].Date, // Return raw date - component will format it
         balanceTrend: {
           average: avg,
           highest: max,
-          highestDate: formatCalendarDate(maxDate),
+          highestDate: maxDate, // Return raw date
           lowest: min,
-          lowestDate: formatCalendarDate(minDate),
+          lowestDate: minDate, // Return raw date
           period: timePeriod || 'available period',
         },
       });
@@ -143,7 +143,7 @@ export async function POST(req: NextRequest) {
 
     const result: AccountBalanceUIData = {
       queryType,
-      date: formatDisplayDate(data.Date),
+      date: data.Date, // Return raw date - component will format it
       cashBalance: data.CashBalance,
       accountEquity: data['Account Equity'],
       dayTradingBP: data.DayTradingBP,

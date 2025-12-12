@@ -154,6 +154,8 @@ The ElevenLabs agent has access to webhook tools that query trade data:
 | `get_profitable_trades` | `/api/elevenlabs/profitable-trades` | Calculate profitable trades using FIFO matching |
 | `get_time_based_trades` | `/api/elevenlabs/time-trades` | Get trades for a time period (last week, yesterday, Nov 18th) |
 | `advanced_query` | `/api/elevenlabs/advanced-query` | Flexible option queries (short/long calls/puts, by date/expiration/strike) |
+| `get_account_balance` | `/api/elevenlabs/account-balance` | Get account balance, equity, buying power, margin info |
+| `get_fees` | `/api/elevenlabs/fees` | Get commissions, interest charges, and locate fees |
 
 #### Tool Usage Guidelines (from System Prompt)
 
@@ -640,6 +642,8 @@ flowchart TD
 | `TotalPremiumCard` | "total premium", "collected/paid total" | Total premium aggregated across trades |
 | `ExpiringOptionsTable` | "options expiring tomorrow/this week" | Options grouped by expiration with pagination, parsed symbols, urgency indicators |
 | `LastOptionTradeCard` | "last/most recent call/put option" (single trade) | Most recent option trade details |
+| `AccountSummary` | "cash balance", "buying power", "account equity", "margin" | Account balances, equity, buying power, margin status, position values (tabular layout) |
+| `FeesSummary` | "commission", "fees", "interest" | Trading commissions, credit/debit interest, locate fees with breakdown |
 
 ---
 
@@ -849,9 +853,11 @@ finagent-frontend/
 │       ├── UnifiedAssistant.tsx      # Main chat/voice interface
 │       ├── QueryBuilder.tsx          # Manual query builder modal
 │       └── generative-ui/
+│           ├── AccountSummary.tsx        # Account balance/equity card (tabular layout)
 │           ├── AdvancedOptionsTable.tsx  # Bulk options trades table
 │           ├── AveragePrice.tsx          # Focused average price card
 │           ├── ExpiringOptionsTable.tsx  # Options expiring soon table
+│           ├── FeesSummary.tsx           # Fees and commissions card
 │           ├── HighestStrikeCard.tsx     # Highest/lowest strike card
 │           ├── LastOptionTradeCard.tsx   # Most recent option trade card
 │           ├── ProfitableTrades.tsx      # Profitable trades card
@@ -955,6 +961,12 @@ curl -X POST http://localhost:3000/api/elevenlabs/detailed-trades \
 | "What options are expiring this week?" | advanced_query | ExpiringOptionsTable |
 | "What was my last call option trade?" | advanced_query | LastOptionTradeCard |
 | "Show all long puts on Apple" | advanced_query | AdvancedOptionsTable |
+| "What's my cash balance?" | get_account_balance | AccountSummary |
+| "Show my account summary" | get_account_balance | AccountSummary |
+| "What's my buying power?" | get_account_balance | AccountSummary |
+| "What are my margin requirements?" | get_account_balance | AccountSummary |
+| "How much commission did I pay last month?" | get_fees | FeesSummary |
+| "Show my interest charges" | get_fees | FeesSummary |
 
 ---
 

@@ -165,6 +165,21 @@ The database contains demo data with fixed dates. Date utilities convert between
 
 Both support time period parameters: "today", "this week", "last month", "this year", specific months, etc.
 
+### UI Component Styling
+
+Both `AccountSummary` and `FeesSummary` components use **inline React styles** (not Tailwind classes) for reliable rendering. This avoids Tailwind JIT compilation issues where classes stored in JavaScript variables aren't scanned.
+
+**AccountSummary Tabular Layout:**
+- Uses `DataRow` component for label/value pairs with proper alignment
+- Uses `SectionHeader` component to group related metrics
+- Alternating row backgrounds for readability
+- Color-coded values (green for positive, red for negative, gold for equity)
+
+**FeesSummary Design:**
+- Fee type icons and accent colors per category
+- Hero amount display with gradient text
+- Recent activity breakdown section
+
 ## Environment Variables
 
 ```env

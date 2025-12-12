@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Wallet, TrendingUp, TrendingDown, BarChart3, Shield, DollarSign, ArrowUpRight, ArrowDownRight } from 'lucide-react';
+import { formatCalendarDate } from '@/src/lib/date-utils';
 
 export type AccountQueryType = 'cash_balance' | 'buying_power' | 'account_summary' | 'nlv' |
                                'overnight_margin' | 'market_value' | 'debit_balances' | 'credit_balances';
@@ -32,8 +32,40 @@ export interface AccountSummaryProps {
   };
 }
 
-const formatCurrency = (value: number | undefined) => {
-  if (value === undefined || value === null) return '-';
+// Refined financial terminal color palette
+const colors = {
+  bgCard: '#0c0c12',
+  bgCardSecondary: '#101018',
+  bgRow: '#0e0e16',
+  bgRowAlt: '#12121c',
+  bgRowHover: '#16161f',
+  border: '#1e1e2a',
+  borderAccent: '#2a2a3a',
+  textMuted: '#4a4a5c',
+  textLabel: '#6a6a7c',
+  textValue: '#e8e8ec',
+  textTitle: '#9a9aac',
+  accent: '#00c806',
+  gold: '#f0c674',
+  green: '#4ade80',
+  greenMuted: '#22c55e',
+  blue: '#60a5fa',
+  purple: '#a78bfa',
+  red: '#f87171',
+  redMuted: '#ef4444',
+  white: '#ffffff',
+};
+
+const formatCurrency = (value: number | undefined, compact = false) => {
+  if (value === undefined || value === null) return '—';
+  if (compact && Math.abs(value) >= 1000) {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      notation: 'compact',
+      maximumFractionDigits: 1,
+    }).format(value);
+  }
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',
@@ -41,84 +73,186 @@ const formatCurrency = (value: number | undefined) => {
   }).format(value);
 };
 
-const formatDate = (dateStr: string) => {
-  const date = new Date(dateStr);
-  return date.toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  });
+const formatNumber = (value: number | undefined) => {
+  if (value === undefined || value === null) return '—';
+  return new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
 };
 
-const getTitle = (queryType: AccountQueryType): string => {
-  switch (queryType) {
-    case 'cash_balance': return 'Cash Balance';
-    case 'buying_power': return 'Day Trading Buying Power';
-    case 'nlv': return 'Net Liquidation Value';
-    case 'overnight_margin': return 'Margin Status';
-    case 'market_value': return 'Position Market Values';
-    case 'debit_balances': return 'Debit Balance Trend';
-    case 'credit_balances': return 'Credit Balance Trend';
-    case 'account_summary':
-    default: return 'Account Summary';
-  }
+// Card container style
+const cardStyle: React.CSSProperties = {
+  position: 'relative',
+  overflow: 'hidden',
+  borderRadius: '12px',
+  background: colors.bgCard,
+  border: `1px solid ${colors.border}`,
+  boxShadow: '0 4px 24px rgba(0,0,0,0.5)',
+  fontFamily: "'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace",
 };
 
-const getIcon = (queryType: AccountQueryType) => {
-  switch (queryType) {
-    case 'cash_balance': return Wallet;
-    case 'buying_power': return TrendingUp;
-    case 'nlv': return DollarSign;
-    case 'overnight_margin': return Shield;
-    case 'market_value': return BarChart3;
-    case 'debit_balances':
-    case 'credit_balances': return TrendingDown;
-    default: return Wallet;
-  }
+// Header style
+const headerStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  padding: '14px 18px',
+  borderBottom: `1px solid ${colors.border}`,
+  background: `linear-gradient(180deg, ${colors.bgCardSecondary} 0%, ${colors.bgCard} 100%)`,
 };
+
+const titleStyle: React.CSSProperties = {
+  fontSize: '11px',
+  fontWeight: 600,
+  letterSpacing: '0.12em',
+  textTransform: 'uppercase',
+  color: colors.textTitle,
+  margin: 0,
+};
+
+const dateStyle: React.CSSProperties = {
+  fontSize: '11px',
+  letterSpacing: '0.05em',
+  color: colors.textMuted,
+};
+
+// Data row style for tabular display
+const dataRowStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  padding: '12px 18px',
+  borderBottom: `1px solid ${colors.border}`,
+};
+
+const labelStyle: React.CSSProperties = {
+  fontSize: '11px',
+  fontWeight: 500,
+  letterSpacing: '0.08em',
+  textTransform: 'uppercase',
+  color: colors.textLabel,
+};
+
+const valueStyle: React.CSSProperties = {
+  fontSize: '15px',
+  fontWeight: 600,
+  letterSpacing: '-0.01em',
+  color: colors.textValue,
+  textAlign: 'right',
+};
+
+// Hero value for featured metrics
+const heroValueStyle = (color: string): React.CSSProperties => ({
+  fontSize: '32px',
+  fontWeight: 700,
+  letterSpacing: '-0.02em',
+  color: color,
+  margin: 0,
+});
+
+// Decorative top accent line
+const AccentLine = ({ color }: { color: string }) => (
+  <div style={{
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: '2px',
+    background: `linear-gradient(90deg, transparent 0%, ${color} 50%, transparent 100%)`,
+  }} />
+);
+
+// Status indicator
+const StatusIndicator = ({ positive }: { positive?: boolean }) => (
+  <span style={{
+    display: 'inline-block',
+    width: '6px',
+    height: '6px',
+    borderRadius: '50%',
+    marginRight: '8px',
+    backgroundColor: positive ? colors.green : colors.red,
+    boxShadow: `0 0 6px ${positive ? colors.green : colors.red}40`,
+  }} />
+);
+
+// Data Row Component
+const DataRow = ({
+  label,
+  value,
+  valueColor = colors.textValue,
+  isAlt = false,
+  indicator,
+}: {
+  label: string;
+  value: string;
+  valueColor?: string;
+  isAlt?: boolean;
+  indicator?: 'positive' | 'negative';
+}) => (
+  <div style={{
+    ...dataRowStyle,
+    background: isAlt ? colors.bgRowAlt : colors.bgRow,
+  }}>
+    <span style={labelStyle}>
+      {indicator && <StatusIndicator positive={indicator === 'positive'} />}
+      {label}
+    </span>
+    <span style={{ ...valueStyle, color: valueColor }}>{value}</span>
+  </div>
+);
+
+// Section Header Component
+const SectionHeader = ({ title, color }: { title: string; color: string }) => (
+  <div style={{
+    padding: '10px 18px',
+    background: colors.bgCardSecondary,
+    borderBottom: `1px solid ${colors.border}`,
+    borderLeft: `3px solid ${color}`,
+  }}>
+    <span style={{
+      fontSize: '10px',
+      fontWeight: 600,
+      letterSpacing: '0.15em',
+      textTransform: 'uppercase',
+      color: color,
+    }}>{title}</span>
+  </div>
+);
 
 export function AccountSummary(props: AccountSummaryProps) {
   const { queryType, date } = props;
-  const Icon = getIcon(queryType);
-  const title = getTitle(queryType);
 
   // Balance Trend View (for debit/credit balances)
   if ((queryType === 'debit_balances' || queryType === 'credit_balances') && props.balanceTrend) {
     const { balanceTrend } = props;
     const isDebit = queryType === 'debit_balances';
-    const accentColor = isDebit ? 'text-red-400' : 'text-emerald-400';
-    const bgAccent = isDebit ? 'bg-red-500/10' : 'bg-emerald-500/10';
+    const accentColor = isDebit ? colors.red : colors.green;
 
     return (
-      <div className="bg-gradient-to-r from-slate-800 to-slate-900 rounded-xl p-6 border border-slate-700 shadow-lg">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-white flex items-center gap-2">
-            <Icon className={`w-5 h-5 ${accentColor}`} />
-            {title}
+      <div style={cardStyle}>
+        <AccentLine color={accentColor} />
+        <div style={headerStyle}>
+          <h3 style={titleStyle}>
+            {isDebit ? 'Debit Balance Trend' : 'Credit Balance Trend'}
           </h3>
-          <span className="text-sm text-slate-400">{balanceTrend.period}</span>
+          <span style={dateStyle}>{balanceTrend.period}</span>
         </div>
 
-        <div className="grid grid-cols-3 gap-4">
-          <div className={`${bgAccent} rounded-lg p-4 border border-slate-600`}>
-            <span className="text-xs text-slate-400 uppercase tracking-wider">Average</span>
-            <p className={`text-xl font-bold ${accentColor} mt-1`}>{formatCurrency(balanceTrend.average)}</p>
-          </div>
-          <div className="bg-slate-800/50 rounded-lg p-4 border border-slate-600">
-            <span className="text-xs text-slate-400 uppercase tracking-wider flex items-center gap-1">
-              <ArrowUpRight className="w-3 h-3" /> Highest
-            </span>
-            <p className="text-xl font-bold text-white mt-1">{formatCurrency(balanceTrend.highest)}</p>
-            <p className="text-xs text-slate-500 mt-1">{formatDate(balanceTrend.highestDate)}</p>
-          </div>
-          <div className="bg-slate-800/50 rounded-lg p-4 border border-slate-600">
-            <span className="text-xs text-slate-400 uppercase tracking-wider flex items-center gap-1">
-              <ArrowDownRight className="w-3 h-3" /> Lowest
-            </span>
-            <p className="text-xl font-bold text-white mt-1">{formatCurrency(balanceTrend.lowest)}</p>
-            <p className="text-xs text-slate-500 mt-1">{formatDate(balanceTrend.lowestDate)}</p>
-          </div>
-        </div>
+        <DataRow
+          label="Average Balance"
+          value={formatCurrency(balanceTrend.average)}
+          valueColor={accentColor}
+        />
+        <DataRow
+          label={`Highest (${formatCalendarDate(balanceTrend.highestDate)})`}
+          value={formatCurrency(balanceTrend.highest)}
+          isAlt
+        />
+        <DataRow
+          label={`Lowest (${formatCalendarDate(balanceTrend.lowestDate)})`}
+          value={formatCurrency(balanceTrend.lowest)}
+        />
       </div>
     );
   }
@@ -126,18 +260,25 @@ export function AccountSummary(props: AccountSummaryProps) {
   // Cash Balance View
   if (queryType === 'cash_balance') {
     return (
-      <div className="bg-gradient-to-r from-slate-800 to-slate-900 rounded-xl p-6 border border-slate-700 shadow-lg">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-white flex items-center gap-2">
-            <Wallet className="w-5 h-5 text-emerald-400" />
-            {title}
-          </h3>
-          <span className="text-sm text-slate-400">As of {formatDate(date)}</span>
+      <div style={cardStyle}>
+        <AccentLine color={colors.green} />
+        <div style={headerStyle}>
+          <h3 style={titleStyle}>Cash Balance</h3>
+          <span style={dateStyle}>{formatCalendarDate(date)}</span>
         </div>
-        <div className="text-center py-4">
-          <p className="text-4xl font-bold text-emerald-400">{formatCurrency(props.cashBalance)}</p>
-          <p className="text-sm text-slate-400 mt-2">Account Equity: {formatCurrency(props.accountEquity)}</p>
+
+        <div style={{ padding: '24px 18px', textAlign: 'center', borderBottom: `1px solid ${colors.border}` }}>
+          <span style={{ fontSize: '10px', letterSpacing: '0.1em', color: colors.textMuted, textTransform: 'uppercase' }}>Available Cash</span>
+          <p style={{ ...heroValueStyle(colors.green), marginTop: '8px' }}>
+            {formatCurrency(props.cashBalance)}
+          </p>
         </div>
+
+        <DataRow
+          label="Account Equity"
+          value={formatCurrency(props.accountEquity)}
+          valueColor={colors.gold}
+        />
       </div>
     );
   }
@@ -145,17 +286,21 @@ export function AccountSummary(props: AccountSummaryProps) {
   // Buying Power View
   if (queryType === 'buying_power') {
     return (
-      <div className="bg-gradient-to-r from-slate-800 to-slate-900 rounded-xl p-6 border border-slate-700 shadow-lg">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-white flex items-center gap-2">
-            <TrendingUp className="w-5 h-5 text-blue-400" />
-            {title}
-          </h3>
-          <span className="text-sm text-slate-400">As of {formatDate(date)}</span>
+      <div style={cardStyle}>
+        <AccentLine color={colors.blue} />
+        <div style={headerStyle}>
+          <h3 style={titleStyle}>Day Trading Buying Power</h3>
+          <span style={dateStyle}>{formatCalendarDate(date)}</span>
         </div>
-        <div className="text-center py-4">
-          <p className="text-4xl font-bold text-blue-400">{formatCurrency(props.dayTradingBP)}</p>
-          <p className="text-sm text-slate-400 mt-2">Available for day trading</p>
+
+        <div style={{ padding: '24px 18px', textAlign: 'center' }}>
+          <span style={{ fontSize: '10px', letterSpacing: '0.1em', color: colors.textMuted, textTransform: 'uppercase' }}>Available</span>
+          <p style={{ ...heroValueStyle(colors.blue), marginTop: '8px' }}>
+            {formatCurrency(props.dayTradingBP)}
+          </p>
+          <p style={{ marginTop: '12px', color: colors.textMuted, fontSize: '11px' }}>
+            Maximum capital for intraday positions
+          </p>
         </div>
       </div>
     );
@@ -164,17 +309,21 @@ export function AccountSummary(props: AccountSummaryProps) {
   // NLV View
   if (queryType === 'nlv') {
     return (
-      <div className="bg-gradient-to-r from-slate-800 to-slate-900 rounded-xl p-6 border border-slate-700 shadow-lg">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-white flex items-center gap-2">
-            <DollarSign className="w-5 h-5 text-emerald-400" />
-            {title}
-          </h3>
-          <span className="text-sm text-slate-400">As of {formatDate(date)}</span>
+      <div style={cardStyle}>
+        <AccentLine color={colors.gold} />
+        <div style={headerStyle}>
+          <h3 style={titleStyle}>Net Liquidation Value</h3>
+          <span style={dateStyle}>{formatCalendarDate(date)}</span>
         </div>
-        <div className="text-center py-4">
-          <p className="text-4xl font-bold text-emerald-400">{formatCurrency(props.accountEquity)}</p>
-          <p className="text-sm text-slate-400 mt-2">Total Account Equity</p>
+
+        <div style={{ padding: '24px 18px', textAlign: 'center' }}>
+          <span style={{ fontSize: '10px', letterSpacing: '0.1em', color: colors.textMuted, textTransform: 'uppercase' }}>NLV</span>
+          <p style={{ ...heroValueStyle(colors.gold), marginTop: '8px' }}>
+            {formatCurrency(props.accountEquity)}
+          </p>
+          <p style={{ marginTop: '12px', color: colors.textMuted, fontSize: '11px' }}>
+            Total account value if all positions were liquidated
+          </p>
         </div>
       </div>
     );
@@ -182,33 +331,42 @@ export function AccountSummary(props: AccountSummaryProps) {
 
   // Margin Status View
   if (queryType === 'overnight_margin') {
+    const houseExcess = props.houseExcessDeficit || 0;
+    const fedExcess = props.fedExcessDeficit || 0;
+
     return (
-      <div className="bg-gradient-to-r from-slate-800 to-slate-900 rounded-xl p-6 border border-slate-700 shadow-lg">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-white flex items-center gap-2">
-            <Shield className="w-5 h-5 text-yellow-400" />
-            {title}
-          </h3>
-          <span className="text-sm text-slate-400">As of {formatDate(date)}</span>
+      <div style={cardStyle}>
+        <AccentLine color={colors.purple} />
+        <div style={headerStyle}>
+          <h3 style={titleStyle}>Margin Status</h3>
+          <span style={dateStyle}>{formatCalendarDate(date)}</span>
         </div>
-        <div className="grid grid-cols-2 gap-4">
-          <div className="bg-slate-800/50 rounded-lg p-4 border border-slate-600">
-            <span className="text-xs text-slate-400 uppercase tracking-wider">House Requirement</span>
-            <p className="text-xl font-bold text-white mt-1">{formatCurrency(props.houseRequirement)}</p>
-            <span className="text-xs text-slate-400">Excess/Deficit:</span>
-            <p className={`text-sm font-semibold ${(props.houseExcessDeficit || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-              {formatCurrency(props.houseExcessDeficit)}
-            </p>
-          </div>
-          <div className="bg-slate-800/50 rounded-lg p-4 border border-slate-600">
-            <span className="text-xs text-slate-400 uppercase tracking-wider">Federal Requirement</span>
-            <p className="text-xl font-bold text-white mt-1">{formatCurrency(props.fedRequirement)}</p>
-            <span className="text-xs text-slate-400">Excess/Deficit:</span>
-            <p className={`text-sm font-semibold ${(props.fedExcessDeficit || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-              {formatCurrency(props.fedExcessDeficit)}
-            </p>
-          </div>
-        </div>
+
+        <SectionHeader title="House Requirement" color={colors.blue} />
+        <DataRow
+          label="Requirement"
+          value={formatCurrency(props.houseRequirement)}
+        />
+        <DataRow
+          label="Excess / Deficit"
+          value={formatCurrency(houseExcess)}
+          valueColor={houseExcess >= 0 ? colors.green : colors.red}
+          indicator={houseExcess >= 0 ? 'positive' : 'negative'}
+          isAlt
+        />
+
+        <SectionHeader title="Federal Requirement" color={colors.purple} />
+        <DataRow
+          label="Requirement"
+          value={formatCurrency(props.fedRequirement)}
+        />
+        <DataRow
+          label="Excess / Deficit"
+          value={formatCurrency(fedExcess)}
+          valueColor={fedExcess >= 0 ? colors.green : colors.red}
+          indicator={fedExcess >= 0 ? 'positive' : 'negative'}
+          isAlt
+        />
       </div>
     );
   }
@@ -223,89 +381,78 @@ export function AccountSummary(props: AccountSummaryProps) {
     const netOptions = optionsLong + optionsShort;
 
     return (
-      <div className="bg-gradient-to-r from-slate-800 to-slate-900 rounded-xl p-6 border border-slate-700 shadow-lg">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-white flex items-center gap-2">
-            <BarChart3 className="w-5 h-5 text-purple-400" />
-            {title}
-          </h3>
-          <span className="text-sm text-slate-400">As of {formatDate(date)}</span>
+      <div style={cardStyle}>
+        <AccentLine color={colors.blue} />
+        <div style={headerStyle}>
+          <h3 style={titleStyle}>Position Market Values</h3>
+          <span style={dateStyle}>{formatCalendarDate(date)}</span>
         </div>
-        <div className="grid grid-cols-2 gap-4">
-          <div className="bg-slate-800/50 rounded-lg p-4 border border-slate-600">
-            <span className="text-xs text-slate-400 uppercase tracking-wider">Stocks</span>
-            <p className="text-xl font-bold text-white mt-1">{formatCurrency(netStocks)}</p>
-            <div className="mt-2 space-y-1 text-xs">
-              <div className="flex justify-between">
-                <span className="text-emerald-400">Long:</span>
-                <span className="text-slate-300">{formatCurrency(stockLong)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-red-400">Short:</span>
-                <span className="text-slate-300">{formatCurrency(stockShort)}</span>
-              </div>
-            </div>
-          </div>
-          <div className="bg-slate-800/50 rounded-lg p-4 border border-slate-600">
-            <span className="text-xs text-slate-400 uppercase tracking-wider">Options</span>
-            <p className="text-xl font-bold text-white mt-1">{formatCurrency(netOptions)}</p>
-            <div className="mt-2 space-y-1 text-xs">
-              <div className="flex justify-between">
-                <span className="text-emerald-400">Long:</span>
-                <span className="text-slate-300">{formatCurrency(optionsLong)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-red-400">Short:</span>
-                <span className="text-slate-300">{formatCurrency(optionsShort)}</span>
-              </div>
-            </div>
-          </div>
-        </div>
+
+        <SectionHeader title="Stocks" color={colors.blue} />
+        <DataRow label="Net Value" value={formatCurrency(netStocks)} valueColor={colors.white} />
+        <DataRow label="Long" value={formatCurrency(stockLong)} valueColor={colors.green} isAlt />
+        <DataRow label="Short" value={formatCurrency(stockShort)} valueColor={colors.red} />
+
+        <SectionHeader title="Options" color={colors.purple} />
+        <DataRow label="Net Value" value={formatCurrency(netOptions)} valueColor={colors.white} />
+        <DataRow label="Long" value={formatCurrency(optionsLong)} valueColor={colors.green} isAlt />
+        <DataRow label="Short" value={formatCurrency(optionsShort)} valueColor={colors.red} />
       </div>
     );
   }
 
-  // Full Account Summary View (default)
+  // Full Account Summary View (default) - Tabular Format
   return (
-    <div className="bg-gradient-to-r from-slate-800 to-slate-900 rounded-xl p-6 border border-slate-700 shadow-lg">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-lg font-semibold text-white flex items-center gap-2">
-          <Wallet className="w-5 h-5 text-emerald-400" />
-          {title}
-        </h3>
-        <span className="text-sm text-slate-400">As of {formatDate(date)}</span>
+    <div style={cardStyle}>
+      <AccentLine color={colors.accent} />
+      <div style={headerStyle}>
+        <h3 style={titleStyle}>Account Summary</h3>
+        <span style={dateStyle}>{formatCalendarDate(date)}</span>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-        <div className="bg-emerald-500/10 rounded-lg p-3 border border-slate-600">
-          <span className="text-xs text-slate-400 uppercase tracking-wider">Cash Balance</span>
-          <p className="text-lg font-bold text-emerald-400 mt-1">{formatCurrency(props.cashBalance)}</p>
-        </div>
-        <div className="bg-slate-800/50 rounded-lg p-3 border border-slate-600">
-          <span className="text-xs text-slate-400 uppercase tracking-wider">Account Equity</span>
-          <p className="text-lg font-bold text-white mt-1">{formatCurrency(props.accountEquity)}</p>
-        </div>
-        <div className="bg-blue-500/10 rounded-lg p-3 border border-slate-600">
-          <span className="text-xs text-slate-400 uppercase tracking-wider">Day Trading BP</span>
-          <p className="text-lg font-bold text-blue-400 mt-1">{formatCurrency(props.dayTradingBP)}</p>
-        </div>
-        <div className="bg-slate-800/50 rounded-lg p-3 border border-slate-600">
-          <span className="text-xs text-slate-400 uppercase tracking-wider">Stock Long</span>
-          <p className="text-lg font-bold text-white mt-1">{formatCurrency(props.stockLMV)}</p>
-        </div>
-        <div className="bg-slate-800/50 rounded-lg p-3 border border-slate-600">
-          <span className="text-xs text-slate-400 uppercase tracking-wider">Stock Short</span>
-          <p className="text-lg font-bold text-white mt-1">{formatCurrency(props.stockSMV)}</p>
-        </div>
-        <div className="bg-slate-800/50 rounded-lg p-3 border border-slate-600">
-          <span className="text-xs text-slate-400 uppercase tracking-wider">Options Long</span>
-          <p className="text-lg font-bold text-white mt-1">{formatCurrency(props.optionsLMV)}</p>
-        </div>
-        <div className="bg-slate-800/50 rounded-lg p-3 border border-slate-600">
-          <span className="text-xs text-slate-400 uppercase tracking-wider">Options Short</span>
-          <p className="text-lg font-bold text-white mt-1">{formatCurrency(props.optionsSMV)}</p>
-        </div>
-      </div>
+      {/* Primary Metrics Section */}
+      <SectionHeader title="Account Balances" color={colors.accent} />
+      <DataRow
+        label="Cash Balance"
+        value={formatCurrency(props.cashBalance)}
+        valueColor={colors.green}
+      />
+      <DataRow
+        label="Account Equity"
+        value={formatCurrency(props.accountEquity)}
+        valueColor={colors.gold}
+        isAlt
+      />
+      <DataRow
+        label="Day Trading BP"
+        value={formatCurrency(props.dayTradingBP)}
+        valueColor={colors.blue}
+      />
+
+      {/* Position Values Section */}
+      <SectionHeader title="Position Values" color={colors.purple} />
+      <DataRow
+        label="Stock Long"
+        value={formatCurrency(props.stockLMV)}
+        valueColor={colors.green}
+      />
+      <DataRow
+        label="Stock Short"
+        value={formatCurrency(props.stockSMV)}
+        valueColor={colors.red}
+        isAlt
+      />
+      <DataRow
+        label="Options Long"
+        value={formatCurrency(props.optionsLMV)}
+        valueColor={colors.green}
+      />
+      <DataRow
+        label="Options Short"
+        value={formatCurrency(props.optionsSMV)}
+        valueColor={colors.red}
+        isAlt
+      />
     </div>
   );
 }

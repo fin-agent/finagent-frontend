@@ -65,6 +65,21 @@ interface QueryIntent {
   feeType?: FeeType;
 }
 
+// UI render parameters received from ElevenLabs client tool
+// The agent calls render_ui with these params after responding to a query
+interface UIRenderParams {
+  cardType: 'summary' | 'detailed' | 'stats' | 'profitable' | 'time-based' |
+            'option-stats' | 'average-price' | 'advanced-options' | 'highest-strike' |
+            'total-premium' | 'expiring-options' | 'last-option' | 'account-balance' | 'fees';
+  symbol?: string;
+  tradeType?: 'buy' | 'sell';
+  timePeriod?: string;
+  callPut?: 'call' | 'put';
+  expiration?: string;
+  accountQueryType?: AccountQueryType;
+  feeType?: FeeType;
+}
+
 /**
  * Detect query intent from USER's message (before sending to agent)
  * This is more reliable than parsing agent's variable responses
@@ -980,10 +995,24 @@ const UnifiedAssistant: React.FC = () => {
   // Store the pending query intent detected from user's message
   // This is used to determine which UI card to show when agent responds
   const pendingQueryIntentRef = useRef<QueryIntent | null>(null);
+  // Store UI render params from ElevenLabs client tool (render_ui)
+  // This is the NEW primary method - agent calls render_ui with structured params
+  const pendingUIParamsRef = useRef<UIRenderParams | null>(null);
+
+  // ElevenLabs client tools - called by the agent to trigger UI rendering
+  // This replaces fragile regex-based intent detection with structured params from the agent
+  const clientTools = {
+    render_ui: async (params: UIRenderParams) => {
+      console.log('🎯 [Client Tool] render_ui called with:', params);
+      pendingUIParamsRef.current = params;
+      return "UI rendering queued";
+    }
+  };
 
   // Text-only ElevenLabs conversation (no voice, just text)
   const textOnlyConversation = useConversation({
     textOnly: true,
+    clientTools,
     onMessage: async (message) => {
       if (message.message && inputMode === 'text') {
         const role = message.source === 'user' ? 'user' : 'assistant';
@@ -998,29 +1027,56 @@ const UnifiedAssistant: React.FC = () => {
         console.log('🔍 [Text Mode] Message:', message.message.substring(0, 150));
         console.log('🔍 [Text Mode] Extracted symbol:', symbol);
 
-        // PRIORITY 1: Use stored intent from user's query (most reliable)
-        const pendingIntent = pendingQueryIntentRef.current;
-        if (pendingIntent) {
-          console.log('🎯 [Intent-Based] Using stored intent:', pendingIntent);
-          const intentSymbol = pendingIntent.symbol || symbol || '';
+        // PRIORITY 0 (HIGHEST): Use client tool params from render_ui (most reliable)
+        // The agent calls render_ui with structured params, eliminating regex guesswork
+        const uiParams = pendingUIParamsRef.current;
+        if (uiParams) {
+          console.log('🎯 [Client Tool] Using render_ui params:', uiParams);
           const data = await fetchTradeData(
-            intentSymbol,
-            pendingIntent.cardType,
-            pendingIntent.tradeType,
-            pendingIntent.timePeriod,
+            uiParams.symbol || '',
+            uiParams.cardType,
+            uiParams.tradeType,
+            uiParams.timePeriod,
             {
-              callPut: pendingIntent.callPut,
-              expiration: pendingIntent.expiration,
-              accountQueryType: pendingIntent.accountQueryType,
-              feeType: pendingIntent.feeType,
+              callPut: uiParams.callPut,
+              expiration: uiParams.expiration,
+              accountQueryType: uiParams.accountQueryType,
+              feeType: uiParams.feeType,
             }
           );
           if (data) {
             tradeUI = data;
-            console.log('🎯 [Intent-Based] Successfully rendered card:', pendingIntent.cardType);
+            console.log('🎯 [Client Tool] Successfully rendered card:', uiParams.cardType);
           }
-          // Clear the pending intent after use
-          pendingQueryIntentRef.current = null;
+          // Clear the pending params after use
+          pendingUIParamsRef.current = null;
+        }
+
+        // PRIORITY 1: Use stored intent from user's query (fallback if agent doesn't call render_ui)
+        if (!tradeUI) {
+          const pendingIntent = pendingQueryIntentRef.current;
+          if (pendingIntent) {
+            console.log('🎯 [Intent-Based] Using stored intent:', pendingIntent);
+            const intentSymbol = pendingIntent.symbol || symbol || '';
+            const data = await fetchTradeData(
+              intentSymbol,
+              pendingIntent.cardType,
+              pendingIntent.tradeType,
+              pendingIntent.timePeriod,
+              {
+                callPut: pendingIntent.callPut,
+                expiration: pendingIntent.expiration,
+                accountQueryType: pendingIntent.accountQueryType,
+                feeType: pendingIntent.feeType,
+              }
+            );
+            if (data) {
+              tradeUI = data;
+              console.log('🎯 [Intent-Based] Successfully rendered card:', pendingIntent.cardType);
+            }
+            // Clear the pending intent after use
+            pendingQueryIntentRef.current = null;
+          }
         }
 
         // PRIORITY 2: Fallback to regex-based detection on agent's response
@@ -1309,6 +1365,7 @@ const UnifiedAssistant: React.FC = () => {
 
   // ElevenLabs Conversation Hook - single source of truth for both voice and text
   const elevenLabsConversation = useConversation({
+    clientTools,
     onConnect: () => {
       console.log('ElevenLabs connected');
       // Only clear transcript if not resuming from history
@@ -1335,30 +1392,57 @@ const UnifiedAssistant: React.FC = () => {
           console.log('🔍 [Voice Mode] Message:', message.message.substring(0, 100));
           console.log('🔍 [Voice Mode] Extracted symbol:', symbol);
 
-          // PRIORITY 1: Use stored intent from user's query (most reliable)
-          const pendingIntent = pendingQueryIntentRef.current;
-          if (pendingIntent) {
-            console.log('🎯 [Voice Intent-Based] Using stored intent:', pendingIntent);
-            // For portfolio-wide queries (no symbol in intent), don't fall back to agent's symbol
-            const intentSymbol = pendingIntent.symbol || '';
+          // PRIORITY 0 (HIGHEST): Use client tool params from render_ui (most reliable)
+          // The agent calls render_ui with structured params, eliminating regex guesswork
+          const uiParams = pendingUIParamsRef.current;
+          if (uiParams) {
+            console.log('🎯 [Voice Client Tool] Using render_ui params:', uiParams);
             const data = await fetchTradeData(
-              intentSymbol,
-              pendingIntent.cardType,
-              pendingIntent.tradeType,
-              pendingIntent.timePeriod,
+              uiParams.symbol || '',
+              uiParams.cardType,
+              uiParams.tradeType,
+              uiParams.timePeriod,
               {
-                callPut: pendingIntent.callPut,
-                expiration: pendingIntent.expiration,
-                accountQueryType: pendingIntent.accountQueryType,
-                feeType: pendingIntent.feeType,
+                callPut: uiParams.callPut,
+                expiration: uiParams.expiration,
+                accountQueryType: uiParams.accountQueryType,
+                feeType: uiParams.feeType,
               }
             );
             if (data) {
               tradeUI = data;
-              console.log('🎯 [Voice Intent-Based] Successfully rendered card:', pendingIntent.cardType);
+              console.log('🎯 [Voice Client Tool] Successfully rendered card:', uiParams.cardType);
             }
-            // Clear the pending intent after use
-            pendingQueryIntentRef.current = null;
+            // Clear the pending params after use
+            pendingUIParamsRef.current = null;
+          }
+
+          // PRIORITY 1: Use stored intent from user's query (fallback if agent doesn't call render_ui)
+          if (!tradeUI) {
+            const pendingIntent = pendingQueryIntentRef.current;
+            if (pendingIntent) {
+              console.log('🎯 [Voice Intent-Based] Using stored intent:', pendingIntent);
+              // For portfolio-wide queries (no symbol in intent), don't fall back to agent's symbol
+              const intentSymbol = pendingIntent.symbol || '';
+              const data = await fetchTradeData(
+                intentSymbol,
+                pendingIntent.cardType,
+                pendingIntent.tradeType,
+                pendingIntent.timePeriod,
+                {
+                  callPut: pendingIntent.callPut,
+                  expiration: pendingIntent.expiration,
+                  accountQueryType: pendingIntent.accountQueryType,
+                  feeType: pendingIntent.feeType,
+                }
+              );
+              if (data) {
+                tradeUI = data;
+                console.log('🎯 [Voice Intent-Based] Successfully rendered card:', pendingIntent.cardType);
+              }
+              // Clear the pending intent after use
+              pendingQueryIntentRef.current = null;
+            }
           }
 
           // PRIORITY 2: Fallback to regex-based detection on agent's response

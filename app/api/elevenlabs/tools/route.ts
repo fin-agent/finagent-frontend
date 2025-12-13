@@ -1,5 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
+import { parseTimeExpression } from '@/src/lib/date-parser';
+import { formatCalendarDate, getDateOffset } from '@/src/lib/date-utils';
 
 // Initialize Supabase client
 const supabase = createClient(
@@ -62,11 +64,36 @@ async function getTradeSummary(symbol: string) {
 }
 
 // Tool: Get trade statistics (highest, lowest, average prices)
-async function getTradeStats(symbol: string, tradeType?: string, year?: number) {
+async function getTradeStats(symbol: string, tradeType?: string, year?: number, timePeriod?: string) {
   const normalizedSymbol = normalizeSymbol(symbol);
-  const filterYear = year || new Date().getFullYear();
-  const yearStart = `${filterYear}-01-01`;
-  const yearEnd = `${filterYear}-12-31`;
+
+  // Get date offset for demo database
+  const offset = getDateOffset();
+  const userYear = year || new Date().getFullYear();
+  const offsetYears = Math.round(offset / 365);
+  const dbYear = userYear + offsetYears;
+
+  let dateStart: string;
+  let dateEnd: string;
+  let timePeriodDescription: string | null = null;
+
+  // If timePeriod is provided (e.g., "last month", "last week"), parse it
+  if (timePeriod) {
+    const parsedTime = parseTimeExpression(timePeriod);
+    if (parsedTime) {
+      dateStart = parsedTime.dateRange.startDate;
+      dateEnd = parsedTime.dateRange.endDate;
+      timePeriodDescription = parsedTime.dateRange.description;
+    } else {
+      // Fallback to full year if parsing fails
+      dateStart = `${dbYear}-01-01`;
+      dateEnd = `${dbYear}-12-31`;
+    }
+  } else {
+    // Default to full year
+    dateStart = `${dbYear}-01-01`;
+    dateEnd = `${dbYear}-12-31`;
+  }
 
   let query = supabase
     .from('TradeData')
@@ -74,8 +101,8 @@ async function getTradeStats(symbol: string, tradeType?: string, year?: number) 
     .eq('AccountCode', ACCOUNT_CODE)
     .eq('SecurityType', 'S') // Stock trades only for price analysis
     .or(`Symbol.eq.${normalizedSymbol},UnderlyingSymbol.eq.${normalizedSymbol}`)
-    .gte('Date', yearStart)
-    .lte('Date', yearEnd);
+    .gte('Date', dateStart)
+    .lte('Date', dateEnd);
 
   // Filter by trade type if specified (B = Buy, S = Sell)
   if (tradeType) {
@@ -89,13 +116,17 @@ async function getTradeStats(symbol: string, tradeType?: string, year?: number) 
     return { error: error.message, symbol: normalizedSymbol };
   }
 
+  // Build period description for messages
+  const periodDescription = timePeriodDescription || `${userYear}`;
+
   if (!data || data.length === 0) {
     const typeLabel = tradeType ? (tradeType.toLowerCase().startsWith('s') ? 'sell' : 'buy') : '';
     return {
       symbol: normalizedSymbol,
-      year: filterYear,
+      year: userYear,
+      timePeriod: timePeriodDescription,
       tradeType: typeLabel,
-      message: `No ${typeLabel} trades found for ${normalizedSymbol} in ${filterYear}.`,
+      message: `No ${typeLabel} trades found for ${normalizedSymbol} ${timePeriodDescription ? timePeriodDescription : `in ${userYear}`}.`,
       tradesFound: 0,
     };
   }
@@ -118,7 +149,9 @@ async function getTradeStats(symbol: string, tradeType?: string, year?: number) 
 
   return {
     symbol: normalizedSymbol,
-    year: filterYear,
+    year: userYear,
+    timePeriod: timePeriodDescription,
+    periodDescription,
     tradeType: typeLabel,
     tradesFound: data.length,
     totalShares,
@@ -359,7 +392,8 @@ export async function POST(req: NextRequest) {
         result = await getTradeStats(
           parameters.symbol,
           parameters.trade_type || parameters.tradeType,
-          parameters.year
+          parameters.year,
+          parameters.time_period || parameters.timePeriod
         );
         break;
 
@@ -407,7 +441,8 @@ export async function POST(req: NextRequest) {
         responseText = result.message as string;
       } else if ('highestPrice' in result && result.highestPrice !== undefined) {
         const typeLabel = result.tradeType === 'sell' ? 'sold' : result.tradeType === 'buy' ? 'bought' : 'traded';
-        responseText = `${result.symbol} ${result.tradeType} trade statistics for ${result.year}:\n`;
+        const periodText = result.periodDescription || result.year;
+        responseText = `${result.symbol} ${result.tradeType} trade statistics for ${periodText}:\n`;
         responseText += `- Highest price ${typeLabel}: $${result.highestPrice.toFixed(2)} on ${result.highestPriceDate} (${result.highestPriceShares} shares)\n`;
         responseText += `- Lowest price ${typeLabel}: $${(result.lowestPrice ?? 0).toFixed(2)} on ${result.lowestPriceDate} (${result.lowestPriceShares} shares)\n`;
         responseText += `- Average price: $${(result.averagePrice ?? 0).toFixed(2)}\n`;

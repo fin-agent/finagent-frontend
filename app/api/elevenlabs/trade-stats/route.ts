@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import { formatCalendarDate, getDateOffset } from '@/src/lib/date-utils';
+import { parseTimeExpression } from '@/src/lib/date-parser';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -32,6 +33,7 @@ export async function POST(req: NextRequest) {
 
     const symbol = body.symbol || body.parameters?.symbol;
     const tradeType = body.trade_type || body.parameters?.trade_type;
+    const timePeriod = body.time_period || body.parameters?.time_period;
 
     if (!symbol) {
       return NextResponse.json({
@@ -49,8 +51,29 @@ export async function POST(req: NextRequest) {
     const offsetYears = Math.round(offset / 365);
     const dbYear = userYear + offsetYears;
 
-    const yearStart = `${dbYear}-01-01`;
-    const yearEnd = `${dbYear}-12-31`;
+    let dateStart: string;
+    let dateEnd: string;
+    let periodDescription: string;
+
+    // If timePeriod is provided (e.g., "last month", "last week"), parse it
+    if (timePeriod) {
+      const parsedTime = parseTimeExpression(timePeriod);
+      if (parsedTime) {
+        dateStart = parsedTime.dateRange.startDate;
+        dateEnd = parsedTime.dateRange.endDate;
+        periodDescription = parsedTime.dateRange.description;
+      } else {
+        // Fallback to full year if parsing fails
+        dateStart = `${dbYear}-01-01`;
+        dateEnd = `${dbYear}-12-31`;
+        periodDescription = `${userYear}`;
+      }
+    } else {
+      // Default to full year
+      dateStart = `${dbYear}-01-01`;
+      dateEnd = `${dbYear}-12-31`;
+      periodDescription = `${userYear}`;
+    }
 
     let query = supabase
       .from('TradeData')
@@ -58,8 +81,8 @@ export async function POST(req: NextRequest) {
       .eq('AccountCode', ACCOUNT_CODE)
       .eq('SecurityType', 'S')
       .or(`Symbol.eq.${normalizedSymbol},UnderlyingSymbol.eq.${normalizedSymbol}`)
-      .gte('Date', yearStart)
-      .lte('Date', yearEnd);
+      .gte('Date', dateStart)
+      .lte('Date', dateEnd);
 
     if (tradeType) {
       const normalizedType = tradeType.toLowerCase().startsWith('s') ? 'S' : 'B';
@@ -77,7 +100,7 @@ export async function POST(req: NextRequest) {
     if (!data || data.length === 0) {
       const typeLabel = tradeType ? (tradeType.toLowerCase().startsWith('s') ? 'sell' : 'buy') : '';
       return NextResponse.json({
-        response: `No ${typeLabel} trades found for ${normalizedSymbol} in ${userYear}.`,
+        response: `No ${typeLabel} trades found for ${normalizedSymbol} ${periodDescription}.`,
       });
     }
 
@@ -103,7 +126,7 @@ export async function POST(req: NextRequest) {
     const highDate = highestTrade?.Date ? formatCalendarDate(highestTrade.Date) : 'N/A';
     const lowDate = lowestTrade?.Date ? formatCalendarDate(lowestTrade.Date) : 'N/A';
 
-    let response = `${normalizedSymbol} trade statistics for ${userYear}: `;
+    let response = `${normalizedSymbol} trade statistics for ${periodDescription}: `;
     response += `Highest price ${typeLabel}: ${formatPrice(highestPrice)} on ${highDate} for ${formatNumber(highShareQty)} shares. `;
     response += `Lowest price ${typeLabel}: ${formatPrice(lowestPrice)} on ${lowDate} for ${formatNumber(lowShareQty)} shares. `;
     response += `Average price: ${formatPrice(avgPrice)}. `;

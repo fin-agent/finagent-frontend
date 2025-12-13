@@ -1,17 +1,38 @@
 /**
  * Date utilities for time-based trade queries
  * Handles offset calculation between demo data dates and actual today
+ *
+ * IMPORTANT: Uses US Pacific timezone for consistent date calculations
+ * This ensures the same "today" is used whether running locally or on Vercel (UTC).
  */
 
 // The latest trade date in the demo database - this represents "today" in the demo
 const DEMO_TODAY = '2025-11-20';
 
 /**
- * Calculate the offset in days between demo "today" and actual today
+ * Get the current date in US Pacific timezone as a Date object
+ * This ensures consistent "today" across local dev (PST) and production (UTC)
+ */
+function getPacificToday(): Date {
+  // Get current time in Pacific timezone
+  const now = new Date();
+  const pacificDateStr = now.toLocaleDateString('en-US', {
+    timeZone: 'America/Los_Angeles',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  });
+  // Parse MM/DD/YYYY format
+  const [month, day, year] = pacificDateStr.split('/').map(Number);
+  return new Date(year, month - 1, day);
+}
+
+/**
+ * Calculate the offset in days between demo "today" and actual today (Pacific time)
  * Positive offset means demo dates are in the future relative to actual today
  */
 export function getDateOffset(): number {
-  const actualToday = new Date();
+  const actualToday = getPacificToday();
   actualToday.setHours(0, 0, 0, 0);
 
   // Parse DEMO_TODAY as local date (not UTC) to avoid timezone issues
@@ -63,7 +84,7 @@ export function demoDateToRealDate(demoDateStr: string): Date {
 export function formatDisplayDate(demoDateStr: string): string {
   const realDate = demoDateToRealDate(demoDateStr);
 
-  const today = new Date();
+  const today = getPacificToday();
   today.setHours(0, 0, 0, 0);
   realDate.setHours(0, 0, 0, 0);
 

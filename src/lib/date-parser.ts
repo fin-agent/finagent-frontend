@@ -1,9 +1,27 @@
 /**
  * Natural language date parsing for time-based trade queries
  * Parses expressions like "last week", "yesterday", "past 5 days", "Monday"
+ *
+ * IMPORTANT: Uses US Pacific timezone for consistent date calculations
  */
 
 import { getDateOffset, formatDateForDB } from './date-utils';
+
+/**
+ * Get the current date in US Pacific timezone as a Date object
+ * Duplicated from date-utils for module independence
+ */
+function getPacificToday(): Date {
+  const now = new Date();
+  const pacificDateStr = now.toLocaleDateString('en-US', {
+    timeZone: 'America/Los_Angeles',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  });
+  const [month, day, year] = pacificDateStr.split('/').map(Number);
+  return new Date(year, month - 1, day);
+}
 
 // Convert spelled-out numbers to digits
 const wordToNumber: Record<string, number> = {
@@ -60,7 +78,7 @@ export interface ParsedDateQuery {
  */
 export function parseTimeExpression(expression: string): ParsedDateQuery | null {
   const lowerExpr = expression.toLowerCase().trim();
-  const today = new Date();
+  const today = getPacificToday();
   today.setHours(0, 0, 0, 0);
 
   const offset = getDateOffset();

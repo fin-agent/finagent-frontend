@@ -102,7 +102,6 @@ export async function POST(req: NextRequest) {
 
     // Build response based on results
     const symbolText = normalizedSymbol ? ` for ${normalizedSymbol}` : '';
-    const tradingDaysText = tradingDays && tradingDays > 1 ? ` over ${tradingDays} trading days` : '';
 
     if (tradeCount === 0) {
       return NextResponse.json({
@@ -165,7 +164,6 @@ export async function POST(req: NextRequest) {
     });
 
     // Build response message with explicit counts
-    let response: string;
     const totalValueStr = `$${totalValue.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
 
     // Always state the exact counts clearly
@@ -182,7 +180,7 @@ export async function POST(req: NextRequest) {
       if (optionCount > 5) detailSection += `\n- ... and ${optionCount - 5} more option trades`;
     }
 
-    response = summaryLine + detailSection + statsText;
+    const response = summaryLine + detailSection + statsText;
 
     // Convert individual dates for display (applying date offset)
     const displayStartDate = formatDisplayDate(startDate);

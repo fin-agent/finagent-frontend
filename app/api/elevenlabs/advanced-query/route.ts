@@ -208,10 +208,17 @@ export async function POST(req: NextRequest) {
     }
 
     // Apply date range filters
+    // For time periods like "last month", fromDate parsing returns both start AND end
+    // We need to apply both constraints to get the correct date range
     if (fromDate) {
       const parsed = parseRelativeDate(fromDate);
       if (parsed.start) {
         query = query.gte('Date', parsed.start);
+      }
+      // Also apply end date if the time period has one (e.g., "last month" = Oct 1-31)
+      // Only apply if toDate wasn't explicitly provided
+      if (parsed.end && !toDate) {
+        query = query.lte('Date', parsed.end);
       }
     }
 

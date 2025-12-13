@@ -12,6 +12,7 @@ import { TimeBasedTrades } from './generative-ui/TimeBasedTrades';
 import { TimePeriodStats } from './generative-ui/TimePeriodStats';
 import { AveragePrice } from './generative-ui/AveragePrice';
 import { AdvancedOptionsTable } from './generative-ui/AdvancedOptionsTable';
+import { BulkOptionsCard } from './generative-ui/BulkOptionsCard';
 import { HighestStrikeCard } from './generative-ui/HighestStrikeCard';
 import { TotalPremiumCard } from './generative-ui/TotalPremiumCard';
 import { ExpiringOptionsTable } from './generative-ui/ExpiringOptionsTable';
@@ -145,9 +146,20 @@ function detectUserQueryIntent(query: string): QueryIntent | null {
   }
 
   // 4. Bulk options queries (all short/long calls/puts, option trades)
-  if (/\b(all|show|my)\s+(short|long)?\s*(call|put)s?\b/i.test(lowerQuery) ||
-      /\b(short|long)\s+(call|put)s?\s+(on|for|I)\b/i.test(lowerQuery) ||
-      /\boption\s+trades?\b/i.test(lowerQuery)) {
+  // Matches: "show all the short calls", "all my short puts", "short call options on TSLA"
+  const isBulkOptionsQuery =
+    // Pattern: "show [me] [all] [the] [my] short/long calls/puts [options]"
+    /\bshow\s+(?:me\s+)?(?:all\s+)?(?:the\s+)?(?:my\s+)?(short|long)?\s*(call|put)s?\s*(?:options?)?\b/i.test(lowerQuery) ||
+    // Pattern: "all [the] [my] short/long calls/puts [options]"
+    /\ball\s+(?:the\s+)?(?:my\s+)?(short|long)?\s*(call|put)s?\s*(?:options?)?\b/i.test(lowerQuery) ||
+    // Pattern: "my short/long calls/puts [options]"
+    /\bmy\s+(short|long)?\s*(call|put)s?\s*(?:options?)?\b/i.test(lowerQuery) ||
+    // Pattern: "short/long calls/puts [options] on/for SYMBOL"
+    /\b(short|long)\s+(call|put)s?\s*(?:options?)?\s+(on|for)\b/i.test(lowerQuery) ||
+    // Pattern: "option trades"
+    /\boption\s+trades?\b/i.test(lowerQuery);
+
+  if (isBulkOptionsQuery) {
     return { cardType: 'advanced-options', symbol, tradeType, callPut, timePeriod };
   }
 
@@ -2268,7 +2280,7 @@ const UnifiedAssistant: React.FC = () => {
             filters={cardFilters}
           />
           {advancedData.trades && advancedData.trades.length > 0 && (
-            <AdvancedOptionsTable
+            <BulkOptionsCard
               trades={advancedData.trades}
               symbol={symbol}
               callPut={tradeUI.callPut}

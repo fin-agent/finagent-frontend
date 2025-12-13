@@ -103,13 +103,13 @@ function detectUserQueryIntent(query: string): QueryIntent | null {
 
   // Extract time period from query (comprehensive patterns)
   const timePeriodMatch = lowerQuery.match(
-    /\b(today|yesterday|last\s+week|this\s+week|last\s+month|this\s+month|last\s+year|this\s+year|last\s+\d+\s+days?|past\s+\d+\s+days?|last\s+\d+\s+trading\s+days?|past\s+\d+\s+trading\s+days?|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/
+    /\b(today|yesterday|last\s+week|this\s+week|last\s+month|this\s+month|last\s+year|this\s+year|last\s+\d+\s+days?|past\s+\d+\s+days?|last\s+\d+\s+months?|past\s+\d+\s+months?|last\s+\d+\s+trading\s+days?|past\s+\d+\s+trading\s+days?|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/
   );
   const timePeriod = timePeriodMatch?.[0];
 
   // Extract trade type context
-  const isSellQuery = /\b(sold|sell|short|written)\b/i.test(lowerQuery);
-  const isBuyQuery = /\b(bought|buy|long|purchased)\b/i.test(lowerQuery);
+  const isSellQuery = /\b(sold|sell|selling|short|written)\b/i.test(lowerQuery);
+  const isBuyQuery = /\b(bought|buy|buying|long|purchased)\b/i.test(lowerQuery);
   const tradeType = isSellQuery ? 'sell' : isBuyQuery ? 'buy' : undefined;
 
   // Extract call/put context

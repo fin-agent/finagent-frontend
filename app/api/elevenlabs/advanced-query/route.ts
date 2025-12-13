@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
+import { formatCalendarDate } from '@/src/lib/date-utils';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -331,7 +332,7 @@ export async function POST(req: NextRequest) {
 
     if (aggregation === 'total_premium') {
       const action = tradeType === 'sell' ? 'collected' : 'paid';
-      response = `You ${action} a total of $${totalNetAmount.toFixed(2)} in premium on ${tradeCount} ${normalizedSymbol || ''} ${callPut || ''} option trades (${totalContracts} contracts covering ${sharesCovered.toLocaleString()} shares)`;
+      response = `You ${action} a total of $${totalNetAmount.toFixed(2)} in premium on ${tradeCount} ${normalizedSymbol || ''} ${callPut || ''} option trades (${totalContracts} contracts covering ${sharesCovered} shares)`;
       if (fromDate || toDate) {
         response += ` during the specified period`;
       }
@@ -344,7 +345,10 @@ export async function POST(req: NextRequest) {
       const callPutText = trade['Call/Put'] === 'C' ? 'call' : 'put';
       const tradeTypeText = trade.TradeType === 'B' ? 'bought' : 'sold';
 
-      response = `You ${tradeTypeText} a quantity of ${qty} of $${strikeVal} strike ${callPutText} option on ${normalizedSymbol} on ${trade.Date} with an expiration date of ${trade.Expiration} for a premium of $${premium.toFixed(2)}.`;
+      // Use formatCalendarDate to ensure dates match UI display
+      const tradeDate = formatCalendarDate(trade.Date);
+      const expirationDate = trade.Expiration ? formatCalendarDate(trade.Expiration) : 'N/A';
+      response = `You ${tradeTypeText} ${qty} contracts of the $${strikeVal} strike ${callPutText} option on ${normalizedSymbol} on ${tradeDate} with expiration ${expirationDate} for a total premium of $${premium.toFixed(2)}.`;
     } else if (aggregation === 'count') {
       response = `Found ${tradeCount} trades`;
       if (normalizedSymbol) response += ` for ${normalizedSymbol}`;
@@ -371,7 +375,7 @@ export async function POST(req: NextRequest) {
         if (fromDate) response += ` ${fromDate}`;
         response += `, ${premiumAction} total premium of $${totalNetAmount.toFixed(2)}`;
         response += `. The average premium per share was $${avgPremiumPerShare.toFixed(2)}`;
-        response += `, covering ${sharesCovered.toLocaleString()} shares across ${tradeCount} trades.`;
+        response += `, covering ${sharesCovered} shares across ${tradeCount} trades.`;
       } else {
         // Mixed or stock-only query
         response = `Found ${tradeCount} trades`;
@@ -388,7 +392,7 @@ export async function POST(req: NextRequest) {
             response += ` (${calls.length} calls, ${puts.length} puts)`;
           }
         } else {
-          response += `${stockTrades.length} stock trades (${totalShares.toLocaleString()} shares)`;
+          response += `${stockTrades.length} stock trades (${totalShares} shares)`;
         }
 
         response += `. ${buyTrades.length} buys, ${sellTrades.length} sells. Total value: $${totalNetAmount.toFixed(2)}.`;

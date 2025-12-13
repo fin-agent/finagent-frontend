@@ -19,6 +19,7 @@ import { LastOptionTradeCard } from './generative-ui/LastOptionTradeCard';
 import { TradeQueryCard } from './generative-ui/TradeQueryCard';
 import { AccountSummary, type AccountQueryType } from './generative-ui/AccountSummary';
 import { FeesSummary, type FeeType } from './generative-ui/FeesSummary';
+import type { ClassificationResult, CardType } from '@/src/lib/intent-detection';
 
 type InputMode = 'voice' | 'text';
 type View = 'chat' | 'history';
@@ -224,6 +225,47 @@ function detectUserQueryIntent(query: string): QueryIntent | null {
   }
 
   return null;
+}
+
+/**
+ * Classify intent using GPT-based LLM classifier (via API)
+ * Returns null if classification fails or confidence is too low
+ */
+async function classifyIntentViaAPI(query: string): Promise<QueryIntent | null> {
+  try {
+    const response = await fetch('/api/classify-intent', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query }),
+    });
+
+    if (!response.ok) {
+      console.warn('[LLM Classifier] API error:', response.status);
+      return null;
+    }
+
+    const { result } = await response.json() as { result: ClassificationResult | null };
+
+    if (!result) {
+      console.log('[LLM Classifier] No confident match from GPT');
+      return null;
+    }
+
+    // Map ClassificationResult to QueryIntent format
+    return {
+      cardType: result.cardType as QueryIntent['cardType'],
+      symbol: result.entities.symbol,
+      tradeType: result.entities.tradeType,
+      timePeriod: result.entities.timePeriod,
+      callPut: result.entities.callPut,
+      expiration: result.entities.expiration,
+      accountQueryType: result.entities.accountQueryType,
+      feeType: result.entities.feeType,
+    };
+  } catch (error) {
+    console.error('[LLM Classifier] Error:', error);
+    return null;
+  }
 }
 
 // App color scheme (dark theme)
@@ -653,27 +695,100 @@ function detectAdvancedOptionsQuery(text: string): { tradeType?: 'buy' | 'sell';
   return { tradeType, callPut, timePeriod };
 }
 
-// Detect highest/lowest strike query results
-function detectHighestStrikeQuery(text: string): { isHighest: boolean; callPut: 'call' | 'put' } | null {
+// Parse highest/lowest strike data directly from agent text
+// This ensures UI card matches exactly what the agent said (no drift from separate API call)
+interface ParsedHighestStrikeData {
+  isHighest: boolean;
+  callPut: 'call' | 'put';
+  tradeType: 'buy' | 'sell';
+  strike: number;
+  date: string; // Keep as spoken date string
+  expiration: string; // Keep as spoken date string
+  contracts: number;
+  premium: number;
+  symbol: string;
+}
+
+function parseHighestStrikeFromText(text: string): ParsedHighestStrikeData | null {
   // Skip messages that are just "checking" without actual results
   const isJustChecking = /I'll check|let me check|checking your|retrieving|looking up/i.test(text);
   if (isJustChecking) return null;
 
   // Detect highest/lowest strike responses
-  // Matches patterns like:
-  // - "highest strike call/put"
-  // - "sold a quantity of ... $220 strike"
-  // - "sold 15 contracts of $220 strike" (common agent response format)
   const highestMatch = /(?:highest|maximum|top)\s+strike.*(?:call|put)|(?:sold|bought)\s+(?:a\s+quantity\s+of|\d+\s+contracts?\s+of).*\$\d+\s+strike/i.test(text);
   const lowestMatch = /(?:lowest|minimum|bottom)\s+strike.*(?:call|put)/i.test(text);
 
   if (!highestMatch && !lowestMatch) return null;
 
+  // Parse strike price: "$220 strike" or "$220"
+  const strikeMatch = text.match(/\$(\d+)\s*strike/i) || text.match(/\$(\d+)/);
+  const strike = strikeMatch ? parseInt(strikeMatch[1]) : 0;
+  if (!strike) return null;
+
+  // Parse date: "on September 10th, 2025" or "September 10th"
+  const dateMatch = text.match(/on\s+([A-Z][a-z]+\s+\d{1,2}(?:st|nd|rd|th)?,?\s*\d{4})/i) ||
+                    text.match(/on\s+([A-Z][a-z]+\s+\d{1,2}(?:st|nd|rd|th)?)/i);
+  const dateStr = dateMatch ? dateMatch[1] : '';
+
+  // Parse expiration: "expired on October 17th" or "expiration on October 17th"
+  const expMatch = text.match(/expir(?:ed|ation)\s+(?:on\s+)?([A-Z][a-z]+\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s*\d{4})?)/i);
+  const expStr = expMatch ? expMatch[1] : '';
+
+  // Parse contracts: "15 contracts" or "sold 15 contracts"
+  const contractsMatch = text.match(/(\d+)\s+contracts?/i);
+  const contracts = contractsMatch ? parseInt(contractsMatch[1]) : 0;
+
+  // Parse premium: "$1416 in premium" or "collecting $1416"
+  const premiumMatch = text.match(/(?:collecting|paid|for|total\s+premium\s+of)\s+\$?([\d,]+)/i) ||
+                       text.match(/\$?([\d,]+)\s+(?:in\s+)?premium/i);
+  const premium = premiumMatch ? parseFloat(premiumMatch[1].replace(/,/g, '')) : 0;
+
   // Determine call/put
   let callPut: 'call' | 'put' = 'call';
   if (/\bput\b/i.test(text) && !/\bcall\b/i.test(text)) callPut = 'put';
 
-  return { isHighest: highestMatch, callPut };
+  // Determine trade type
+  let tradeType: 'buy' | 'sell' = 'sell';
+  if (/\b(?:bought|purchased|buying)\b/i.test(text)) tradeType = 'buy';
+
+  // Extract symbol from text (company name or ticker)
+  let symbol = 'AAPL';
+  const symbolPatterns = [
+    { pattern: /Apple\s+Inc|Apple/i, ticker: 'AAPL' },
+    { pattern: /\bAAPL\b/, ticker: 'AAPL' },
+    { pattern: /Tesla/i, ticker: 'TSLA' },
+    { pattern: /\bTSLA\b/, ticker: 'TSLA' },
+    { pattern: /Google|Alphabet/i, ticker: 'GOOGL' },
+    { pattern: /\bGOOGL?\b/, ticker: 'GOOGL' },
+    { pattern: /Nvidia/i, ticker: 'NVDA' },
+    { pattern: /\bNVDA\b/, ticker: 'NVDA' },
+    { pattern: /\bSPY\b/, ticker: 'SPY' },
+  ];
+  for (const { pattern, ticker } of symbolPatterns) {
+    if (pattern.test(text)) {
+      symbol = ticker;
+      break;
+    }
+  }
+
+  return {
+    isHighest: highestMatch,
+    callPut,
+    tradeType,
+    strike,
+    date: dateStr,
+    expiration: expStr,
+    contracts,
+    premium,
+    symbol
+  };
+}
+
+// Legacy function for backward compatibility
+function detectHighestStrikeQuery(text: string): { isHighest: boolean; callPut: 'call' | 'put' } | null {
+  const parsed = parseHighestStrikeFromText(text);
+  if (!parsed) return null;
+  return { isHighest: parsed.isHighest, callPut: parsed.callPut };
 }
 
 // Detect total premium query results
@@ -983,6 +1098,9 @@ const UnifiedAssistant: React.FC = () => {
   // Store the pending query intent detected from user's message
   // This is used to determine which UI card to show when agent responds
   const pendingQueryIntentRef = useRef<QueryIntent | null>(null);
+  // Track the last processed message to prevent duplicates
+  // ElevenLabs SDK can sometimes fire onMessage multiple times for the same message
+  const lastProcessedMessageRef = useRef<{ content: string; timestamp: number } | null>(null);
 
   // Text-only ElevenLabs conversation (no voice, just text)
   const textOnlyConversation = useConversation({
@@ -995,6 +1113,15 @@ const UnifiedAssistant: React.FC = () => {
         if (role === 'user') {
           return;
         }
+
+        // Deduplicate: Skip if this is the same message we just processed (within 2 seconds)
+        const now = Date.now();
+        const lastMsg = lastProcessedMessageRef.current;
+        if (lastMsg && lastMsg.content === message.message && (now - lastMsg.timestamp) < 2000) {
+          console.log('🔍 [Text Mode] Skipping duplicate message');
+          return;
+        }
+        lastProcessedMessageRef.current = { content: message.message, timestamp: now };
 
         let tradeUI: TradeUIData | undefined;
 
@@ -1087,11 +1214,21 @@ const UnifiedAssistant: React.FC = () => {
           }
         }
         // Check for highest/lowest strike queries
+        // IMPORTANT: Parse data from agent's text to ensure UI card matches exactly what agent said
         if (!tradeUI) {
-          const strikeMatch = detectHighestStrikeQuery(message.message);
-          if (strikeMatch) {
-            const data = await fetchTradeData(symbol || '', 'highest-strike', undefined, undefined, { callPut: strikeMatch.callPut });
-            if (data) tradeUI = data;
+          const parsedStrike = parseHighestStrikeFromText(message.message);
+          if (parsedStrike) {
+            console.log('🎯 [Text Parse] Using parsed highest-strike data from agent text:', parsedStrike);
+            tradeUI = {
+              type: 'highest-strike',
+              symbol: parsedStrike.symbol,
+              tradeType: parsedStrike.tradeType,
+              callPut: parsedStrike.callPut,
+              data: {
+                parsedFromText: true,
+                ...parsedStrike
+              }
+            };
           }
           // Check for total premium queries
           else {
@@ -1334,6 +1471,15 @@ const UnifiedAssistant: React.FC = () => {
       if (message.message) {
         const role = message.source === 'user' ? 'user' : 'assistant';
 
+        // Deduplicate: Skip if this is the same message we just processed (within 2 seconds)
+        const now = Date.now();
+        const lastMsg = lastProcessedMessageRef.current;
+        if (lastMsg && lastMsg.content === message.message && (now - lastMsg.timestamp) < 2000) {
+          console.log('🔍 [Voice Mode] Skipping duplicate message');
+          return;
+        }
+        lastProcessedMessageRef.current = { content: message.message, timestamp: now };
+
         let tradeUI: TradeUIData | undefined;
 
         // For assistant messages, check if we should render trade UI
@@ -1347,24 +1493,45 @@ const UnifiedAssistant: React.FC = () => {
           if (pendingIntent) {
             console.log('🎯 [Voice Intent-Based] Using stored intent:', pendingIntent);
             pendingQueryIntentRef.current = null; // Clear immediately
-            // IMPORTANT: Only use symbol from intent, don't fall back to extracted symbol
-            // This prevents extracting dollar amounts or other text from agent's response as symbols
-            const intentSymbol = pendingIntent.symbol || '';
-            const data = await fetchTradeData(
-              intentSymbol,
-              pendingIntent.cardType,
-              pendingIntent.tradeType,
-              pendingIntent.timePeriod,
-              {
-                callPut: pendingIntent.callPut,
-                expiration: pendingIntent.expiration,
-                accountQueryType: pendingIntent.accountQueryType,
-                feeType: pendingIntent.feeType,
+
+            // SPECIAL CASE: For highest-strike, use text parsing to ensure UI matches agent's spoken dates
+            // The API returns different dates than what the agent says, causing date mismatch
+            if (pendingIntent.cardType === 'highest-strike') {
+              console.log('🎯 [Voice Intent-Based] highest-strike detected - using text parsing directly');
+              const parsedStrike = parseHighestStrikeFromText(message.message);
+              if (parsedStrike) {
+                console.log('🎯 [Voice Intent-Based] Parsed highest-strike from text:', parsedStrike);
+                tradeUI = {
+                  type: 'highest-strike',
+                  symbol: parsedStrike.symbol,
+                  tradeType: parsedStrike.tradeType,
+                  callPut: parsedStrike.callPut,
+                  data: {
+                    parsedFromText: true,
+                    ...parsedStrike
+                  }
+                };
               }
-            );
-            if (data) {
-              tradeUI = data;
-              console.log('🎯 [Voice Intent-Based] Successfully rendered card:', pendingIntent.cardType);
+            } else {
+              // IMPORTANT: Only use symbol from intent, don't fall back to extracted symbol
+              // This prevents extracting dollar amounts or other text from agent's response as symbols
+              const intentSymbol = pendingIntent.symbol || '';
+              const data = await fetchTradeData(
+                intentSymbol,
+                pendingIntent.cardType,
+                pendingIntent.tradeType,
+                pendingIntent.timePeriod,
+                {
+                  callPut: pendingIntent.callPut,
+                  expiration: pendingIntent.expiration,
+                  accountQueryType: pendingIntent.accountQueryType,
+                  feeType: pendingIntent.feeType,
+                }
+              );
+              if (data) {
+                tradeUI = data;
+                console.log('🎯 [Voice Intent-Based] Successfully rendered card:', pendingIntent.cardType);
+              }
             }
           }
 
@@ -1424,12 +1591,21 @@ const UnifiedAssistant: React.FC = () => {
             }
           }
           // Check for highest/lowest strike queries
+          // IMPORTANT: Parse data from agent's text to ensure UI card matches exactly what agent said
           if (!tradeUI) {
-            const strikeMatch = detectHighestStrikeQuery(message.message);
-            if (strikeMatch) {
-              console.log('🔍 Highest strike detected:', strikeMatch);
-              const data = await fetchTradeData(symbol || '', 'highest-strike', undefined, undefined, { callPut: strikeMatch.callPut });
-              if (data) tradeUI = data;
+            const parsedStrike = parseHighestStrikeFromText(message.message);
+            if (parsedStrike) {
+              console.log('🎯 [Voice Text Parse] Using parsed highest-strike data from agent text:', parsedStrike);
+              tradeUI = {
+                type: 'highest-strike',
+                symbol: parsedStrike.symbol,
+                tradeType: parsedStrike.tradeType,
+                callPut: parsedStrike.callPut,
+                data: {
+                  parsedFromText: true,
+                  ...parsedStrike
+                }
+              };
             }
             // Check for total premium queries
             else {
@@ -1819,14 +1995,21 @@ const UnifiedAssistant: React.FC = () => {
     setInputValue('');
     setIsSending(true);
 
-    // Detect query intent from user's message BEFORE sending to agent
-    // This is more reliable than parsing the agent's variable response
-    const intent = detectUserQueryIntent(message);
+    // Classify query intent using GPT-based LLM classifier
+    // Falls back to regex-based detection if LLM fails
+    console.log('🎯 [Intent Detection] User query:', message);
+    let intent: QueryIntent | null = await classifyIntentViaAPI(message);
+    if (intent) {
+      console.log('🎯 [LLM Classifier] Intent:', intent);
+    } else {
+      // Fallback to regex-based detection if LLM fails
+      console.log('🎯 [LLM Classifier] Falling back to regex detection');
+      intent = detectUserQueryIntent(message);
+      console.log('🎯 [Regex Detection] Intent:', intent);
+    }
     pendingQueryIntentRef.current = intent;
     // NOTE: cardRenderedForCycleRef is reset in render_ui client tool, NOT here
     // Resetting here would cause late message fragments from previous query to trigger duplicates
-    console.log('🎯 [Intent Detection] User query:', message);
-    console.log('🎯 [Intent Detection] Detected intent:', intent);
 
     let convId = currentConversationId;
     if (!convId) {
@@ -2304,6 +2487,30 @@ const UnifiedAssistant: React.FC = () => {
 
     if (type === 'highest-strike') {
       console.log('🎨 Rendering highest strike card with data:', data);
+
+      // Check if data was parsed from agent's text response (ensures UI matches exactly what agent said)
+      const parsedData = data as { parsedFromText?: boolean } & ParsedHighestStrikeData;
+      if (parsedData.parsedFromText) {
+        console.log('🎯 [Render] Using parsed text data for highest-strike card');
+        return (
+          <div style={{ marginTop: '12px' }}>
+            <HighestStrikeCard
+              symbol={parsedData.symbol}
+              strike={parsedData.strike}
+              callPut={parsedData.callPut === 'call' ? 'Call' : 'Put'}
+              tradeType={parsedData.tradeType}
+              date={parsedData.date}
+              expiration={parsedData.expiration}
+              contracts={parsedData.contracts}
+              premium={parsedData.premium}
+              isHighest={parsedData.isHighest}
+              datePreformatted={true}
+            />
+          </div>
+        );
+      }
+
+      // Fallback: Use API data (legacy path)
       const strikeData = data as {
         trades: Array<{
           TradeID: number;

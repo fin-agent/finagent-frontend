@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import { parseTimeExpression } from '@/src/lib/date-parser';
-import { getDateOffset } from '@/src/lib/date-utils';
+import { getDateOffset, formatCalendarDate } from '@/src/lib/date-utils';
 
 // Initialize Supabase client
 const supabase = createClient(
@@ -157,10 +157,10 @@ async function getTradeStats(symbol: string, tradeType?: string, year?: number, 
     totalShares,
     totalValue,
     highestPrice,
-    highestPriceDate: highestTrade?.Date,
+    highestPriceDate: highestTrade?.Date ? formatCalendarDate(highestTrade.Date) : undefined,
     highestPriceShares: highestTrade ? parseFloat(highestTrade.StockShareQty || '0') : 0,
     lowestPrice,
-    lowestPriceDate: lowestTrade?.Date,
+    lowestPriceDate: lowestTrade?.Date ? formatCalendarDate(lowestTrade.Date) : undefined,
     lowestPriceShares: lowestTrade ? parseFloat(lowestTrade.StockShareQty || '0') : 0,
     averagePrice: avgPrice,
   };
@@ -256,14 +256,14 @@ async function getProfitableTrades(symbol: string, onlyProfitable: boolean = tru
 
       matchedTrades.push({
         buyTradeId: buy.TradeID,
-        buyDate: buy.Date,
+        buyDate: formatCalendarDate(buy.Date),
         securityType: secType === 'S' ? 'Stock' : 'Option',
         symbol: buy.Symbol,
         quantity: parseFloat(buy.StockShareQty || buy.OptionContracts || '0'),
         buyPrice: parseFloat(buy.StockTradePrice || buy.OptionTradePremium || '0'),
         buyCost: parseFloat(buy.NetAmount || '0'),
         sellTradeId: sell.TradeID,
-        sellDate: sell.Date,
+        sellDate: formatCalendarDate(sell.Date),
         sellPrice: parseFloat(sell.StockTradePrice || sell.OptionTradePremium || '0'),
         sellProceeds: parseFloat(sell.NetAmount || '0'),
         profitLoss,

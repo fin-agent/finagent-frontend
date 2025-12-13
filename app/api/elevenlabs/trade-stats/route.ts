@@ -15,15 +15,34 @@ function formatPrice(price: number): string {
   return `$${price.toFixed(2)}`;
 }
 
-// Format number with commas
+// Format number without commas (TTS requires no commas - commas break speech synthesis)
 function formatNumber(num: number): string {
-  return Math.round(num).toLocaleString();
+  return Math.round(num).toString();
 }
 
-// The ElevenLabs LLM should pass the ticker symbol directly
-// No need to maintain a symbol map - the LLM knows company→ticker mappings
+// Symbol mapping for common company names (fallback if agent doesn't convert)
+const SYMBOL_MAP: Record<string, string> = {
+  'apple': 'AAPL',
+  'google': 'GOOGL',
+  'alphabet': 'GOOGL',
+  'amazon': 'AMZN',
+  'microsoft': 'MSFT',
+  'tesla': 'TSLA',
+  'nvidia': 'NVDA',
+  'meta': 'META',
+  'facebook': 'META',
+  'netflix': 'NFLX',
+  'amd': 'AMD',
+  'intel': 'INTC',
+  'bank of america': 'BAC',
+  'citigroup': 'C',
+  'gamestop': 'GME',
+  'lucid': 'LCID',
+};
+
 function normalizeSymbol(input: string): string {
-  return input.toUpperCase().trim();
+  const lower = input.toLowerCase().trim();
+  return SYMBOL_MAP[lower] || input.toUpperCase();
 }
 
 export async function POST(req: NextRequest) {

@@ -164,7 +164,8 @@ export async function POST(req: NextRequest) {
     });
 
     // Build response message with explicit counts
-    const totalValueStr = `$${totalValue.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
+    // TTS requires no commas in numbers - commas break speech synthesis
+    const totalValueStr = `$${totalValue.toFixed(2)}`;
 
     // Always state the exact counts clearly
     const summaryLine = `You executed ${tradeCount} total trades${symbolText} ${description} from ${displayRange}: ${stockCount} stock trade${stockCount !== 1 ? 's' : ''} and ${optionCount} option trade${optionCount !== 1 ? 's' : ''} with a total value of ${totalValueStr}.`;

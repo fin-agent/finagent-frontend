@@ -94,20 +94,57 @@ Profitable trades calculation uses First-In-First-Out methodology:
 - Profit = Sell NetAmount + Buy NetAmount (buy is negative)
 - Matching done separately for Stock (S) and Option (O) security types
 
+### LLM-Based Intent Detection (`src/lib/intent-detection/`)
+
+User queries are classified using Azure OpenAI GPT-5.2 for accurate intent detection and entity extraction. This replaced the brittle regex-based detection system.
+
+**Architecture:**
+```
+User Query → /api/classify-intent → GPT-5.2 → { intent, confidence, entities }
+                                                    ↓
+                                          fetchTradeData() → UI Card
+```
+
+**Key Files:**
+- `src/lib/intent-detection/classifier.ts` - GPT API call with structured JSON output
+- `src/lib/intent-detection/prompt.ts` - Developer prompt with intent definitions
+- `src/lib/intent-detection/intents/registry.ts` - All 14 intent definitions
+- `src/lib/intent-detection/types.ts` - TypeScript interfaces
+- `app/api/classify-intent/route.ts` - Next.js API endpoint
+
+**Intent Domains:**
+| Domain | Intents |
+|--------|---------|
+| `trades` | `trades.profitable`, `trades.detailed`, `trades.time_based`, `trades.stats`, `trades.summary`, `trades.average_price` |
+| `options` | `options.bulk`, `options.last_trade`, `options.expiring`, `options.highest_strike`, `options.total_premium` |
+| `account` | `account.summary` |
+| `fees` | `fees.query` |
+
+**Entity Extraction:**
+- `symbol` - Stock ticker (converts company names: "Apple" → "AAPL")
+- `timePeriod` - "today", "yesterday", "last week", "this month", "last 30 days"
+- `tradeType` - "buy" or "sell"
+- `callPut` - "call" or "put"
+- `expiration` - "tomorrow", "this week", "this month"
+- `accountQueryType` - For account balance queries
+- `feeType` - For fees/commission queries
+
+**Fallback:** If LLM classification fails, regex-based `detectUserQueryIntent()` is used as fallback.
+
 ### Generative UI Detection
 
-UI components are triggered by pattern matching on agent messages:
-- "profitable trades" / "profit of $X" → ProfitableTrades card
-- "highest price" / "lowest sold" / "average" → TradeStats card
-- "found X trades" → TradesTable card
-- "X stock trades and Y option trades" → TradeSummary card
-- "X call/put option contracts" / "across N trades" → AdvancedOptionsTable (bulk options)
-- "last/most recent call/put" → LastOptionTradeCard (single trade)
-- "options expiring tomorrow/this week" → ExpiringOptionsTable
-- "highest strike" → HighestStrikeCard
-- "total premium" → TotalPremiumCard
-- "cash balance" / "buying power" / "account equity" / "margin" → AccountSummary card
-- "commission" / "fees" / "interest" → FeesSummary card
+UI components are triggered by LLM intent classification (primary) or pattern matching on agent messages (fallback):
+- `trades.profitable` → ProfitableTrades card
+- `trades.stats` → TradeStats card
+- `trades.detailed` → TradesTable card
+- `trades.summary` → TradeSummary card
+- `options.bulk` → BulkOptionsCard (bulk options)
+- `options.last_trade` → LastOptionTradeCard (single trade)
+- `options.expiring` → ExpiringOptionsTable
+- `options.highest_strike` → HighestStrikeCard
+- `options.total_premium` → TotalPremiumCard
+- `account.summary` → AccountSummary card
+- `fees.query` → FeesSummary card
 
 ### Bulk vs Single Trade Detection
 

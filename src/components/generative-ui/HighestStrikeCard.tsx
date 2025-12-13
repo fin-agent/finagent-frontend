@@ -13,6 +13,7 @@ interface HighestStrikeCardProps {
   contracts: number;
   premium: number;
   isHighest?: boolean; // true for highest, false for lowest
+  datePreformatted?: boolean; // If true, dates are already formatted (from agent text parsing)
 }
 
 const formatCurrency = (value: number) => {
@@ -64,7 +65,11 @@ export function HighestStrikeCard({
   contracts,
   premium,
   isHighest = true,
+  datePreformatted = false,
 }: HighestStrikeCardProps) {
+  // Format dates - if preformatted (from agent text parsing), use as-is to ensure UI matches agent speech
+  const displayDate = datePreformatted ? date : formatDate(date);
+  const displayExpiration = datePreformatted ? expiration : formatDate(expiration);
   const actionLabel = tradeType === 'sell' ? 'Sold' : 'Bought';
   const directionLabel = isHighest ? 'Highest' : 'Lowest';
   const isCall = callPut === 'Call';
@@ -283,14 +288,14 @@ export function HighestStrikeCard({
             <Calendar size={14} color={colors.textMuted} />
             <span style={styles.detailLabel}>Trade Date</span>
           </div>
-          <div style={styles.detailValue}>{formatDate(date)}</div>
+          <div style={styles.detailValue}>{displayDate}</div>
         </div>
         <div style={styles.detailItem}>
           <div style={styles.detailIcon}>
             <Target size={14} color={colors.textMuted} />
             <span style={styles.detailLabel}>Expiration</span>
           </div>
-          <div style={styles.detailValue}>{formatDate(expiration)}</div>
+          <div style={styles.detailValue}>{displayExpiration}</div>
         </div>
         <div style={styles.detailItem}>
           <div style={styles.detailIcon}>

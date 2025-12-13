@@ -111,9 +111,16 @@ export async function POST(req: NextRequest) {
         if (matchingBuy) {
           matchingBuy.matched = true;
 
-          const buyPrice = parseFloat(matchingBuy.StockTradePrice || matchingBuy.OptionTradePremium || '0');
-          const sellPrice = parseFloat(sell.StockTradePrice || sell.OptionTradePremium || '0');
-          const quantity = parseFloat(matchingBuy.StockShareQty || matchingBuy.OptionContracts || '0');
+          // Helper to safely parse numeric values (handles null, undefined, empty strings)
+          const safeParseFloat = (val: unknown): number => {
+            if (val === null || val === undefined || val === '') return 0;
+            const parsed = parseFloat(String(val));
+            return isNaN(parsed) ? 0 : parsed;
+          };
+
+          const buyPrice = safeParseFloat(matchingBuy.StockTradePrice) || safeParseFloat(matchingBuy.OptionTradePremium);
+          const sellPrice = safeParseFloat(sell.StockTradePrice) || safeParseFloat(sell.OptionTradePremium);
+          const quantity = safeParseFloat(matchingBuy.StockShareQty) || safeParseFloat(matchingBuy.OptionContracts);
 
           // Calculate profit based on actual prices: (sellPrice - buyPrice) * quantity
           const profitLoss = (sellPrice - buyPrice) * quantity;

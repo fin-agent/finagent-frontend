@@ -140,12 +140,22 @@ export function parseTimeExpression(expression: string): ParsedDateQuery | null 
     }
   }
 
-  // Pattern: "last week" / "past week"
+  // Pattern: "last week" / "past week" - actual previous calendar week (Sun-Sat)
   if (/^(last|past)\s*week$/.test(lowerExpr)) {
+    const dayOfWeek = today.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+
+    // Find last Saturday (end of previous week)
+    // If today is Sunday (0), last Saturday was yesterday (1 day ago)
+    // If today is Monday (1), last Saturday was 2 days ago
+    // If today is Saturday (6), last Saturday was 7 days ago (previous Saturday, not today)
+    const daysToLastSaturday = dayOfWeek === 6 ? 7 : dayOfWeek + 1;
     const endDate = new Date(today);
-    endDate.setDate(endDate.getDate() - 1); // Yesterday
-    const startDate = new Date(today);
-    startDate.setDate(startDate.getDate() - 7);
+    endDate.setDate(today.getDate() - daysToLastSaturday);
+
+    // Start of last week is 6 days before last Saturday (the Sunday)
+    const startDate = new Date(endDate);
+    startDate.setDate(endDate.getDate() - 6);
+
     return {
       type: 'range',
       dateRange: {

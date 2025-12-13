@@ -2,9 +2,8 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useConversation } from '@elevenlabs/react';
-import { Mic, MessageSquare, X, Phone, Loader2, Plus, History, Send, Filter } from 'lucide-react';
+import { Mic, MessageSquare, X, Phone, Loader2, Plus, History, Send } from 'lucide-react';
 import { TradesTable, type ActiveFilters, type Aggregations } from './generative-ui/TradesTable';
-import { QueryBuilder } from './QueryBuilder';
 import { TradeSummary } from './generative-ui/TradeSummary';
 import { TradeStats } from './generative-ui/TradeStats';
 import { OptionStats } from './generative-ui/OptionStats';
@@ -32,7 +31,7 @@ interface Conversation {
 }
 
 interface TradeUIData {
-  type: 'summary' | 'detailed' | 'stats' | 'profitable' | 'time-based' | 'option-stats' | 'average-price' | 'advanced-options' | 'highest-strike' | 'total-premium' | 'expiring-options' | 'last-option' | 'query-builder-result' | 'account-balance' | 'fees';
+  type: 'summary' | 'detailed' | 'stats' | 'profitable' | 'time-based' | 'option-stats' | 'average-price' | 'advanced-options' | 'highest-strike' | 'total-premium' | 'expiring-options' | 'last-option' | 'account-balance' | 'fees';
   symbol: string;
   tradeType?: 'buy' | 'sell' | 'all';
   timePeriod?: string;
@@ -50,6 +49,166 @@ interface TranscriptMessage {
   content: string;
   timestamp: Date;
   tradeUI?: TradeUIData;
+}
+
+// Query intent detected from USER's message (not agent response)
+// This is more reliable than parsing agent's natural language response
+interface QueryIntent {
+  cardType: TradeUIData['type'];
+  symbol?: string;
+  tradeType?: 'buy' | 'sell';
+  timePeriod?: string;
+  callPut?: 'call' | 'put';
+  expiration?: string;
+  accountQueryType?: AccountQueryType;
+  feeType?: FeeType;
+}
+
+/**
+ * Detect query intent from USER's message (before sending to agent)
+ * This is more reliable than parsing agent's variable responses
+ */
+function detectUserQueryIntent(query: string): QueryIntent | null {
+  const lowerQuery = query.toLowerCase();
+
+  // Company name to symbol mapping for user queries
+  const companyToSymbol: Record<string, string> = {
+    'apple': 'AAPL', 'google': 'GOOGL', 'alphabet': 'GOOGL',
+    'amazon': 'AMZN', 'microsoft': 'MSFT', 'tesla': 'TSLA',
+    'nvidia': 'NVDA', 'meta': 'META', 'facebook': 'META',
+    'netflix': 'NFLX', 'amd': 'AMD', 'intel': 'INTC',
+    'gamestop': 'GME', 'qualcomm': 'QCOM',
+  };
+
+  // Extract symbol from query - check company names first, then uppercase tickers
+  let symbol: string | undefined;
+
+  // Check for company names
+  for (const [company, ticker] of Object.entries(companyToSymbol)) {
+    if (new RegExp(`\\b${company}\\b`, 'i').test(lowerQuery)) {
+      symbol = ticker;
+      break;
+    }
+  }
+
+  // If no company name found, check for uppercase tickers
+  if (!symbol) {
+    const symbolMatch = query.match(/\b([A-Z]{2,5})\b/g);
+    symbol = symbolMatch?.find(s =>
+      KNOWN_SYMBOLS.includes(s) ||
+      !['THE', 'FOR', 'AND', 'ALL', 'MY', 'HOW', 'WHAT', 'SHOW', 'GET', 'DID', 'HAVE', 'HAS'].includes(s)
+    );
+  }
+
+  // Extract time period from query (comprehensive patterns)
+  const timePeriodMatch = lowerQuery.match(
+    /\b(today|yesterday|last\s+week|this\s+week|last\s+month|this\s+month|last\s+year|this\s+year|last\s+\d+\s+days?|past\s+\d+\s+days?|last\s+\d+\s+trading\s+days?|past\s+\d+\s+trading\s+days?|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/
+  );
+  const timePeriod = timePeriodMatch?.[0];
+
+  // Extract trade type context
+  const isSellQuery = /\b(sold|sell|short|written)\b/i.test(lowerQuery);
+  const isBuyQuery = /\b(bought|buy|long|purchased)\b/i.test(lowerQuery);
+  const tradeType = isSellQuery ? 'sell' : isBuyQuery ? 'buy' : undefined;
+
+  // Extract call/put context
+  const isCallQuery = /\bcalls?\b/i.test(lowerQuery);
+  const isPutQuery = /\bputs?\b/i.test(lowerQuery);
+  const callPut = isCallQuery && !isPutQuery ? 'call' : isPutQuery && !isCallQuery ? 'put' : undefined;
+
+  // 1. Account balance queries
+  if (/\b(balance|buying\s*power|equity|margin|net\s*liquidation|nlv|market\s*value)\b/i.test(lowerQuery)) {
+    let accountQueryType: AccountQueryType = 'account_summary';
+    if (/cash\s*balance/i.test(lowerQuery)) accountQueryType = 'cash_balance';
+    else if (/buying\s*power/i.test(lowerQuery)) accountQueryType = 'buying_power';
+    else if (/nlv|net\s*liquidation/i.test(lowerQuery)) accountQueryType = 'nlv';
+    else if (/margin/i.test(lowerQuery)) accountQueryType = 'overnight_margin';
+    else if (/market\s*value/i.test(lowerQuery)) accountQueryType = 'market_value';
+    return { cardType: 'account-balance', accountQueryType, timePeriod };
+  }
+
+  // 2. Fees queries
+  if (/\b(fees?|commissions?|interest|locate)\b/i.test(lowerQuery)) {
+    let feeType: FeeType = 'commission';
+    if (/credit\s*interest/i.test(lowerQuery)) feeType = 'credit_interest';
+    else if (/debit\s*interest|margin\s*interest/i.test(lowerQuery)) feeType = 'debit_interest';
+    else if (/locate/i.test(lowerQuery)) feeType = 'locate_fee';
+    return { cardType: 'fees', feeType, timePeriod, symbol };
+  }
+
+  // 3. Expiring options
+  if (/\b(expir(?:ing|es?|ation))\s+(tomorrow|this\s+week|this\s+month)/i.test(lowerQuery) ||
+      /options?\s+expir/i.test(lowerQuery)) {
+    const expirationMatch = lowerQuery.match(/expir\w*\s+(tomorrow|this\s+week|this\s+month)/i) ||
+                            lowerQuery.match(/(tomorrow|this\s+week|this\s+month)/i);
+    return { cardType: 'expiring-options', expiration: expirationMatch?.[1] || 'tomorrow', symbol };
+  }
+
+  // 4. Bulk options queries (all short/long calls/puts, option trades)
+  if (/\b(all|show|my)\s+(short|long)?\s*(call|put)s?\b/i.test(lowerQuery) ||
+      /\b(short|long)\s+(call|put)s?\s+(on|for|I)\b/i.test(lowerQuery) ||
+      /\boption\s+trades?\b/i.test(lowerQuery)) {
+    return { cardType: 'advanced-options', symbol, tradeType, callPut, timePeriod };
+  }
+
+  // 5. Last/most recent option trade
+  if (/\b(last|most\s+recent|latest)\s+(call|put|option)\b/i.test(lowerQuery)) {
+    return { cardType: 'last-option', symbol, tradeType, callPut };
+  }
+
+  // 6. Highest/lowest strike
+  if (/\b(highest|lowest)\s+strike\b/i.test(lowerQuery)) {
+    return { cardType: 'highest-strike', symbol, callPut };
+  }
+
+  // 7. Total premium
+  if (/\btotal\s+premium\b/i.test(lowerQuery) || /\bpremium\s+(collected|paid|received)\b/i.test(lowerQuery)) {
+    return { cardType: 'total-premium', symbol, tradeType, timePeriod };
+  }
+
+  // 8. Average price (simple average query - before general stats)
+  if (/\b(average|avg)\s+(price|cost)\b/i.test(lowerQuery) &&
+      !/\b(highest|lowest|max|min)\b/i.test(lowerQuery)) {
+    return { cardType: 'average-price', symbol, tradeType, timePeriod };
+  }
+
+  // 9. Trade stats (highest/lowest price)
+  if (/\b(highest|lowest|max|min)\s+(price|sold|bought|paid)\b/i.test(lowerQuery)) {
+    return { cardType: 'stats', symbol, tradeType, timePeriod };
+  }
+
+  // 10. Profitable trades
+  if (/\b(profitable|profit|gains?|winners?|winning)\b/i.test(lowerQuery)) {
+    return { cardType: 'profitable', symbol };
+  }
+
+  // 11. Time-based trades (yesterday, last week, etc.) - MUST COME BEFORE detailed trades
+  if (timePeriod && !symbol) {
+    // Portfolio-wide time query (no symbol specified)
+    return { cardType: 'time-based', symbol: undefined, timePeriod };
+  }
+  if (timePeriod && symbol) {
+    // Symbol-specific time query
+    return { cardType: 'time-based', symbol, timePeriod };
+  }
+
+  // 12. Trade summary (how many trades)
+  if (/\b(how\s+many|count|number\s+of|total)\s+trades?\b/i.test(lowerQuery)) {
+    return { cardType: 'summary', symbol };
+  }
+
+  // 13. Detailed trades (show trades, list trades, what did I trade)
+  if (/\b(show|list|get|display|what)\s+(my\s+|did\s+I\s+)?(all\s+)?trades?\b/i.test(lowerQuery)) {
+    // If no symbol and no time period, this is a general "show trades" - use detailed with symbol if available
+    return { cardType: 'detailed', symbol };
+  }
+
+  // 14. General symbol query (e.g., "AAPL" or "Apple" by itself, or "my Apple trades")
+  if (symbol && /\btrades?\b/i.test(lowerQuery)) {
+    return { cardType: 'detailed', symbol };
+  }
+
+  return null;
 }
 
 // App color scheme (dark theme)
@@ -586,18 +745,29 @@ function detectBulkOptionsQuery(text: string): { tradeType?: 'buy' | 'sell'; cal
   // 1. "across N trades" - explicitly mentions multiple trades
   // 2. "covering N shares across" - mentions shares covered
   // 3. "you sold N call option contracts" - mentions total contracts traded
-  // 4. "N option trades" or "N call/put trades" - mentions trade count
+  // 4. "N option trades" or "N call/put trades" - mentions trade count (but NOT in "stock trades and option trades" summaries)
   // 5. "total premium of $X" with contracts mention - bulk sale/purchase
-  const hasBulkTrades = /across\s+\d+\s+trades/i.test(text) ||
+
+  // Check if this is a portfolio summary with both stock and option trades
+  // Patterns like "5 stock trades and 3 option trades" should NOT trigger bulk options
+  // Must cover all variants from detectAllTradesQuery
+  const isPortfolioSummary = /\d+\s+stock\s+trades?\s+and\s+\d+\s+option\s+trades?/i.test(text) ||
+                             /\d+\s+stock\s+and\s+\d+\s+option\s+trades?/i.test(text) ||
+                             /includes?\s+\d+\s+stock\s+trades?\s+and\s+\d+\s+option\s+trades?/i.test(text) ||
+                             /executed\s+\d+\s+trades?\s+(?:yesterday|today|last\s+week|this\s+week|last\s+month)/i.test(text);
+
+  const hasBulkTrades = !isPortfolioSummary && (
+                        /across\s+\d+\s+trades/i.test(text) ||
                         /covering\s+[\d,]+\s+shares\s+across/i.test(text) ||
                         /you\s+(?:bought|sold)\s+\d+\s+(?:call|put)\s+option\s+contracts/i.test(text) ||
                         /\d+\s+(?:call|put)\s+option\s+contracts/i.test(text) ||
                         /total\s+premium\s+of\s+\$[\d,]+.*contracts/i.test(text) ||
                         /collecting\s+total\s+premium/i.test(text) ||
-                        /\d+\s+option\s+trades/i.test(text);
+                        /\d+\s+option\s+trades/i.test(text));
 
   console.log('🔍 detectBulkOptionsQuery checking:', text.substring(0, 150));
   console.log('🔍 hasBulkTrades patterns:', {
+    isPortfolioSummary,
     acrossNTrades: /across\s+\d+\s+trades/i.test(text),
     coveringShares: /covering\s+[\d,]+\s+shares\s+across/i.test(text),
     youSoldContracts: /you\s+(?:bought|sold)\s+\d+\s+(?:call|put)\s+option\s+contracts/i.test(text),
@@ -606,7 +776,7 @@ function detectBulkOptionsQuery(text: string): { tradeType?: 'buy' | 'sell'; cal
     collectingTotalPremium: /collecting\s+total\s+premium/i.test(text),
     NOptionTrades: /\d+\s+option\s+trades/i.test(text),
   });
-  console.log('🔍 hasBulkTrades result:', hasBulkTrades);
+  console.log('🔍 hasBulkTrades result:', hasBulkTrades, '(skipped if isPortfolioSummary)');
 
   if (!hasBulkTrades) return null;
 
@@ -783,8 +953,6 @@ const UnifiedAssistant: React.FC = () => {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
-  const [showQueryBuilder, setShowQueryBuilder] = useState(false);
-  const [isQueryLoading, setIsQueryLoading] = useState(false);
   const [transcript, setTranscript] = useState<TranscriptMessage[]>([]);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -797,6 +965,9 @@ const UnifiedAssistant: React.FC = () => {
   const voiceTitleSetRef = useRef(false);
   // Track if we're resuming from history (don't clear transcript)
   const isResumingFromHistoryRef = useRef(false);
+  // Store the pending query intent detected from user's message
+  // This is used to determine which UI card to show when agent responds
+  const pendingQueryIntentRef = useRef<QueryIntent | null>(null);
 
   // Text-only ElevenLabs conversation (no voice, just text)
   const textOnlyConversation = useConversation({
@@ -815,14 +986,44 @@ const UnifiedAssistant: React.FC = () => {
         console.log('🔍 [Text Mode] Message:', message.message.substring(0, 150));
         console.log('🔍 [Text Mode] Extracted symbol:', symbol);
 
+        // PRIORITY 1: Use stored intent from user's query (most reliable)
+        const pendingIntent = pendingQueryIntentRef.current;
+        if (pendingIntent) {
+          console.log('🎯 [Intent-Based] Using stored intent:', pendingIntent);
+          const intentSymbol = pendingIntent.symbol || symbol || '';
+          const data = await fetchTradeData(
+            intentSymbol,
+            pendingIntent.cardType,
+            pendingIntent.tradeType,
+            pendingIntent.timePeriod,
+            {
+              callPut: pendingIntent.callPut,
+              expiration: pendingIntent.expiration,
+              accountQueryType: pendingIntent.accountQueryType,
+              feeType: pendingIntent.feeType,
+            }
+          );
+          if (data) {
+            tradeUI = data;
+            console.log('🎯 [Intent-Based] Successfully rendered card:', pendingIntent.cardType);
+          }
+          // Clear the pending intent after use
+          pendingQueryIntentRef.current = null;
+        }
+
+        // PRIORITY 2: Fallback to regex-based detection on agent's response
+        // This handles follow-up questions or cases where intent wasn't detected
+
         // Check for account balance queries FIRST (highest priority)
-        const accountMatch = detectAccountBalanceQuery(message.message);
-        console.log('🔍 [Text Mode] Account balance match:', accountMatch);
-        if (accountMatch) {
-          console.log('🔍 [Text Mode] Account balance query detected:', accountMatch.queryType);
-          const data = await fetchTradeData('', 'account-balance', undefined, accountMatch.timePeriod, { accountQueryType: accountMatch.queryType });
-          console.log('🔍 [Text Mode] Account balance data:', data);
-          if (data) tradeUI = data;
+        if (!tradeUI) {
+          const accountMatch = detectAccountBalanceQuery(message.message);
+          console.log('🔍 [Text Mode] Account balance match:', accountMatch);
+          if (accountMatch) {
+            console.log('🔍 [Text Mode] Account balance query detected:', accountMatch.queryType);
+            const data = await fetchTradeData('', 'account-balance', undefined, accountMatch.timePeriod, { accountQueryType: accountMatch.queryType });
+            console.log('🔍 [Text Mode] Account balance data:', data);
+            if (data) tradeUI = data;
+          }
         }
         // Check for fees/commissions queries
         if (!tradeUI) {
@@ -1119,15 +1320,44 @@ const UnifiedAssistant: React.FC = () => {
         // For assistant messages, check if we should render trade UI
         if (role === 'assistant') {
           const symbol = extractSymbolOrCompany(message.message);
-          console.log('🔍 Message:', message.message.substring(0, 100));
-          console.log('🔍 Extracted symbol:', symbol);
+          console.log('🔍 [Voice Mode] Message:', message.message.substring(0, 100));
+          console.log('🔍 [Voice Mode] Extracted symbol:', symbol);
 
+          // PRIORITY 1: Use stored intent from user's query (most reliable)
+          const pendingIntent = pendingQueryIntentRef.current;
+          if (pendingIntent) {
+            console.log('🎯 [Voice Intent-Based] Using stored intent:', pendingIntent);
+            // For portfolio-wide queries (no symbol in intent), don't fall back to agent's symbol
+            const intentSymbol = pendingIntent.symbol || '';
+            const data = await fetchTradeData(
+              intentSymbol,
+              pendingIntent.cardType,
+              pendingIntent.tradeType,
+              pendingIntent.timePeriod,
+              {
+                callPut: pendingIntent.callPut,
+                expiration: pendingIntent.expiration,
+                accountQueryType: pendingIntent.accountQueryType,
+                feeType: pendingIntent.feeType,
+              }
+            );
+            if (data) {
+              tradeUI = data;
+              console.log('🎯 [Voice Intent-Based] Successfully rendered card:', pendingIntent.cardType);
+            }
+            // Clear the pending intent after use
+            pendingQueryIntentRef.current = null;
+          }
+
+          // PRIORITY 2: Fallback to regex-based detection on agent's response
           // Check for account balance queries FIRST (highest priority)
-          const accountMatch = detectAccountBalanceQuery(message.message);
-          if (accountMatch) {
-            console.log('🔍 Account balance query detected:', accountMatch.queryType);
-            const data = await fetchTradeData('', 'account-balance', undefined, accountMatch.timePeriod, { accountQueryType: accountMatch.queryType });
-            if (data) tradeUI = data;
+          if (!tradeUI) {
+            const accountMatch = detectAccountBalanceQuery(message.message);
+            if (accountMatch) {
+              console.log('🔍 Account balance query detected:', accountMatch.queryType);
+              const data = await fetchTradeData('', 'account-balance', undefined, accountMatch.timePeriod, { accountQueryType: accountMatch.queryType });
+              if (data) tradeUI = data;
+            }
           }
           // Check for fees/commissions queries
           if (!tradeUI) {
@@ -1570,6 +1800,13 @@ const UnifiedAssistant: React.FC = () => {
     setInputValue('');
     setIsSending(true);
 
+    // Detect query intent from user's message BEFORE sending to agent
+    // This is more reliable than parsing the agent's variable response
+    const intent = detectUserQueryIntent(message);
+    pendingQueryIntentRef.current = intent;
+    console.log('🎯 [Intent Detection] User query:', message);
+    console.log('🎯 [Intent Detection] Detected intent:', intent);
+
     let convId = currentConversationId;
     if (!convId) {
       convId = await createConversation(message.slice(0, 50));
@@ -1660,94 +1897,6 @@ const UnifiedAssistant: React.FC = () => {
     stopVoiceSession();
   }, [stopVoiceSession]);
 
-  // Handle advanced query execution from QueryBuilder
-  const handleQueryExecute = useCallback(async (filters: {
-    symbol: string;
-    securityType: 'all' | 'S' | 'O';
-    tradeType: 'all' | 'B' | 'S';
-    callPut: 'all' | 'C' | 'P';
-    fromDate: string;
-    toDate: string;
-    expiration: string;
-    strike: string;
-  }) => {
-    setIsQueryLoading(true);
-    try {
-      const res = await fetch('/api/advanced-query-ui', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          symbol: filters.symbol || undefined,
-          securityType: filters.securityType !== 'all' ? filters.securityType : undefined,
-          tradeType: filters.tradeType !== 'all' ? filters.tradeType : undefined,
-          callPut: filters.callPut !== 'all' ? filters.callPut : undefined,
-          fromDate: filters.fromDate || undefined,
-          toDate: filters.toDate || undefined,
-          expiration: filters.expiration || undefined,
-          strike: filters.strike ? parseFloat(filters.strike) : undefined,
-        }),
-      });
-      const data = await res.json();
-      setShowQueryBuilder(false);
-
-      // Add query results as a message in the transcript
-      const queryDesc = generateQueryDescription(filters);
-      const resultMsg: TranscriptMessage = {
-        id: `msg-${Date.now()}-query`,
-        role: 'assistant',
-        content: `Here are your ${queryDesc}:`,
-        timestamp: new Date(),
-        tradeUI: {
-          type: 'query-builder-result',
-          symbol: filters.symbol || 'Portfolio',
-          tradeType: filters.tradeType === 'B' ? 'buy' : filters.tradeType === 'S' ? 'sell' : undefined,
-          callPut: filters.callPut === 'C' ? 'call' : filters.callPut === 'P' ? 'put' : undefined,
-          data: {
-            ...data,
-            queryFilters: filters, // Pass the original filters for TradeQueryCard
-          },
-        },
-      };
-      setTranscript(prev => [...prev, resultMsg]);
-    } catch (error) {
-      console.error('Query execution error:', error);
-    } finally {
-      setIsQueryLoading(false);
-    }
-  }, []);
-
-  // Generate human-readable query description
-  const generateQueryDescription = (filters: {
-    symbol: string;
-    securityType: 'all' | 'S' | 'O';
-    tradeType: 'all' | 'B' | 'S';
-    callPut: 'all' | 'C' | 'P';
-    fromDate: string;
-    toDate: string;
-    expiration: string;
-    strike: string;
-  }): string => {
-    const parts: string[] = [];
-    if (filters.tradeType === 'B') parts.push('bought');
-    else if (filters.tradeType === 'S') parts.push('sold');
-
-    if (filters.securityType === 'O') {
-      if (filters.callPut === 'C') parts.push('call options');
-      else if (filters.callPut === 'P') parts.push('put options');
-      else parts.push('options');
-    } else if (filters.securityType === 'S') {
-      parts.push('stocks');
-    } else {
-      parts.push('trades');
-    }
-
-    if (filters.symbol) parts.push(`for ${filters.symbol}`);
-    if (filters.fromDate) parts.push(`from ${filters.fromDate}`);
-    if (filters.expiration) parts.push(`expiring ${filters.expiration}`);
-
-    return parts.join(' ') || 'trades';
-  };
-
   const toggleMode = useCallback(async () => {
     const newMode = inputMode === 'text' ? 'voice' : 'text';
     setInputMode(newMode);
@@ -1798,7 +1947,7 @@ const UnifiedAssistant: React.FC = () => {
     }
 
     if (type === 'detailed') {
-      // Check if data already contains trades (from QueryBuilder)
+      // Check if data already contains trades
       const queryData = data as { trades?: Array<Record<string, unknown>>; aggregations?: Aggregations; filters?: ActiveFilters };
       if (queryData.trades && queryData.trades.length > 0) {
         return (
@@ -2324,98 +2473,6 @@ const UnifiedAssistant: React.FC = () => {
       }
     }
 
-    if (type === 'query-builder-result') {
-      console.log('🎨 Rendering query builder result with data:', data);
-      const queryData = data as {
-        trades: Array<{
-          TradeID: number;
-          Date: string;
-          Symbol: string;
-          SecurityType: string;
-          TradeType: string;
-          StockTradePrice: string;
-          StockShareQty: string;
-          OptionContracts: string;
-          OptionTradePremium: string;
-          GrossAmount: string;
-          NetAmount: string;
-          Strike?: string;
-          Expiration?: string;
-          'Call/Put'?: string;
-        }>;
-        aggregations?: Aggregations;
-        filters?: ActiveFilters;
-        queryFilters?: {
-          symbol: string;
-          securityType: 'all' | 'S' | 'O';
-          tradeType: 'all' | 'B' | 'S';
-          callPut: 'all' | 'C' | 'P';
-          fromDate: string;
-          toDate: string;
-          expiration: string;
-          strike: string;
-        };
-      };
-
-      // Build query description from filters
-      const filters = (queryData.queryFilters || {}) as {
-        tradeType?: string;
-        securityType?: string;
-        callPut?: string;
-        symbol?: string;
-        fromDate?: string;
-        toDate?: string;
-        strike?: string;
-        expiration?: string;
-      };
-      const queryParts: string[] = ['Show'];
-      if (filters.tradeType === 'S') queryParts.push('all sold');
-      else if (filters.tradeType === 'B') queryParts.push('all bought');
-      else queryParts.push('all');
-
-      if (filters.securityType === 'O') {
-        if (filters.callPut === 'C') queryParts.push('call options');
-        else if (filters.callPut === 'P') queryParts.push('put options');
-        else queryParts.push('options');
-      } else if (filters.securityType === 'S') {
-        queryParts.push('stocks');
-      } else {
-        queryParts.push('trades');
-      }
-
-      if (filters.symbol) queryParts.push(`for ${filters.symbol}`);
-      if (filters.fromDate) queryParts.push(`from ${filters.fromDate}`);
-      const queryText = queryParts.join(' ');
-
-      // Build filter object for TradeQueryCard
-      const cardFilters = {
-        fromDate: queryData.filters?.fromDate || filters.fromDate,
-        toDate: queryData.filters?.toDate || filters.toDate,
-        symbol: queryData.filters?.symbol || filters.symbol || symbol,
-        securityType: filters.securityType === 'O' ? 'Option' : filters.securityType === 'S' ? 'Stock' : undefined,
-        tradeType: filters.tradeType === 'S' ? 'Sell' : filters.tradeType === 'B' ? 'Buy' : undefined,
-        callPut: filters.callPut === 'C' ? 'Call' : filters.callPut === 'P' ? 'Put' : undefined,
-        strike: filters.strike ? parseFloat(filters.strike) : undefined,
-        expiration: filters.expiration,
-      };
-
-      return (
-        <div style={{ marginTop: '12px' }}>
-          <TradeQueryCard
-            query={queryText}
-            filters={cardFilters}
-          />
-          {queryData.trades && queryData.trades.length > 0 && (
-            <TradesTable
-              trades={queryData.trades}
-              filters={queryData.filters}
-              aggregations={queryData.aggregations}
-            />
-          )}
-        </div>
-      );
-    }
-
     if (type === 'account-balance') {
       console.log('🎨 Rendering account balance card with data:', data);
       const accountData = data as {
@@ -2916,19 +2973,6 @@ const UnifiedAssistant: React.FC = () => {
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           {currentView === 'chat' && (
             <>
-              <button
-                onClick={() => setShowQueryBuilder(true)}
-                style={{
-                  ...styles.modeButton,
-                  backgroundColor: 'rgba(0, 200, 6, 0.1)',
-                  borderColor: 'rgba(0, 200, 6, 0.3)',
-                  color: '#00c806',
-                }}
-                title="Advanced Query Builder"
-              >
-                <Filter size={14} />
-                Query
-              </button>
               <button onClick={toggleMode} style={styles.modeButton}>
                 {inputMode === 'text' ? (
                   <>
@@ -3308,14 +3352,6 @@ const UnifiedAssistant: React.FC = () => {
         }
       `}</style>
 
-      {/* Query Builder Modal */}
-      {showQueryBuilder && (
-        <QueryBuilder
-          onExecute={handleQueryExecute}
-          onClose={() => setShowQueryBuilder(false)}
-          isLoading={isQueryLoading}
-        />
-      )}
     </div>
   );
 };

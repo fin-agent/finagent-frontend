@@ -11,7 +11,6 @@ import { ProfitableTrades } from './generative-ui/ProfitableTrades';
 import { TimeBasedTrades } from './generative-ui/TimeBasedTrades';
 import { TimePeriodStats } from './generative-ui/TimePeriodStats';
 import { AveragePrice } from './generative-ui/AveragePrice';
-import { AdvancedOptionsTable } from './generative-ui/AdvancedOptionsTable';
 import { BulkOptionsCard } from './generative-ui/BulkOptionsCard';
 import { HighestStrikeCard } from './generative-ui/HighestStrikeCard';
 import { TotalPremiumCard } from './generative-ui/TotalPremiumCard';
@@ -65,20 +64,6 @@ interface QueryIntent {
   feeType?: FeeType;
 }
 
-// UI render parameters received from ElevenLabs client tool
-// The agent calls render_ui with these params after responding to a query
-interface UIRenderParams {
-  cardType: 'summary' | 'detailed' | 'stats' | 'profitable' | 'time-based' |
-            'option-stats' | 'average-price' | 'advanced-options' | 'highest-strike' |
-            'total-premium' | 'expiring-options' | 'last-option' | 'account-balance' | 'fees';
-  symbol?: string;
-  tradeType?: 'buy' | 'sell';
-  timePeriod?: string;
-  callPut?: 'call' | 'put';
-  expiration?: string;
-  accountQueryType?: AccountQueryType;
-  feeType?: FeeType;
-}
 
 /**
  * Detect query intent from USER's message (before sending to agent)
@@ -185,7 +170,7 @@ function detectUserQueryIntent(query: string): QueryIntent | null {
 
   // 6. Highest/lowest strike
   if (/\b(highest|lowest)\s+strike\b/i.test(lowerQuery)) {
-    return { cardType: 'highest-strike', symbol, callPut };
+    return { cardType: 'highest-strike', symbol, tradeType, callPut, timePeriod };
   }
 
   // 7. Total premium
@@ -225,8 +210,11 @@ function detectUserQueryIntent(query: string): QueryIntent | null {
   }
 
   // 13. Detailed trades (show trades, list trades, what did I trade)
-  if (/\b(show|list|get|display|what)\s+(my\s+|did\s+I\s+)?(all\s+)?trades?\b/i.test(lowerQuery)) {
-    // If no symbol and no time period, this is a general "show trades" - use detailed with symbol if available
+  // Updated to handle "show my Apple trades" pattern (symbol between "my" and "trades")
+  if (/\b(show|list|get|display|what)\s+(my\s+|did\s+I\s+)?(\w+\s+)*(all\s+)?trades?\b/i.test(lowerQuery) ||
+      /\btrades?\s+(for|on)\s+/i.test(lowerQuery) ||
+      /\bmy\s+\w+\s+trades?\b/i.test(lowerQuery)) {
+    // If symbol detected and query mentions "trades", this is a detailed trades request
     return { cardType: 'detailed', symbol };
   }
 
@@ -995,30 +983,18 @@ const UnifiedAssistant: React.FC = () => {
   // Store the pending query intent detected from user's message
   // This is used to determine which UI card to show when agent responds
   const pendingQueryIntentRef = useRef<QueryIntent | null>(null);
-  // Store UI render params from ElevenLabs client tool (render_ui)
-  // This is the NEW primary method - agent calls render_ui with structured params
-  const pendingUIParamsRef = useRef<UIRenderParams | null>(null);
-
-  // ElevenLabs client tools - called by the agent to trigger UI rendering
-  // This replaces fragile regex-based intent detection with structured params from the agent
-  const clientTools = {
-    render_ui: async (params: UIRenderParams) => {
-      console.log('🎯 [Client Tool] render_ui called with:', params);
-      pendingUIParamsRef.current = params;
-      return "UI rendering queued";
-    }
-  };
 
   // Text-only ElevenLabs conversation (no voice, just text)
   const textOnlyConversation = useConversation({
     textOnly: true,
-    clientTools,
     onMessage: async (message) => {
       if (message.message && inputMode === 'text') {
         const role = message.source === 'user' ? 'user' : 'assistant';
 
         // Skip user messages as we add them immediately on send
-        if (role === 'user') return;
+        if (role === 'user') {
+          return;
+        }
 
         let tradeUI: TradeUIData | undefined;
 
@@ -1027,59 +1003,33 @@ const UnifiedAssistant: React.FC = () => {
         console.log('🔍 [Text Mode] Message:', message.message.substring(0, 150));
         console.log('🔍 [Text Mode] Extracted symbol:', symbol);
 
-        // PRIORITY 0 (HIGHEST): Use client tool params from render_ui (most reliable)
-        // The agent calls render_ui with structured params, eliminating regex guesswork
-        const uiParams = pendingUIParamsRef.current;
-        if (uiParams) {
-          console.log('🎯 [Client Tool] Using render_ui params:', uiParams);
+        // PRIMARY: Use stored intent from user's query (deterministic)
+        const pendingIntent = pendingQueryIntentRef.current;
+        if (pendingIntent) {
+          console.log('🎯 [Intent-Based] Using stored intent:', pendingIntent);
+          pendingQueryIntentRef.current = null; // Clear immediately
+          // IMPORTANT: Only use symbol from intent, don't fall back to extracted symbol
+          // This prevents extracting dollar amounts or other text from agent's response as symbols
+          const intentSymbol = pendingIntent.symbol || '';
           const data = await fetchTradeData(
-            uiParams.symbol || '',
-            uiParams.cardType,
-            uiParams.tradeType,
-            uiParams.timePeriod,
+            intentSymbol,
+            pendingIntent.cardType,
+            pendingIntent.tradeType,
+            pendingIntent.timePeriod,
             {
-              callPut: uiParams.callPut,
-              expiration: uiParams.expiration,
-              accountQueryType: uiParams.accountQueryType,
-              feeType: uiParams.feeType,
+              callPut: pendingIntent.callPut,
+              expiration: pendingIntent.expiration,
+              accountQueryType: pendingIntent.accountQueryType,
+              feeType: pendingIntent.feeType,
             }
           );
           if (data) {
             tradeUI = data;
-            console.log('🎯 [Client Tool] Successfully rendered card:', uiParams.cardType);
-          }
-          // Clear the pending params after use
-          pendingUIParamsRef.current = null;
-        }
-
-        // PRIORITY 1: Use stored intent from user's query (fallback if agent doesn't call render_ui)
-        if (!tradeUI) {
-          const pendingIntent = pendingQueryIntentRef.current;
-          if (pendingIntent) {
-            console.log('🎯 [Intent-Based] Using stored intent:', pendingIntent);
-            const intentSymbol = pendingIntent.symbol || symbol || '';
-            const data = await fetchTradeData(
-              intentSymbol,
-              pendingIntent.cardType,
-              pendingIntent.tradeType,
-              pendingIntent.timePeriod,
-              {
-                callPut: pendingIntent.callPut,
-                expiration: pendingIntent.expiration,
-                accountQueryType: pendingIntent.accountQueryType,
-                feeType: pendingIntent.feeType,
-              }
-            );
-            if (data) {
-              tradeUI = data;
-              console.log('🎯 [Intent-Based] Successfully rendered card:', pendingIntent.cardType);
-            }
-            // Clear the pending intent after use
-            pendingQueryIntentRef.current = null;
+            console.log('🎯 [Intent-Based] Successfully rendered card:', pendingIntent.cardType);
           }
         }
 
-        // PRIORITY 2: Fallback to regex-based detection on agent's response
+        // FALLBACK: Regex-based detection on agent's response
         // This handles follow-up questions or cases where intent wasn't detected
 
         // Check for account balance queries FIRST (highest priority)
@@ -1268,7 +1218,8 @@ const UnifiedAssistant: React.FC = () => {
         const data = await res.json();
         return { type, symbol, tradeType, timePeriod, data };
       } else if (type === 'last-option') {
-        // Fetch the most recent option trade for the symbol
+        // Fetch ALL option trades matching the criteria (not just 1)
+        // The render logic will decide whether to show single card or bulk card
         endpoint = '/api/advanced-query-ui';
         body = {
           symbol: symbol || undefined,
@@ -1277,7 +1228,7 @@ const UnifiedAssistant: React.FC = () => {
           callPut: extraParams?.callPut === 'call' ? 'C' : extraParams?.callPut === 'put' ? 'P' : undefined,
           orderBy: 'date',
           orderDir: 'desc',
-          limit: 1,
+          // No limit - fetch all trades to match what agent reports
         };
         const res = await fetch(endpoint, {
           method: 'POST',
@@ -1365,7 +1316,6 @@ const UnifiedAssistant: React.FC = () => {
 
   // ElevenLabs Conversation Hook - single source of truth for both voice and text
   const elevenLabsConversation = useConversation({
-    clientTools,
     onConnect: () => {
       console.log('ElevenLabs connected');
       // Only clear transcript if not resuming from history
@@ -1392,60 +1342,33 @@ const UnifiedAssistant: React.FC = () => {
           console.log('🔍 [Voice Mode] Message:', message.message.substring(0, 100));
           console.log('🔍 [Voice Mode] Extracted symbol:', symbol);
 
-          // PRIORITY 0 (HIGHEST): Use client tool params from render_ui (most reliable)
-          // The agent calls render_ui with structured params, eliminating regex guesswork
-          const uiParams = pendingUIParamsRef.current;
-          if (uiParams) {
-            console.log('🎯 [Voice Client Tool] Using render_ui params:', uiParams);
+          // PRIMARY: Use stored intent from user's query (deterministic)
+          const pendingIntent = pendingQueryIntentRef.current;
+          if (pendingIntent) {
+            console.log('🎯 [Voice Intent-Based] Using stored intent:', pendingIntent);
+            pendingQueryIntentRef.current = null; // Clear immediately
+            // IMPORTANT: Only use symbol from intent, don't fall back to extracted symbol
+            // This prevents extracting dollar amounts or other text from agent's response as symbols
+            const intentSymbol = pendingIntent.symbol || '';
             const data = await fetchTradeData(
-              uiParams.symbol || '',
-              uiParams.cardType,
-              uiParams.tradeType,
-              uiParams.timePeriod,
+              intentSymbol,
+              pendingIntent.cardType,
+              pendingIntent.tradeType,
+              pendingIntent.timePeriod,
               {
-                callPut: uiParams.callPut,
-                expiration: uiParams.expiration,
-                accountQueryType: uiParams.accountQueryType,
-                feeType: uiParams.feeType,
+                callPut: pendingIntent.callPut,
+                expiration: pendingIntent.expiration,
+                accountQueryType: pendingIntent.accountQueryType,
+                feeType: pendingIntent.feeType,
               }
             );
             if (data) {
               tradeUI = data;
-              console.log('🎯 [Voice Client Tool] Successfully rendered card:', uiParams.cardType);
-            }
-            // Clear the pending params after use
-            pendingUIParamsRef.current = null;
-          }
-
-          // PRIORITY 1: Use stored intent from user's query (fallback if agent doesn't call render_ui)
-          if (!tradeUI) {
-            const pendingIntent = pendingQueryIntentRef.current;
-            if (pendingIntent) {
-              console.log('🎯 [Voice Intent-Based] Using stored intent:', pendingIntent);
-              // For portfolio-wide queries (no symbol in intent), don't fall back to agent's symbol
-              const intentSymbol = pendingIntent.symbol || '';
-              const data = await fetchTradeData(
-                intentSymbol,
-                pendingIntent.cardType,
-                pendingIntent.tradeType,
-                pendingIntent.timePeriod,
-                {
-                  callPut: pendingIntent.callPut,
-                  expiration: pendingIntent.expiration,
-                  accountQueryType: pendingIntent.accountQueryType,
-                  feeType: pendingIntent.feeType,
-                }
-              );
-              if (data) {
-                tradeUI = data;
-                console.log('🎯 [Voice Intent-Based] Successfully rendered card:', pendingIntent.cardType);
-              }
-              // Clear the pending intent after use
-              pendingQueryIntentRef.current = null;
+              console.log('🎯 [Voice Intent-Based] Successfully rendered card:', pendingIntent.cardType);
             }
           }
 
-          // PRIORITY 2: Fallback to regex-based detection on agent's response
+          // FALLBACK: Regex-based detection on agent's response (for follow-up questions)
           // Check for account balance queries FIRST (highest priority)
           if (!tradeUI) {
             const accountMatch = detectAccountBalanceQuery(message.message);
@@ -1900,6 +1823,8 @@ const UnifiedAssistant: React.FC = () => {
     // This is more reliable than parsing the agent's variable response
     const intent = detectUserQueryIntent(message);
     pendingQueryIntentRef.current = intent;
+    // NOTE: cardRenderedForCycleRef is reset in render_ui client tool, NOT here
+    // Resetting here would cause late message fragments from previous query to trigger duplicates
     console.log('🎯 [Intent Detection] User query:', message);
     console.log('🎯 [Intent Detection] Detected intent:', intent);
 
@@ -2401,10 +2326,9 @@ const UnifiedAssistant: React.FC = () => {
         );
         const highestStrikeTrade = sortedByStrike[0];
 
-        // Calculate total premium correctly: premium_per_share * contracts * 100
-        const premiumPerShare = parseFloat(highestStrikeTrade.OptionTradePremium || '0');
+        // Use NetAmount for actual transaction total (includes fees/adjustments)
         const contracts = parseInt(highestStrikeTrade.OptionContracts || '0');
-        const totalPremium = premiumPerShare * contracts * 100;
+        const totalPremium = Math.abs(parseFloat(highestStrikeTrade.NetAmount || '0'));
 
         return (
           <div style={{ marginTop: '12px' }}>
@@ -2426,6 +2350,8 @@ const UnifiedAssistant: React.FC = () => {
 
     if (type === 'total-premium') {
       console.log('🎨 Rendering total premium card with data:', data);
+      console.log('🎨 Data type:', typeof data);
+      console.log('🎨 Data keys:', data ? Object.keys(data as object) : 'null');
       const premiumData = data as {
         trades: Array<{
           TradeID: number;
@@ -2448,6 +2374,8 @@ const UnifiedAssistant: React.FC = () => {
         };
       };
 
+      console.log('🎨 premiumData.aggregations:', premiumData.aggregations);
+      console.log('🎨 Will render card:', !!premiumData.aggregations);
       if (premiumData.aggregations) {
         return (
           <div style={{ marginTop: '12px' }}>
@@ -2537,7 +2465,34 @@ const UnifiedAssistant: React.FC = () => {
       };
 
       if (lastOptionData.trades && lastOptionData.trades.length > 0) {
-        const trade = lastOptionData.trades[0]; // Get the most recent trade
+        // If multiple trades, use BulkOptionsCard for aggregate view
+        if (lastOptionData.trades.length > 1 || (lastOptionData.aggregations && lastOptionData.aggregations.totalTrades > 1)) {
+          const trade = lastOptionData.trades[0];
+          const isCall = trade['Call/Put'] === 'C';
+          const isBuy = trade.TradeType === 'B';
+          const displaySymbol = trade.UnderlyingSymbol || trade.Symbol;
+
+          return (
+            <div style={{ marginTop: '12px' }}>
+              <BulkOptionsCard
+                trades={lastOptionData.trades}
+                symbol={displaySymbol}
+                callPut={isCall ? 'call' : 'put'}
+                tradeType={isBuy ? 'buy' : 'sell'}
+                aggregations={{
+                  totalTrades: lastOptionData.aggregations?.totalTrades || lastOptionData.trades.length,
+                  totalPremium: lastOptionData.aggregations?.totalPremium || 0,
+                  totalContracts: lastOptionData.aggregations?.totalContracts,
+                  callCount: lastOptionData.aggregations?.callCount || 0,
+                  putCount: lastOptionData.aggregations?.putCount || 0,
+                }}
+              />
+            </div>
+          );
+        }
+
+        // Single trade - use LastOptionTradeCard
+        const trade = lastOptionData.trades[0];
         const isCall = trade['Call/Put'] === 'C';
         const isBuy = trade.TradeType === 'B';
         const contracts = parseInt(trade.OptionContracts || '0');
@@ -2559,10 +2514,6 @@ const UnifiedAssistant: React.FC = () => {
               contracts={contracts}
               premium={premium}
               totalValue={totalValue}
-              totalTrades={lastOptionData.aggregations?.totalTrades}
-              avgPremium={lastOptionData.aggregations?.totalPremium
-                ? lastOptionData.aggregations.totalPremium / (lastOptionData.aggregations.totalTrades || 1)
-                : undefined}
             />
           </div>
         );
@@ -3337,7 +3288,12 @@ const UnifiedAssistant: React.FC = () => {
               </div>
             ) : (
               <>
-                {transcript.map((msg) => (
+                {transcript.map((msg) => {
+                  // Debug logging for tradeUI
+                  if (msg.role === 'assistant') {
+                    console.log('📝 [Render] Message has tradeUI:', !!msg.tradeUI, 'type:', msg.tradeUI?.type, 'id:', msg.id);
+                  }
+                  return (
                   <div key={msg.id}>
                     <div
                       style={{
@@ -3379,7 +3335,8 @@ const UnifiedAssistant: React.FC = () => {
                     {/* Render trade UI if available */}
                     {msg.tradeUI && renderTradeUI(msg.tradeUI)}
                   </div>
-                ))}
+                  );
+                })}
                 {/* Scroll anchor */}
                 <div style={{ height: '1px' }} />
               </>

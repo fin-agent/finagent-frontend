@@ -66,7 +66,10 @@ export function TotalPremiumCard({
   const isSell = tradeType === 'sell';
   const actionLabel = isSell ? 'Collected' : tradeType === 'all' ? 'Total' : 'Paid';
   const actionVerb = isSell ? 'Selling' : tradeType === 'all' ? 'Trading' : 'Buying';
-  const avgPremium = totalTrades > 0 ? totalPremium / totalTrades : 0;
+  // Calculate shares covered (1 contract = 100 shares)
+  const totalShares = totalContracts * 100;
+  // Per share premium (what options traders care about)
+  const perSharePremium = totalShares > 0 ? totalPremium / totalShares : 0;
 
   const styles: Record<string, React.CSSProperties> = {
     container: {
@@ -299,8 +302,8 @@ export function TotalPremiumCard({
           <div style={styles.statIcon}>
             <TrendingUp size={16} color={colors.textMuted} />
           </div>
-          <div style={styles.statLabel}>Avg Premium</div>
-          <div style={styles.statValue}>{formatCurrency(avgPremium)}</div>
+          <div style={styles.statLabel}>Per Share</div>
+          <div style={styles.statValue}>{formatCurrency(perSharePremium)}</div>
         </div>
         <div style={styles.statItem}>
           <div style={styles.statIcon}>

@@ -316,7 +316,7 @@ export function LastOptionTradeCard({
         <div style={styles.heroSymbol}>{symbol}</div>
         <div style={styles.heroStrike}>${strike.toFixed(2)} Strike</div>
         <div style={styles.heroSubtext}>
-          {actionLabel} {contracts} contract{contracts !== 1 ? 's' : ''} @ {formatCurrency(premium)} per contract
+          {actionLabel} {contracts} contract{contracts !== 1 ? 's' : ''} @ {formatCurrency(premium)}/share
         </div>
       </div>
 
@@ -335,6 +335,9 @@ export function LastOptionTradeCard({
             Contracts
           </div>
           <div style={styles.detailValue}>{contracts}</div>
+          <div style={{ fontSize: '11px', color: colors.textMuted, marginTop: '2px' }}>
+            {(contracts * 100).toLocaleString()} shares
+          </div>
         </div>
         <div style={styles.detailItem}>
           <div style={styles.detailLabel}>
@@ -346,9 +349,12 @@ export function LastOptionTradeCard({
         <div style={styles.detailItem}>
           <div style={styles.detailLabel}>
             <DollarSign size={12} color={colors.cyan} />
-            Premium
+            Premium/Share
           </div>
           <div style={styles.detailValue}>{formatCurrency(premium)}</div>
+          <div style={{ fontSize: '11px', color: colors.textMuted, marginTop: '2px' }}>
+            {formatCurrency(premium * 100)}/contract
+          </div>
         </div>
       </div>
 

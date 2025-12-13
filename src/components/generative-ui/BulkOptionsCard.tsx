@@ -1,13 +1,28 @@
 'use client';
 
 import React, { useState } from 'react';
-import { TrendingDown, TrendingUp, Zap, Target, Clock, ChevronDown, ChevronUp } from 'lucide-react';
+import { TrendingDown, TrendingUp, Zap, Target, ChevronDown, ChevronUp, Calendar } from 'lucide-react';
+
+// Parse OCC option symbol to extract expiration date
+// Format: AAPL251121C00175000 -> "Nov 21, 2025"
+function parseExpirationFromSymbol(occSymbol: string): string | null {
+  const match = occSymbol.match(/^[A-Z]{1,6}(\d{6})[CP]\d{8}$/);
+  if (match) {
+    const dateStr = match[1]; // YYMMDD
+    const year = 2000 + parseInt(dateStr.substring(0, 2));
+    const month = parseInt(dateStr.substring(2, 4)) - 1;
+    const day = parseInt(dateStr.substring(4, 6));
+    const date = new Date(year, month, day);
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }
+  return null;
+}
 
 interface OptionTrade {
   TradeID: number;
   Date: string;
   Symbol: string;
-  SecurityType: string;
+  SecurityType?: string;
   TradeType: string;
   Strike?: string;
   Expiration?: string;
@@ -377,57 +392,115 @@ export function BulkOptionsCard({ trades, symbol, callPut, tradeType, timePeriod
         {isExpanded && (
           <div style={{
             borderTop: '1px solid #1a1a1a',
-            maxHeight: '300px',
+            maxHeight: '400px',
             overflowY: 'auto',
           }}>
+            {/* Table Header */}
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: '70px 80px 60px 70px 50px 90px',
+              padding: '10px 16px',
+              backgroundColor: '#0f0f0f',
+              borderBottom: '1px solid #1f1f1f',
+              position: 'sticky',
+              top: 0,
+              zIndex: 1,
+            }}>
+              {['DATE', 'STRIKE', 'TYPE', 'EXPIRY', 'QTY', 'PREMIUM'].map((header) => (
+                <div key={header} style={{
+                  fontSize: '9px',
+                  fontWeight: 700,
+                  color: '#555',
+                  letterSpacing: '0.8px',
+                  textAlign: header === 'PREMIUM' || header === 'QTY' ? 'right' : 'left',
+                }}>
+                  {header}
+                </div>
+              ))}
+            </div>
+            {/* Trade Rows */}
             {trades.map((trade, i) => {
               const netAmount = Math.abs(parseFloat(trade.NetAmount || '0'));
               const contracts = parseFloat(trade.OptionContracts || '0');
               const strike = parseFloat(trade.Strike || '0');
               const isTradeCall = trade['Call/Put'] === 'C';
+              const expiry = trade.Expiration
+                ? formatDate(trade.Expiration)
+                : parseExpirationFromSymbol(trade.Symbol);
+              const typeColor = isTradeCall ? '#3b82f6' : '#ec4899';
 
               return (
                 <div
                   key={trade.TradeID}
                   style={{
                     display: 'grid',
-                    gridTemplateColumns: '80px 1fr 80px 100px',
+                    gridTemplateColumns: '70px 80px 60px 70px 50px 90px',
                     alignItems: 'center',
-                    padding: '12px 20px',
-                    backgroundColor: i % 2 === 0 ? '#0c0c0c' : '#0a0a0a',
+                    padding: '11px 16px',
+                    backgroundColor: i % 2 === 0 ? '#0c0c0c' : '#090909',
                     borderBottom: '1px solid #151515',
-                    gap: '12px',
+                    transition: 'background-color 0.15s ease',
                   }}
+                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#111'}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = i % 2 === 0 ? '#0c0c0c' : '#090909'}
                 >
+                  {/* Trade Date */}
                   <div style={{
-                    fontSize: '12px',
+                    fontSize: '11px',
+                    color: '#777',
+                    fontWeight: 500,
+                  }}>
+                    {formatDate(trade.Date)}
+                  </div>
+                  {/* Strike */}
+                  <div style={{
+                    fontSize: '13px',
+                    fontWeight: 700,
+                    color: '#fff',
+                  }}>
+                    ${strike.toFixed(0)}
+                  </div>
+                  {/* Call/Put Badge */}
+                  <div>
+                    <span style={{
+                      fontSize: '9px',
+                      fontWeight: 700,
+                      padding: '3px 6px',
+                      borderRadius: '4px',
+                      backgroundColor: typeColor + '18',
+                      color: typeColor,
+                      letterSpacing: '0.3px',
+                    }}>
+                      {isTradeCall ? 'CALL' : 'PUT'}
+                    </span>
+                  </div>
+                  {/* Expiration */}
+                  <div style={{
+                    fontSize: '11px',
                     color: '#666',
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '6px',
+                    gap: '4px',
                   }}>
-                    <Clock size={11} color="#444" />
-                    {formatDate(trade.Date)}
+                    <Calendar size={10} color="#444" />
+                    {expiry || '—'}
                   </div>
-                  <div style={{
-                    fontSize: '13px',
-                    fontWeight: 600,
-                    color: '#fff',
-                  }}>
-                    {trade.Symbol} ${strike.toFixed(0)} {isTradeCall ? 'Call' : 'Put'}
-                  </div>
+                  {/* Contracts */}
                   <div style={{
                     fontSize: '12px',
                     color: '#888',
                     textAlign: 'right',
+                    fontWeight: 600,
                   }}>
                     {contracts}×
                   </div>
+                  {/* Premium */}
                   <div style={{
-                    fontSize: '13px',
-                    fontWeight: 600,
+                    fontSize: '12px',
+                    fontWeight: 700,
                     color: accentColor,
                     textAlign: 'right',
+                    fontFamily: '"SF Mono", "Fira Code", monospace',
                   }}>
                     {formatCurrency(netAmount)}
                   </div>

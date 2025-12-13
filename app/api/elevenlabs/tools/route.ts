@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import { parseTimeExpression } from '@/src/lib/date-parser';
-import { formatCalendarDate, getDateOffset } from '@/src/lib/date-utils';
+import { getDateOffset } from '@/src/lib/date-utils';
 
 // Initialize Supabase client
 const supabase = createClient(

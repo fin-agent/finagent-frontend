@@ -143,20 +143,46 @@ export async function POST(req: NextRequest) {
     // Format dates for display
     const displayRange = formatDateRange(startDate, endDate);
 
-    // Build response message
+    // Build detailed trade descriptions for agent to read
+    // Group trades by type for clearer verbal response
+    const stockTradeDescriptions = stockTrades.slice(0, 5).map(t => {
+      const action = t.TradeType === 'B' ? 'Bought' : 'Sold';
+      const shares = parseInt(t.StockShareQty || '0');
+      const price = parseFloat(t.StockTradePrice || '0');
+      const net = Math.abs(parseFloat(t.NetAmount || '0'));
+      return `${formatCalendarDate(t.Date)}: ${action} ${shares} shares of ${t.Symbol} at $${price.toFixed(2)} (net $${net.toFixed(2)})`;
+    });
+
+    const optionTradeDescriptions = optionTrades.slice(0, 5).map(t => {
+      const action = t.TradeType === 'B' ? 'Bought' : 'Sold';
+      const contracts = parseInt(t.OptionContracts || '0');
+      const premium = parseFloat(t.OptionTradePremium || '0');
+      const net = Math.abs(parseFloat(t.NetAmount || '0'));
+      const callPut = t['Call/Put'] === 'C' ? 'call' : 'put';
+      const underlying = t.UnderlyingSymbol || t.Symbol.substring(0, 4);
+      const strike = t.Strike ? `$${t.Strike}` : '';
+      return `${formatCalendarDate(t.Date)}: ${action} ${contracts} ${underlying} ${strike} ${callPut} options at $${premium.toFixed(2)} premium (net $${net.toFixed(2)})`;
+    });
+
+    // Build response message with explicit counts
     let response: string;
-    if (parsedTime.type === 'specific') {
-      // Specific day query
-      response = `You executed ${tradeCount} trade${tradeCount !== 1 ? 's' : ''}${symbolText} on ${description}.${statsText} Would you like a detailed list?`;
-    } else {
-      // Range query
-      response = `You executed ${tradeCount} trade${tradeCount !== 1 ? 's' : ''}${symbolText} ${description}${tradingDaysText}.${statsText} Would you like a detailed list?`;
+    const totalValueStr = `$${totalValue.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
+
+    // Always state the exact counts clearly
+    const summaryLine = `You executed ${tradeCount} total trades${symbolText} ${description} from ${displayRange}: ${stockCount} stock trade${stockCount !== 1 ? 's' : ''} and ${optionCount} option trade${optionCount !== 1 ? 's' : ''} with a total value of ${totalValueStr}.`;
+
+    // Add detailed breakdown if there are trades
+    let detailSection = '';
+    if (stockCount > 0 && stockTradeDescriptions.length > 0) {
+      detailSection += `\n\nStock Trades (${stockCount}):\n- ${stockTradeDescriptions.join('\n- ')}`;
+      if (stockCount > 5) detailSection += `\n- ... and ${stockCount - 5} more stock trades`;
+    }
+    if (optionCount > 0 && optionTradeDescriptions.length > 0) {
+      detailSection += `\n\nOption Trades (${optionCount}):\n- ${optionTradeDescriptions.join('\n- ')}`;
+      if (optionCount > 5) detailSection += `\n- ... and ${optionCount - 5} more option trades`;
     }
 
-    // Add stock/option breakdown if mixed
-    if (stockCount > 0 && optionCount > 0) {
-      response = `You executed ${tradeCount} trades${symbolText} ${description}: ${stockCount} stock trade${stockCount !== 1 ? 's' : ''} and ${optionCount} option trade${optionCount !== 1 ? 's' : ''}.${statsText} Would you like a detailed list?`;
-    }
+    response = summaryLine + detailSection + statsText;
 
     // Convert individual dates for display (applying date offset)
     const displayStartDate = formatDisplayDate(startDate);

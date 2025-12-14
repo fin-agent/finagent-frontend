@@ -123,14 +123,22 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const prices = data.map(t => parseFloat(t.StockTradePrice || '0')).filter(p => p > 0);
-    const shares = data.map(t => parseFloat(t.StockShareQty || '0'));
-    const totalShares = shares.reduce((a, b) => a + b, 0);
-    const totalValue = data.reduce((sum, t) => sum + Math.abs(parseFloat(t.NetAmount || '0')), 0);
+    // Filter to valid trades only (both price and shares must be positive)
+    const validTrades = data
+      .map(t => ({
+        price: parseFloat(t.StockTradePrice || '0'),
+        shares: parseFloat(t.StockShareQty || '0'),
+      }))
+      .filter(t => t.price > 0 && t.shares > 0);
 
-    const highestPrice = Math.max(...prices);
-    const lowestPrice = Math.min(...prices);
-    const avgPrice = prices.reduce((a, b) => a + b, 0) / prices.length;
+    const prices = validTrades.map(t => t.price);
+    const totalShares = validTrades.reduce((sum, t) => sum + t.shares, 0);
+    const totalNotional = validTrades.reduce((sum, t) => sum + t.price * t.shares, 0);
+    const totalValue = totalNotional;
+
+    const highestPrice = prices.length > 0 ? Math.max(...prices) : 0;
+    const lowestPrice = prices.length > 0 ? Math.min(...prices) : 0;
+    const avgPrice = totalShares > 0 ? totalNotional / totalShares : 0;
 
     const highestTrade = data.find(t => parseFloat(t.StockTradePrice || '0') === highestPrice);
     const lowestTrade = data.find(t => parseFloat(t.StockTradePrice || '0') === lowestPrice);

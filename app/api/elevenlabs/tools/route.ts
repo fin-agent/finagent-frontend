@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import { parseTimeExpression } from '@/src/lib/date-parser';
 import { getDateOffset, formatCalendarDate } from '@/src/lib/date-utils';
+import { calculateRealizedMatchesFIFO, filterProfitableTrades } from '@/src/lib/profitable-trades';
 
 // Initialize Supabase client
 const supabase = createClient(
@@ -131,15 +132,22 @@ async function getTradeStats(symbol: string, tradeType?: string, year?: number, 
     };
   }
 
-  // Calculate statistics
-  const prices = data.map(t => parseFloat(t.StockTradePrice || '0')).filter(p => p > 0);
-  const shares = data.map(t => parseFloat(t.StockShareQty || '0'));
-  const totalShares = shares.reduce((a, b) => a + b, 0);
-  const totalValue = data.reduce((sum, t) => sum + Math.abs(parseFloat(t.NetAmount || '0')), 0);
+  // Calculate statistics - filter to valid trades only (both price and shares must be positive)
+  const validTrades = data
+    .map(t => ({
+      price: parseFloat(t.StockTradePrice || '0'),
+      shares: parseFloat(t.StockShareQty || '0'),
+    }))
+    .filter(t => t.price > 0 && t.shares > 0);
 
-  const highestPrice = Math.max(...prices);
-  const lowestPrice = Math.min(...prices);
-  const avgPrice = prices.reduce((a, b) => a + b, 0) / prices.length;
+  const prices = validTrades.map(t => t.price);
+  const totalShares = validTrades.reduce((sum, t) => sum + t.shares, 0);
+  const totalNotional = validTrades.reduce((sum, t) => sum + t.price * t.shares, 0);
+  const totalValue = totalNotional;
+
+  const highestPrice = prices.length > 0 ? Math.max(...prices) : 0;
+  const lowestPrice = prices.length > 0 ? Math.min(...prices) : 0;
+  const avgPrice = totalShares > 0 ? totalNotional / totalShares : 0;
 
   // Find the trades with highest and lowest prices
   const highestTrade = data.find(t => parseFloat(t.StockTradePrice || '0') === highestPrice);
@@ -167,129 +175,77 @@ async function getTradeStats(symbol: string, tradeType?: string, year?: number, 
 }
 
 // Tool: Get profitable trades (FIFO matching)
-async function getProfitableTrades(symbol: string, onlyProfitable: boolean = true) {
+async function getProfitableTrades(symbol: string, onlyProfitable: boolean = true, timePeriod?: string) {
   const normalizedSymbol = normalizeSymbol(symbol);
 
-  // Fetch all buy trades for the symbol
-  const { data: buyTrades, error: buyError } = await supabase
+  const parsedTime = timePeriod ? parseTimeExpression(timePeriod) : null;
+  const dateStart = parsedTime?.dateRange.startDate;
+  const dateEnd = parsedTime?.dateRange.endDate;
+
+  let query = supabase
     .from('TradeData')
     .select('*')
     .eq('AccountCode', ACCOUNT_CODE)
     .or(`Symbol.eq.${normalizedSymbol},UnderlyingSymbol.eq.${normalizedSymbol}`)
-    .eq('TradeType', 'B')
     .order('Date', { ascending: true })
     .order('TradeID', { ascending: true });
 
-  if (buyError) {
-    console.error('Buy trades error:', buyError);
-    return { error: buyError.message, symbol: normalizedSymbol };
+  if (dateEnd) {
+    query = query.lte('Date', dateEnd);
   }
 
-  console.log(`Found ${buyTrades?.length || 0} buy trades for ${normalizedSymbol}`);
+  const { data: trades, error } = await query;
 
-  // Fetch all sell trades for the symbol (case-insensitive for 's' and 'S')
-  const { data: sellTrades, error: sellError } = await supabase
-    .from('TradeData')
-    .select('*')
-    .eq('AccountCode', ACCOUNT_CODE)
-    .or(`Symbol.eq.${normalizedSymbol},UnderlyingSymbol.eq.${normalizedSymbol}`)
-    .ilike('TradeType', 'S')
-    .order('Date', { ascending: true })
-    .order('TradeID', { ascending: true });
-
-  if (sellError) {
-    console.error('Sell trades error:', sellError);
-    return { error: sellError.message, symbol: normalizedSymbol };
+  if (error) {
+    return { error: error.message, symbol: normalizedSymbol };
   }
 
-  console.log(`Found ${sellTrades?.length || 0} sell trades for ${normalizedSymbol}`);
-
-  // Debug: Log security types
-  if (buyTrades?.length) {
-    const buySecTypes = buyTrades.map(t => t.SecurityType);
-    console.log('Buy SecurityTypes:', [...new Set(buySecTypes)]);
-  }
-  if (sellTrades?.length) {
-    const sellSecTypes = sellTrades.map(t => t.SecurityType);
-    console.log('Sell SecurityTypes:', [...new Set(sellSecTypes)]);
-  }
-
-  if (!buyTrades?.length || !sellTrades?.length) {
+  const allTrades = trades || [];
+  if (allTrades.length === 0) {
     return {
       symbol: normalizedSymbol,
-      message: `No matched buy/sell pairs found for ${normalizedSymbol}.`,
-      trades: [],
+      timePeriod: parsedTime?.dateRange.description || timePeriod || null,
+      message: `No trades found for ${normalizedSymbol}.`,
       totalMatchedTrades: 0,
-      profitableTrades: 0,
-      totalProfitLoss: 0,
+      totalProfitableTrades: 0,
+      totalProfit: 0,
+      trades: [],
     };
   }
 
-  // Match trades using FIFO by security type
-  interface MatchedTrade {
-    buyTradeId: number;
-    buyDate: string;
-    securityType: string;
-    symbol: string;
-    quantity: number;
-    buyPrice: number;
-    buyCost: number;
-    sellTradeId: number;
-    sellDate: string;
-    sellPrice: number;
-    sellProceeds: number;
-    profitLoss: number;
+  const matchedTrades = calculateRealizedMatchesFIFO(allTrades, normalizedSymbol);
+  if (matchedTrades.length === 0) {
+    return {
+      symbol: normalizedSymbol,
+      timePeriod: parsedTime?.dateRange.description || timePeriod || null,
+      message: `No completed round-trip trades found for ${normalizedSymbol}.`,
+      totalMatchedTrades: 0,
+      totalProfitableTrades: 0,
+      totalProfit: 0,
+      trades: [],
+    };
   }
 
-  const matchedTrades: MatchedTrade[] = [];
-  const securityTypes = ['S', 'O'];
-
-  for (const secType of securityTypes) {
-    const buys = buyTrades.filter(t => t.SecurityType === secType);
-    const sells = sellTrades.filter(t => t.SecurityType === secType);
-    const matchCount = Math.min(buys.length, sells.length);
-
-    for (let i = 0; i < matchCount; i++) {
-      const buy = buys[i];
-      const sell = sells[i];
-      const profitLoss = (parseFloat(sell.NetAmount) || 0) + (parseFloat(buy.NetAmount) || 0);
-
-      matchedTrades.push({
-        buyTradeId: buy.TradeID,
-        buyDate: formatCalendarDate(buy.Date),
-        securityType: secType === 'S' ? 'Stock' : 'Option',
-        symbol: buy.Symbol,
-        quantity: parseFloat(buy.StockShareQty || buy.OptionContracts || '0'),
-        buyPrice: parseFloat(buy.StockTradePrice || buy.OptionTradePremium || '0'),
-        buyCost: parseFloat(buy.NetAmount || '0'),
-        sellTradeId: sell.TradeID,
-        sellDate: formatCalendarDate(sell.Date),
-        sellPrice: parseFloat(sell.StockTradePrice || sell.OptionTradePremium || '0'),
-        sellProceeds: parseFloat(sell.NetAmount || '0'),
-        profitLoss,
-      });
-    }
+  if (onlyProfitable) {
+    const { profitableTrades, totalProfit } = filterProfitableTrades(matchedTrades, dateStart, dateEnd);
+    return {
+      symbol: normalizedSymbol,
+      timePeriod: parsedTime?.dateRange.description || timePeriod || null,
+      totalMatchedTrades: matchedTrades.length,
+      totalProfitableTrades: profitableTrades.length,
+      totalProfit,
+      trades: profitableTrades,
+    };
   }
 
-  console.log(`Total matched trades before filter: ${matchedTrades.length}`);
-  matchedTrades.forEach(t => console.log(`  ${t.securityType}: P/L = ${t.profitLoss}`));
-
-  // Filter and sort results
-  let results = onlyProfitable
-    ? matchedTrades.filter(t => t.profitLoss > 0)
-    : matchedTrades;
-
-  results = results.sort((a, b) => b.profitLoss - a.profitLoss);
-
-  const totalProfit = results.reduce((sum, t) => sum + t.profitLoss, 0);
-  const profitableCount = results.filter(t => t.profitLoss > 0).length;
-
+  const allTotal = matchedTrades.reduce((sum, t) => sum + t.profitLoss, 0);
   return {
     symbol: normalizedSymbol,
-    totalMatchedTrades: results.length,
-    profitableTrades: profitableCount,
-    totalProfitLoss: totalProfit,
-    trades: results,
+    timePeriod: parsedTime?.dateRange.description || timePeriod || null,
+    totalMatchedTrades: matchedTrades.length,
+    totalProfitableTrades: matchedTrades.filter(t => t.profitLoss > 0).length,
+    totalProfit: allTotal,
+    trades: matchedTrades.sort((a, b) => b.profitLoss - a.profitLoss),
   };
 }
 
@@ -401,7 +357,8 @@ export async function POST(req: NextRequest) {
       case 'get_profitable_trades':
         result = await getProfitableTrades(
           parameters.symbol,
-          parameters.only_profitable ?? parameters.onlyProfitable ?? true
+          parameters.only_profitable ?? parameters.onlyProfitable ?? true,
+          parameters.time_period || parameters.timePeriod
         );
         break;
 
@@ -427,12 +384,8 @@ export async function POST(req: NextRequest) {
         responseText = `Error getting trade details: ${result.error}`;
       } else if ('summary' in result && result.summary) {
         const summary = result.summary;
-        responseText = `Detailed ${result.symbol} trades:\n`;
-        responseText += `- Total shares purchased: ${summary.totalSharesPurchased}\n`;
-        responseText += `- Total cost: $${summary.totalCost.toFixed(2)}\n`;
-        responseText += `- Current value: $${summary.currentValue.toFixed(2)}\n`;
-        responseText += `- Profit/Loss: $${summary.profitLoss.toFixed(2)} (${summary.profitLossPercent.toFixed(2)}%)\n`;
-        responseText += `- Stock trades: ${result.stockTradeCount}, Option trades: ${result.optionTradeCount}`;
+        const sharesText = Math.round(summary.totalSharesPurchased).toString();
+        responseText = `For ${result.symbol}, you bought ${sharesText} shares for a total cost of $${summary.totalCost.toFixed(2)} with an estimated current value of $${summary.currentValue.toFixed(2)}, for a profit or loss of $${summary.profitLoss.toFixed(2)} or ${summary.profitLossPercent.toFixed(2)} percent. You have ${result.stockTradeCount} stock trades and ${result.optionTradeCount} option trades.`;
       }
     } else if (tool_name === 'getTradeStats' || tool_name === 'get_trade_stats') {
       if ('error' in result && result.error) {
@@ -442,35 +395,19 @@ export async function POST(req: NextRequest) {
       } else if ('highestPrice' in result && result.highestPrice !== undefined) {
         const typeLabel = result.tradeType === 'sell' ? 'sold' : result.tradeType === 'buy' ? 'bought' : 'traded';
         const periodText = result.periodDescription || result.year;
-        responseText = `${result.symbol} ${result.tradeType} trade statistics for ${periodText}:\n`;
-        responseText += `- Highest price ${typeLabel}: $${result.highestPrice.toFixed(2)} on ${result.highestPriceDate} (${result.highestPriceShares} shares)\n`;
-        responseText += `- Lowest price ${typeLabel}: $${(result.lowestPrice ?? 0).toFixed(2)} on ${result.lowestPriceDate} (${result.lowestPriceShares} shares)\n`;
-        responseText += `- Average price: $${(result.averagePrice ?? 0).toFixed(2)}\n`;
-        responseText += `- Total ${result.tradesFound} trades, ${result.totalShares} shares, $${(result.totalValue ?? 0).toFixed(2)} total value`;
+        responseText = `For ${result.symbol} ${periodText}, the highest price you ${typeLabel} at was $${result.highestPrice.toFixed(2)} on ${result.highestPriceDate} for ${Math.round(result.highestPriceShares)} shares. The lowest was $${(result.lowestPrice ?? 0).toFixed(2)} on ${result.lowestPriceDate} for ${Math.round(result.lowestPriceShares)} shares. The average price was $${(result.averagePrice ?? 0).toFixed(2)} across ${result.tradesFound} trades.`;
       }
     } else if (tool_name === 'getProfitableTrades' || tool_name === 'get_profitable_trades') {
       if ('error' in result && result.error) {
         responseText = `Error getting profitable trades: ${result.error}`;
       } else if ('message' in result && 'totalMatchedTrades' in result && result.totalMatchedTrades === 0) {
         responseText = result.message as string;
-      } else if ('totalProfitLoss' in result && result.totalProfitLoss !== undefined) {
-        responseText = `Profitable trades for ${result.symbol}:\n`;
-        responseText += `- Total matched trades: ${result.totalMatchedTrades}\n`;
-        responseText += `- Profitable trades: ${result.profitableTrades}\n`;
-        responseText += `- Total profit: $${result.totalProfitLoss.toFixed(2)}\n\n`;
-
-        // List top trades (limit to 5 for voice response)
-        const topTrades = result.trades?.slice(0, 5) || [];
-        if (topTrades.length > 0) {
-          responseText += `Top trades:\n`;
-          topTrades.forEach((trade: { securityType: string; buyDate: string; sellDate: string; quantity: number; profitLoss: number }, i: number) => {
-            const profitLabel = trade.profitLoss >= 0 ? 'Profit' : 'Loss';
-            responseText += `${i + 1}. ${trade.securityType}: Bought ${trade.buyDate}, Sold ${trade.sellDate}, ${trade.quantity} shares, ${profitLabel}: $${Math.abs(trade.profitLoss).toFixed(2)}\n`;
-          });
-        }
-
-        if (result.totalMatchedTrades === 0 && result.profitableTrades === 0) {
-          responseText = `No profitable trades found for ${result.symbol}. There may be matched trades that resulted in losses.`;
+      } else if ('totalProfit' in result && result.totalProfit !== undefined) {
+        const topTrade = result.trades?.[0];
+        const periodText = result.timePeriod ? ` ${result.timePeriod}` : '';
+        responseText = `For ${result.symbol}${periodText}, you have ${result.totalProfitableTrades} profitable trades with total realized profit $${result.totalProfit.toFixed(2)}.`;
+        if (topTrade) {
+          responseText += ` Your top profit was $${topTrade.profitLoss.toFixed(2)} from ${topTrade.buyDate} to ${topTrade.sellDate}.`;
         }
       }
     }

@@ -121,14 +121,20 @@ export async function POST(req: NextRequest) {
     const stockCount = stockTrades.length;
     const optionCount = optionTrades.length;
 
-    // Calculate average price if requested
+    // Calculate average price if requested (weighted by shares)
     let statsText = '';
     if (calculation === 'average') {
-      const prices = stockTrades
-        .map(t => parseFloat(t.StockTradePrice || '0'))
-        .filter(p => p > 0);
-      if (prices.length > 0) {
-        const avgPrice = prices.reduce((a, b) => a + b, 0) / prices.length;
+      const validTrades = stockTrades
+        .map(t => ({
+          price: parseFloat(t.StockTradePrice || '0'),
+          shares: parseFloat(t.StockShareQty || '0'),
+        }))
+        .filter(t => t.price > 0 && t.shares > 0);
+
+      if (validTrades.length > 0) {
+        const totalShares = validTrades.reduce((sum, t) => sum + t.shares, 0);
+        const totalNotional = validTrades.reduce((sum, t) => sum + t.price * t.shares, 0);
+        const avgPrice = totalShares > 0 ? totalNotional / totalShares : 0;
         statsText = ` The average price was $${avgPrice.toFixed(2)}.`;
       }
     }
@@ -142,27 +148,6 @@ export async function POST(req: NextRequest) {
     // Format dates for display
     const displayRange = formatDateRange(startDate, endDate);
 
-    // Build detailed trade descriptions for agent to read
-    // Group trades by type for clearer verbal response
-    const stockTradeDescriptions = stockTrades.slice(0, 5).map(t => {
-      const action = t.TradeType === 'B' ? 'Bought' : 'Sold';
-      const shares = parseInt(t.StockShareQty || '0');
-      const price = parseFloat(t.StockTradePrice || '0');
-      const net = Math.abs(parseFloat(t.NetAmount || '0'));
-      return `${formatCalendarDate(t.Date)}: ${action} ${shares} shares of ${t.Symbol} at $${price.toFixed(2)} (net $${net.toFixed(2)})`;
-    });
-
-    const optionTradeDescriptions = optionTrades.slice(0, 5).map(t => {
-      const action = t.TradeType === 'B' ? 'Bought' : 'Sold';
-      const contracts = parseInt(t.OptionContracts || '0');
-      const premium = parseFloat(t.OptionTradePremium || '0');
-      const net = Math.abs(parseFloat(t.NetAmount || '0'));
-      const callPut = t['Call/Put'] === 'C' ? 'call' : 'put';
-      const underlying = t.UnderlyingSymbol || t.Symbol.substring(0, 4);
-      const strike = t.Strike ? `$${t.Strike}` : '';
-      return `${formatCalendarDate(t.Date)}: ${action} ${contracts} ${underlying} ${strike} ${callPut} options at $${premium.toFixed(2)} premium (net $${net.toFixed(2)})`;
-    });
-
     // Build response message with explicit counts
     // TTS requires no commas in numbers - commas break speech synthesis
     const totalValueStr = `$${totalValue.toFixed(2)}`;
@@ -170,18 +155,35 @@ export async function POST(req: NextRequest) {
     // Always state the exact counts clearly
     const summaryLine = `You executed ${tradeCount} total trades${symbolText} ${description} from ${displayRange}: ${stockCount} stock trade${stockCount !== 1 ? 's' : ''} and ${optionCount} option trade${optionCount !== 1 ? 's' : ''} with a total value of ${totalValueStr}.`;
 
-    // Add detailed breakdown if there are trades
-    let detailSection = '';
-    if (stockCount > 0 && stockTradeDescriptions.length > 0) {
-      detailSection += `\n\nStock Trades (${stockCount}):\n- ${stockTradeDescriptions.join('\n- ')}`;
-      if (stockCount > 5) detailSection += `\n- ... and ${stockCount - 5} more stock trades`;
+    const stockHighlights = stockTrades.slice(0, 2).map(t => {
+      const action = t.TradeType === 'B' ? 'buying' : 'selling';
+      const shares = parseInt(t.StockShareQty || '0');
+      const price = parseFloat(t.StockTradePrice || '0');
+      return `${action} ${shares} shares of ${t.Symbol} at $${price.toFixed(2)}`;
+    });
+
+    const optionHighlights = optionTrades.slice(0, 2).map(t => {
+      const action = t.TradeType === 'B' ? 'buying' : 'selling';
+      const contracts = parseInt(t.OptionContracts || '0');
+      const premium = parseFloat(t.OptionTradePremium || '0');
+      const callPut = t['Call/Put'] === 'C' ? 'call' : 'put';
+      const rawSymbol = String(t.Symbol || '');
+      const parsedUnderlying = rawSymbol.match(/^[A-Z]{1,6}/)?.[0];
+      const underlying = t.UnderlyingSymbol || parsedUnderlying || rawSymbol;
+      const strike = t.Strike ? `$${t.Strike}` : null;
+      const instrumentText = strike ? `${underlying} ${strike}` : underlying;
+      return `${action} ${contracts} ${instrumentText} ${callPut} contracts at $${premium.toFixed(2)} premium`;
+    });
+
+    let highlightsText = '';
+    if (stockHighlights.length > 0) {
+      highlightsText += ` Stock trades included ${stockHighlights.join(' and ')}.`;
     }
-    if (optionCount > 0 && optionTradeDescriptions.length > 0) {
-      detailSection += `\n\nOption Trades (${optionCount}):\n- ${optionTradeDescriptions.join('\n- ')}`;
-      if (optionCount > 5) detailSection += `\n- ... and ${optionCount - 5} more option trades`;
+    if (optionHighlights.length > 0) {
+      highlightsText += ` Option trades included ${optionHighlights.join(' and ')}.`;
     }
 
-    const response = summaryLine + detailSection + statsText;
+    const response = summaryLine + highlightsText + statsText;
 
     // Convert individual dates for display (applying date offset)
     const displayStartDate = formatDisplayDate(startDate);

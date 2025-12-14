@@ -14,6 +14,9 @@ const apiKey = process.env.AZURE_OPENAI_API_KEY || '';
 const openai = new OpenAI({
   baseURL: endpoint,
   apiKey: apiKey,
+  defaultHeaders: {
+    'api-key': apiKey, // Azure uses api-key header
+  },
 });
 
 // Cache the developer prompt since it doesn't change
@@ -28,6 +31,12 @@ function getDeveloperPrompt(): string {
 
 export async function classifyIntent(userQuery: string): Promise<ClassificationResult | null> {
   try {
+    console.log('🤖 [LLM Classifier] ================================');
+    console.log('🤖 [LLM Classifier] Query:', userQuery);
+    console.log('🤖 [LLM Classifier] Endpoint:', endpoint);
+    console.log('🤖 [LLM Classifier] Model:', deploymentName);
+    console.log('🤖 [LLM Classifier] API Key present:', !!apiKey, '| Key length:', apiKey?.length || 0);
+    console.log('🤖 [LLM Classifier] Making API call...');
     const startTime = Date.now();
     const developerPrompt = getDeveloperPrompt();
 

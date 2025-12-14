@@ -437,10 +437,14 @@ function detectUserQueryIntent(query: string): QueryIntent | null {
   }
 
   // Extract time period from query (comprehensive patterns)
-  const timePeriodMatch = lowerQuery.match(
-    /\b(today|yesterday|last\s+week|this\s+week|last\s+month|this\s+month|last\s+year|this\s+year|last\s+\d+\s+days?|past\s+\d+\s+days?|last\s+\d+\s+months?|past\s+\d+\s+months?|last\s+\d+\s+trading\s+days?|past\s+\d+\s+trading\s+days?|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/
+  // Support both numeric (4) and spelled-out (four) numbers
+  const numberPattern = '(?:\\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)';
+  const timePeriodRegex = new RegExp(
+    `\\b(today|yesterday|last\\s+week|this\\s+week|last\\s+month|this\\s+month|last\\s+year|this\\s+year|(?:last|past)\\s+${numberPattern}\\s+days?|(?:last|past)\\s+${numberPattern}\\s+months?|(?:last|past)\\s+${numberPattern}\\s+trading\\s+days?|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\\b`,
+    'i'
   );
-  const timePeriod = timePeriodMatch?.[0];
+  const timePeriodMatch = lowerQuery.match(timePeriodRegex);
+  const timePeriod = timePeriodMatch?.[1];
 
   // Extract trade type context
   const isSellQuery = /\b(sold|sell|selling|short|written)\b/i.test(lowerQuery);
@@ -2101,8 +2105,11 @@ const UnifiedAssistant: React.FC = () => {
             pendingVoiceIntentTokenRef.current = token;
 
             // Fast path: regex intent (sync) so we can prefetch before the assistant responds.
+            console.log('🔍 [REGEX] ================================');
+            console.log('🔍 [REGEX] Query:', userQuery);
             const fastIntent = detectUserQueryIntent(userQuery);
             if (fastIntent) {
+              console.log('🔍 [REGEX] ✅ Detected intent:', fastIntent.cardType, '| symbol:', fastIntent.symbol, '| timePeriod:', fastIntent.timePeriod);
               pendingQueryIntentRef.current = fastIntent;
               pendingTradeUIRequestRef.current = fetchTradeData(
                 fastIntent.symbol || '',
@@ -2120,6 +2127,7 @@ const UnifiedAssistant: React.FC = () => {
                 buildAnswerOverride(fastIntent, tradeUI)
               );
             } else {
+              console.log('🔍 [REGEX] ❌ No intent detected');
               // Clear any stale pending intent from prior cycles.
               pendingQueryIntentRef.current = null;
               pendingTradeUIRequestRef.current = null;
@@ -2129,9 +2137,15 @@ const UnifiedAssistant: React.FC = () => {
             // Slow path: LLM classifier (async). If it differs from the fast intent, refine it,
             // but only if we haven't already consumed the pending intent for an assistant reply.
             void (async () => {
-              console.log('🎯 [Voice Intent Detection] User query:', userQuery);
+              console.log('🤖 [LLM] ================================');
+              console.log('🤖 [LLM] Query:', userQuery);
+              console.log('🤖 [LLM] Calling Azure OpenAI classifier...');
               const llmIntent = await classifyIntentViaAPI(userQuery);
-              if (!llmIntent) return;
+              if (!llmIntent) {
+                console.log('🤖 [LLM] ❌ No intent returned (failed or low confidence)');
+                return;
+              }
+              console.log('🤖 [LLM] ✅ Detected intent:', llmIntent.cardType, '| symbol:', llmIntent.symbol, '| timePeriod:', llmIntent.timePeriod);
 
               if (pendingVoiceIntentTokenRef.current !== token) return;
               if (!pendingQueryIntentRef.current) return;

@@ -821,12 +821,82 @@ This dual-layer approach ensures:
 
 ---
 
+## LLM-Based Intent Detection
+
+User queries are classified using **Azure OpenAI GPT-5.2** for accurate intent detection and entity extraction, replacing brittle regex-based pattern matching.
+
+### Architecture
+
+```mermaid
+flowchart LR
+    subgraph Input["User Input"]
+        Q["Show my Apple trades"]
+    end
+
+    subgraph LLM["Azure OpenAI GPT-5.2"]
+        CLS["/api/classify-intent"]
+    end
+
+    subgraph Output["Classification Result"]
+        R["intent: trades.detailed<br/>confidence: 0.95<br/>entities: {symbol: AAPL}"]
+    end
+
+    subgraph UI["UI Rendering"]
+        CARD["TradesTable Card"]
+    end
+
+    Q --> CLS --> R --> CARD
+```
+
+### Intent Categories
+
+| Domain | Intents | Example Queries |
+|--------|---------|-----------------|
+| **Trades** | `trades.profitable`, `trades.detailed`, `trades.time_based`, `trades.stats`, `trades.summary` | "Show profitable trades on Tesla", "What did I trade yesterday?" |
+| **Options** | `options.bulk`, `options.last_trade`, `options.expiring`, `options.highest_strike`, `options.total_premium` | "Show all short calls", "What options expire this week?" |
+| **Account** | `account.summary` | "What's my buying power?", "Show account balance" |
+| **Fees** | `fees.query` | "How much commission did I pay?" |
+
+### Entity Extraction
+
+The LLM extracts structured entities from natural language:
+
+| Entity | Examples | Extracted Value |
+|--------|----------|-----------------|
+| `symbol` | "Apple", "AAPL", "Tesla" | `AAPL`, `TSLA` |
+| `timePeriod` | "yesterday", "last week", "this month" | `yesterday`, `last week` |
+| `tradeType` | "bought", "sold", "purchases" | `buy`, `sell` |
+| `callPut` | "calls", "put options" | `call`, `put` |
+
+### Configuration
+
+Uses direct `fetch()` to Azure OpenAI REST API:
+
+```typescript
+// Endpoint format
+POST https://<resource>.openai.azure.com/openai/deployments/<deployment>/chat/completions?api-version=2024-10-21
+
+// Headers
+api-key: <your-azure-openai-key>
+Content-Type: application/json
+```
+
+**Environment Variables:**
+```env
+AZURE_EXISTING_AIPROJECT_ENDPOINT=https://<resource>.openai.azure.com/openai/v1/
+AZURE_OPENAI_API_KEY=<key>
+AZURE_OPENAI_MODEL=gpt-5.2
+```
+
+---
+
 ## Project Structure
 
 ```
 finagent-frontend/
 ├── app/
 │   ├── api/
+│   │   ├── classify-intent/          # LLM intent classification endpoint
 │   │   ├── elevenlabs/
 │   │   │   ├── profitable-trades/    # Profitable trades webhook
 │   │   │   ├── time-trades/          # Time-based trades webhook
@@ -847,6 +917,11 @@ finagent-frontend/
 │   └── page.tsx
 ├── src/
 │   ├── lib/
+│   │   ├── intent-detection/         # LLM-based intent classification
+│   │   │   ├── classifier.ts         # Azure OpenAI API calls
+│   │   │   ├── prompt.ts             # GPT system prompt builder
+│   │   │   ├── types.ts              # TypeScript interfaces
+│   │   │   └── intents/registry.ts   # Intent definitions
 │   │   ├── date-utils.ts             # Date offset utilities for demo data
 │   │   └── date-parser.ts            # Natural language date parsing
 │   └── components/
@@ -888,6 +963,13 @@ finagent-frontend/
 # Supabase
 NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
+
+# Azure OpenAI (LLM intent classifier)
+# Endpoint can be either the resource root (recommended) or the OpenAI-compatible base URL.
+AZURE_OPENAI_ENDPOINT=https://<resource>.openai.azure.com
+AZURE_OPENAI_API_KEY=your_azure_openai_api_key
+# This should be your Azure deployment name (not the underlying model name).
+AZURE_OPENAI_MODEL=your_deployment_name
 
 # ElevenLabs
 NEXT_PUBLIC_ELEVENLABS_AGENT_ID=agent_3101kbjqgdc0fkgvt8f1zw2hbvxv
@@ -979,6 +1061,7 @@ curl -X POST http://localhost:3000/api/elevenlabs/detailed-trades \
 | **Backend** | Next.js API Routes |
 | **Database** | Supabase PostgreSQL |
 | **Voice AI** | ElevenLabs Conversational AI |
+| **LLM Intent Detection** | Azure OpenAI GPT-5.2 |
 | **State** | React useState/useRef |
 
 ---

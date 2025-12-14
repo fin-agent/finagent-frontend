@@ -578,7 +578,8 @@ async function classifyIntentViaAPI(query: string): Promise<QueryIntent | null> 
     });
 
     if (!response.ok) {
-      console.warn('[LLM Classifier] API error:', response.status);
+      const body = await response.json().catch(() => null);
+      console.warn('[LLM Classifier] API error:', response.status, body);
       return null;
     }
 

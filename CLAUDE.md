@@ -100,13 +100,19 @@ User queries are classified using Azure OpenAI GPT-5.2 for accurate intent detec
 
 **Architecture:**
 ```
-User Query → /api/classify-intent → GPT-5.2 → { intent, confidence, entities }
-                                                    ↓
-                                          fetchTradeData() → UI Card
+User Query → /api/classify-intent → Azure OpenAI GPT-5.2 → { intent, confidence, entities }
+                                                               ↓
+                                                     fetchTradeData() → UI Card
 ```
 
+**Azure OpenAI Configuration:**
+- Uses direct `fetch()` to Azure OpenAI REST API (not OpenAI SDK) for precise URL control
+- Endpoint format: `https://<resource>.openai.azure.com/openai/deployments/<deployment>/chat/completions?api-version=2024-10-21`
+- Prioritizes `AZURE_EXISTING_AIPROJECT_ENDPOINT` over `AZURE_OPENAI_ENDPOINT` (the former uses the standard openai.azure.com format)
+- API key passed via `api-key` header
+
 **Key Files:**
-- `src/lib/intent-detection/classifier.ts` - GPT API call with structured JSON output
+- `src/lib/intent-detection/classifier.ts` - Azure OpenAI API call with structured JSON output
 - `src/lib/intent-detection/prompt.ts` - Developer prompt with intent definitions
 - `src/lib/intent-detection/intents/registry.ts` - All 14 intent definitions
 - `src/lib/intent-detection/types.ts` - TypeScript interfaces
@@ -220,10 +226,22 @@ Both `AccountSummary` and `FeesSummary` components use **inline React styles** (
 ## Environment Variables
 
 ```env
+# Supabase
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
+
+# ElevenLabs
 NEXT_PUBLIC_ELEVENLABS_AGENT_ID=
+
+# Azure OpenAI (for LLM intent classification)
+# Use the openai.azure.com endpoint format (not services.ai.azure.com AI Foundry format)
+AZURE_EXISTING_AIPROJECT_ENDPOINT=https://<resource>.openai.azure.com/openai/v1/
+AZURE_OPENAI_API_KEY=<your-api-key>
+AZURE_OPENAI_MODEL=gpt-5.2  # Your deployment name
+AZURE_OPENAI_API_VERSION=2024-10-21  # Optional, defaults to 2024-10-21
 ```
+
+**Note:** Shell environment variables override `.env.local`. If you see 401 errors with correct `.env.local` credentials, check for conflicting shell variables with `env | grep AZURE`.
 
 ## ElevenLabs Agent Tools
 

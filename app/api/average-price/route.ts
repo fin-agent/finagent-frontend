@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
-import { getDateOffset } from '@/src/lib/date-utils';
+import { formatCalendarDate, getDateOffset } from '@/src/lib/date-utils';
 import { parseTimeExpression } from '@/src/lib/date-parser';
 
 const supabase = createClient(
@@ -38,7 +38,12 @@ function normalizeSymbol(input: string): string {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { symbol, tradeType, timePeriod } = body;
+    const { symbol, tradeType, timePeriod, includeTrades } = body as {
+      symbol?: string;
+      tradeType?: string;
+      timePeriod?: string;
+      includeTrades?: boolean;
+    };
 
     if (!symbol) {
       return NextResponse.json({ error: 'Symbol required' }, { status: 400 });
@@ -107,8 +112,22 @@ export async function POST(req: NextRequest) {
     }
 
     const prices = data.map(t => parseFloat(t.StockTradePrice || '0')).filter(p => p > 0);
-    const shares = data.map(t => parseFloat(t.StockShareQty || '0'));
-    const totalShares = shares.reduce((a, b) => a + b, 0);
+    const tradeLots = data
+      .map((t) => {
+        const price = parseFloat(t.StockTradePrice || '0');
+        const shares = parseFloat(t.StockShareQty || '0');
+        if (!(price > 0 && shares > 0)) return null;
+        return {
+          date: t.Date as string,
+          shares,
+          price,
+          notional: price * shares,
+        };
+      })
+      .filter((t): t is { date: string; shares: number; price: number; notional: number } => !!t);
+
+    const totalShares = tradeLots.reduce((sum, t) => sum + t.shares, 0);
+    const totalNotional = tradeLots.reduce((sum, t) => sum + t.notional, 0);
 
     if (prices.length === 0) {
       return NextResponse.json({
@@ -122,7 +141,7 @@ export async function POST(req: NextRequest) {
 
     const highestPrice = Math.max(...prices);
     const lowestPrice = Math.min(...prices);
-    const avgPrice = prices.reduce((a, b) => a + b, 0) / prices.length;
+    const avgPrice = totalShares > 0 ? totalNotional / totalShares : (prices.reduce((a, b) => a + b, 0) / prices.length);
 
     // Determine actual trade type from data if not specified
     let actualTradeType = tradeType || 'all';
@@ -142,6 +161,17 @@ export async function POST(req: NextRequest) {
       totalShares,
       timePeriod: timePeriodDescription,
       tradeType: actualTradeType,
+      breakdown: includeTrades
+        ? {
+            totalNotional,
+            trades: tradeLots.map((t) => ({
+              date: formatCalendarDate(t.date),
+              shares: t.shares,
+              price: t.price,
+              notional: t.notional,
+            })),
+          }
+        : undefined,
     });
   } catch (error) {
     console.error('Average price API error:', error);

@@ -2,6 +2,8 @@
 
 import React, { useState, useMemo } from 'react';
 import { Download, Maximize2, ArrowUpRight, ArrowDownRight, X, Filter, ChevronLeft, ChevronRight } from 'lucide-react';
+import { downloadCsv, toCsv } from '@/src/lib/csv';
+import { getTradeCashFlowUSD, safeParseNumber } from '@/src/lib/trade-math';
 
 interface Trade {
   TradeID: number;
@@ -114,6 +116,28 @@ const formatFilterLabel = (key: string, value: unknown): string => {
 export function TradesTable({ trades, summary, filters, aggregations, onClearFilter, pageSize = ITEMS_PER_PAGE }: TradesTableProps) {
   const [stockPage, setStockPage] = useState(1);
   const [optionPage, setOptionPage] = useState(1);
+
+  const handleDownload = () => {
+    const rows = trades.map((trade) => ({
+      TradeID: trade.TradeID,
+      Date: trade.Date,
+      Symbol: trade.Symbol,
+      SecurityType: trade.SecurityType,
+      TradeType: trade.TradeType,
+      StockShareQty: trade.StockShareQty,
+      StockTradePrice: trade.StockTradePrice,
+      OptionContracts: trade.OptionContracts,
+      OptionTradePremium: trade.OptionTradePremium,
+      Strike: trade.Strike || '',
+      Expiration: trade.Expiration || '',
+      CallPut: trade['Call/Put'] || '',
+      NetAmount: trade.NetAmount,
+      AmountUSD: getTradeCashFlowUSD(trade),
+    }));
+
+    const filenameBase = (filters?.symbol || summary?.symbol || trades[0]?.Symbol || 'trades').toString().trim() || 'trades';
+    downloadCsv(`${filenameBase}_trades.csv`, toCsv(rows));
+  };
 
   const stockTrades = useMemo(() => trades.filter(t => t.SecurityType === 'S'), [trades]);
   const optionTrades = useMemo(() => trades.filter(t => t.SecurityType === 'O'), [trades]);
@@ -452,7 +476,7 @@ export function TradesTable({ trades, summary, filters, aggregations, onClearFil
       <div style={styles.header}>
         <span style={styles.headerTitle}>{safeSummary.symbol} Trades</span>
         <div style={styles.headerActions}>
-          <button style={styles.iconButton} title="Download">
+          <button type="button" style={styles.iconButton} title="Download CSV" onClick={handleDownload}>
             <Download size={16} />
           </button>
           <button style={styles.iconButton} title="Expand">
@@ -558,7 +582,7 @@ export function TradesTable({ trades, summary, filters, aggregations, onClearFil
               </thead>
               <tbody>
                 {paginatedStockTrades.map((trade, index) => {
-                  const netAmount = parseFloat(trade.NetAmount || '0');
+                  const netAmount = getTradeCashFlowUSD(trade);
                   const globalIndex = (stockPage - 1) * pageSize + index;
                   return (
                     <tr key={trade.TradeID} style={{ backgroundColor: index % 2 === 0 ? colors.bgRow : colors.bgRowAlt }}>
@@ -627,7 +651,7 @@ export function TradesTable({ trades, summary, filters, aggregations, onClearFil
               </thead>
               <tbody>
                 {paginatedOptionTrades.map((trade, index) => {
-                  const netAmount = parseFloat(trade.NetAmount || '0');
+                  const netAmount = getTradeCashFlowUSD(trade);
                   const globalIndex = (optionPage - 1) * pageSize + index;
                   return (
                     <tr key={trade.TradeID} style={{ backgroundColor: index % 2 === 0 ? colors.bgRow : colors.bgRowAlt }}>
@@ -649,13 +673,13 @@ export function TradesTable({ trades, summary, filters, aggregations, onClearFil
                         </span>
                       </td>
                       <td style={{ ...styles.td, ...styles.tdRight }}>
-                        {formatCurrency(parseFloat(trade.Strike || '0'))}
+                        {formatCurrency(safeParseNumber(trade.Strike))}
                       </td>
                       <td style={styles.td}>
                         {trade.Expiration ? formatDate(trade.Expiration) : '-'}
                       </td>
                       <td style={{ ...styles.td, ...styles.tdRight }}>
-                        {parseFloat(trade.OptionContracts || '0').toLocaleString()}
+                        {safeParseNumber(trade.OptionContracts).toLocaleString()}
                       </td>
                       <td style={{
                         ...styles.td,

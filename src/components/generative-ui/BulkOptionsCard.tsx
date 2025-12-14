@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { TrendingDown, TrendingUp, Zap, Target, ChevronDown, ChevronUp, Calendar } from 'lucide-react';
+import { getOptionPremiumUSD, safeParseNumber } from '@/src/lib/trade-math';
 
 // Parse OCC option symbol to extract expiration date
 // Format: AAPL251121C00175000 -> "Nov 21, 2025"
@@ -83,13 +84,13 @@ export function BulkOptionsCard({ trades, symbol, callPut, tradeType, timePeriod
   const isCall = callPut === 'call';
 
   // Calculate totals from aggregations or trades
-  const totalContracts = aggregations?.totalContracts ||
-    trades.reduce((sum, t) => sum + parseFloat(t.OptionContracts || '0'), 0);
-  const totalPremium = aggregations?.totalNetAmount || aggregations?.totalPremium ||
-    trades.reduce((sum, t) => sum + Math.abs(parseFloat(t.NetAmount || '0')), 0);
-  const avgPremium = aggregations?.avgPremium || (totalContracts > 0 ? totalPremium / totalContracts / 100 : 0);
-  const sharesCovered = aggregations?.sharesCovered || totalContracts * 100;
-  const tradeCount = aggregations?.totalTrades || trades.length;
+  const totalContracts = aggregations?.totalContracts ??
+    trades.reduce((sum, trade) => sum + safeParseNumber(trade.OptionContracts), 0);
+  const totalPremium = aggregations?.totalPremium ??
+    trades.reduce((sum, trade) => sum + getOptionPremiumUSD(trade), 0);
+  const avgPremium = aggregations?.avgPremium ?? (totalContracts > 0 ? totalPremium / totalContracts / 100 : 0);
+  const sharesCovered = aggregations?.sharesCovered ?? totalContracts * 100;
+  const tradeCount = aggregations?.totalTrades ?? trades.length;
 
   // Group trades by strike for visual breakdown
   const strikeGroups = trades.reduce((acc, trade) => {
@@ -97,8 +98,8 @@ export function BulkOptionsCard({ trades, symbol, callPut, tradeType, timePeriod
     if (!acc[strike]) {
       acc[strike] = { contracts: 0, premium: 0, count: 0 };
     }
-    acc[strike].contracts += parseFloat(trade.OptionContracts || '0');
-    acc[strike].premium += Math.abs(parseFloat(trade.NetAmount || '0'));
+    acc[strike].contracts += safeParseNumber(trade.OptionContracts);
+    acc[strike].premium += getOptionPremiumUSD(trade);
     acc[strike].count += 1;
     return acc;
   }, {} as Record<string, { contracts: number; premium: number; count: number }>);
@@ -420,9 +421,10 @@ export function BulkOptionsCard({ trades, symbol, callPut, tradeType, timePeriod
             </div>
             {/* Trade Rows */}
             {trades.map((trade, i) => {
-              const netAmount = Math.abs(parseFloat(trade.NetAmount || '0'));
-              const contracts = parseFloat(trade.OptionContracts || '0');
-              const strike = parseFloat(trade.Strike || '0');
+              const fallbackNetAmount = Math.abs(safeParseNumber(trade.NetAmount));
+              const premiumUSD = getOptionPremiumUSD(trade) || fallbackNetAmount;
+              const contracts = safeParseNumber(trade.OptionContracts);
+              const strike = safeParseNumber(trade.Strike);
               const isTradeCall = trade['Call/Put'] === 'C';
               const expiry = trade.Expiration
                 ? formatDate(trade.Expiration)
@@ -502,7 +504,7 @@ export function BulkOptionsCard({ trades, symbol, callPut, tradeType, timePeriod
                     textAlign: 'right',
                     fontFamily: '"SF Mono", "Fira Code", monospace',
                   }}>
-                    {formatCurrency(netAmount)}
+                    {formatCurrency(premiumUSD)}
                   </div>
                 </div>
               );

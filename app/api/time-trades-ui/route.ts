@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import { parseTimeExpression } from '@/src/lib/date-parser';
 import { formatDisplayDate, formatDateRange } from '@/src/lib/date-utils';
+import { getTradeGrossUSD, safeParseNumber } from '@/src/lib/trade-math';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -77,17 +78,23 @@ export async function POST(req: NextRequest) {
     const stockTrades = trades.filter(t => t.SecurityType === 'S');
     const optionTrades = trades.filter(t => t.SecurityType === 'O');
 
-    const totalValue = trades.reduce((sum, t) => {
-      return sum + Math.abs(parseFloat(t.NetAmount || '0'));
+    const totalValue = trades.reduce((sum, trade) => {
+      const netAbs = Math.abs(safeParseNumber(trade.NetAmount));
+      const gross = getTradeGrossUSD(trade);
+      return sum + (netAbs > 0 ? netAbs : gross);
     }, 0);
 
     // Calculate average price for stock trades
-    const stockPrices = stockTrades
-      .map(t => parseFloat(t.StockTradePrice || '0'))
-      .filter(p => p > 0);
-    const averagePrice = stockPrices.length > 0
-      ? stockPrices.reduce((a, b) => a + b, 0) / stockPrices.length
-      : 0;
+    const stockTotals = stockTrades.reduce((acc, trade) => {
+      const price = safeParseNumber(trade.StockTradePrice);
+      const shares = safeParseNumber(trade.StockShareQty);
+      if (price > 0 && shares > 0) {
+        acc.notional += price * shares;
+        acc.shares += shares;
+      }
+      return acc;
+    }, { notional: 0, shares: 0 });
+    const averagePrice = stockTotals.shares > 0 ? stockTotals.notional / stockTotals.shares : 0;
 
     // Format trades with display dates
     const formattedTrades = trades.map(t => ({

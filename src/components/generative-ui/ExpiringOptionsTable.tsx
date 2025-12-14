@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { Clock, ArrowUpRight, ArrowDownRight, Flame, ChevronLeft, ChevronRight } from 'lucide-react';
+import { getOptionPremiumUSD, safeParseNumber } from '@/src/lib/trade-math';
 
 interface ExpiringOption {
   TradeID: number;
@@ -13,6 +14,7 @@ interface ExpiringOption {
   Expiration?: string;
   'Call/Put'?: string;
   OptionContracts?: string;
+  OptionTradePremium?: string;
   NetAmount: string;
 }
 
@@ -109,10 +111,13 @@ export function ExpiringOptionsTable({
   // Calculate aggregations from trades if not provided
   const aggregations = {
     tradeCount: externalAggregations?.tradeCount ?? trades.length,
-    totalPremium: externalAggregations?.totalPremium ?? trades.reduce((sum, t) => sum + Math.abs(parseFloat(t.NetAmount || '0')), 0),
+    totalPremium: externalAggregations?.totalPremium ?? trades.reduce((sum, trade) => {
+      const premiumUSD = getOptionPremiumUSD(trade);
+      return sum + (premiumUSD || Math.abs(safeParseNumber(trade.NetAmount)));
+    }, 0),
     callCount: externalAggregations?.callCount ?? trades.filter(t => t['Call/Put'] === 'C').length,
     putCount: externalAggregations?.putCount ?? trades.filter(t => t['Call/Put'] === 'P').length,
-    totalContracts: externalAggregations?.totalContracts ?? trades.reduce((sum, t) => sum + parseFloat(t.OptionContracts || '0'), 0),
+    totalContracts: externalAggregations?.totalContracts ?? trades.reduce((sum, trade) => sum + safeParseNumber(trade.OptionContracts), 0),
   };
 
   const styles: Record<string, React.CSSProperties> = {
@@ -421,9 +426,10 @@ export function ExpiringOptionsTable({
           </thead>
           <tbody>
             {currentTrades.map((trade, index) => {
-              const netAmount = parseFloat(trade.NetAmount || '0');
-              const contracts = parseFloat(trade.OptionContracts || '0');
-              const strike = parseFloat(trade.Strike || '0');
+              const fallbackNetAmount = safeParseNumber(trade.NetAmount);
+              const premiumUSD = getOptionPremiumUSD(trade) || Math.abs(fallbackNetAmount);
+              const contracts = safeParseNumber(trade.OptionContracts);
+              const strike = safeParseNumber(trade.Strike);
               const isCall = trade['Call/Put'] === 'C';
               const isBuy = trade.TradeType === 'B';
               const daysUntil = trade.Expiration ? getDaysUntil(trade.Expiration) : null;
@@ -489,10 +495,10 @@ export function ExpiringOptionsTable({
                   <td style={{
                     ...styles.td,
                     textAlign: 'right',
-                    color: netAmount >= 0 ? colors.buy : colors.sell,
+                    color: trade.TradeType === 'B' ? colors.sell : colors.buy,
                     fontWeight: 600,
                   }}>
-                    {formatCurrency(Math.abs(netAmount))}
+                    {formatCurrency(premiumUSD)}
                   </td>
                 </tr>
               );

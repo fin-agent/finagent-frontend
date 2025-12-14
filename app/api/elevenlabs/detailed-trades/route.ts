@@ -83,12 +83,8 @@ export async function POST(req: NextRequest) {
     const profitLoss = currentValue - totalCost;
     const profitLossPercent = totalCost > 0 ? ((currentValue - totalCost) / totalCost) * 100 : 0;
 
-    let response = `Detailed ${normalizedSymbol} trades:\n`;
-    response += `Total shares purchased: ${totalSharesPurchased}\n`;
-    response += `Total cost: $${totalCost.toFixed(2)}\n`;
-    response += `Current estimated value: $${currentValue.toFixed(2)}\n`;
-    response += `Profit/Loss: $${profitLoss.toFixed(2)} (${profitLossPercent.toFixed(2)}%)\n`;
-    response += `Stock trades: ${stockTrades.length}, Option trades: ${optionTrades.length}`;
+    const sharesText = Math.round(totalSharesPurchased).toString();
+    const response = `For ${normalizedSymbol}, you have ${stockTrades.length} stock trades and ${optionTrades.length} option trades. You bought ${sharesText} shares for a total cost of $${totalCost.toFixed(2)} with an estimated current value of $${currentValue.toFixed(2)}, for a profit or loss of $${profitLoss.toFixed(2)} or ${profitLossPercent.toFixed(2)} percent.`;
 
     return NextResponse.json({ response });
   } catch (error) {

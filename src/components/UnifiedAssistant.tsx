@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useConversation } from '@elevenlabs/react';
 import { Mic, MessageSquare, X, Phone, Loader2, Plus, History, Send } from 'lucide-react';
 import { TradesTable, type ActiveFilters, type Aggregations } from './generative-ui/TradesTable';
@@ -19,7 +19,8 @@ import { LastOptionTradeCard } from './generative-ui/LastOptionTradeCard';
 import { TradeQueryCard } from './generative-ui/TradeQueryCard';
 import { AccountSummary, type AccountQueryType } from './generative-ui/AccountSummary';
 import { FeesSummary, type FeeType } from './generative-ui/FeesSummary';
-import type { ClassificationResult, CardType } from '@/src/lib/intent-detection';
+import type { ClassificationResult } from '@/src/lib/intent-detection';
+import { getOptionPremiumUSD, safeParseNumber } from '@/src/lib/trade-math';
 
 type InputMode = 'voice' | 'text';
 type View = 'chat' | 'history';
@@ -63,6 +64,339 @@ interface QueryIntent {
   expiration?: string;
   accountQueryType?: AccountQueryType;
   feeType?: FeeType;
+}
+
+function formatUSDNoCommas(value: unknown): string {
+  const num = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(num)) return '$0.00';
+  return `$${num.toFixed(2)}`;
+}
+
+function pluralize(count: number, singular: string, plural?: string): string {
+  return count === 1 ? singular : (plural || `${singular}s`);
+}
+
+function joinPhrases(phrases: string[]): string {
+  if (phrases.length === 0) return '';
+  if (phrases.length === 1) return phrases[0];
+  if (phrases.length === 2) return `${phrases[0]} and ${phrases[1]}`;
+  return `${phrases.slice(0, -1).join(', ')}, and ${phrases[phrases.length - 1]}`;
+}
+
+function isExplainCalculationQuery(query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return false;
+  return (
+    /\bhow\b.*\bcalculat/i.test(q) ||
+    /\bshow\b.*\bcalculat/i.test(q) ||
+    /\bshow\b.*\bmath\b/i.test(q) ||
+    /\bshow\b.*\bwork\b/i.test(q) ||
+    /\bbreak\s*down\b/i.test(q) ||
+    /\bhow\b.*\bget\b.*\bthat\b/i.test(q) ||
+    /\bhow\b.*\bcomputed\b/i.test(q)
+  );
+}
+
+function normalizeTradeVerb(tradeType: string): 'buying' | 'selling' {
+  const normalized = tradeType.trim().toUpperCase();
+  if (normalized === 'B' || normalized === 'BUY') return 'buying';
+  return 'selling';
+}
+
+function formatStrikeForDisplay(strike: number): string {
+  if (!Number.isFinite(strike)) return '';
+  if (Number.isInteger(strike)) return String(strike);
+  return String(Number(strike.toFixed(3))).replace(/\.0+$/, '');
+}
+
+function parseOCCOptionSymbolDetails(symbol: string): { underlying: string; callPut: 'call' | 'put'; strike: number } | null {
+  const match = symbol.match(/^([A-Z]{1,6})(\d{6})([CP])(\d{8})$/);
+  if (!match) return null;
+  const [, underlying, , callPutRaw, strikeRaw] = match;
+  const strike = Number.parseInt(strikeRaw, 10) / 1000;
+  return {
+    underlying,
+    callPut: callPutRaw === 'C' ? 'call' : 'put',
+    strike,
+  };
+}
+
+function formatDateForHighestStrikeCard(dateStr: string): string {
+  const date = new Date(dateStr);
+  if (Number.isNaN(date.getTime())) return dateStr;
+  return date.toLocaleDateString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
+function buildAnswerOverride(intent: QueryIntent | null, tradeUI: TradeUIData | null): string | null {
+  if (!intent || !tradeUI) return null;
+
+  if (tradeUI.type === 'time-based') {
+    const d = tradeUI.data as {
+      timePeriod?: { description?: string; displayRange?: string };
+      summary?: { totalTrades?: number; stockCount?: number; optionCount?: number; totalValue?: number };
+      trades?: Array<{
+        SecurityType: string;
+        TradeType: string;
+        Symbol: string;
+        StockShareQty?: string;
+        StockTradePrice?: string;
+        OptionContracts?: string;
+        OptionTradePremium?: string;
+      }>;
+    };
+    const totalTrades = d.summary?.totalTrades ?? 0;
+    const stockCount = d.summary?.stockCount ?? 0;
+    const optionCount = d.summary?.optionCount ?? 0;
+    const totalValue = d.summary?.totalValue ?? 0;
+    const desc = d.timePeriod?.description || tradeUI.timePeriod || intent.timePeriod || '';
+    const range = d.timePeriod?.displayRange ? ` from ${d.timePeriod.displayRange}` : '';
+    const symbolText = tradeUI.symbol ? ` for ${tradeUI.symbol}` : '';
+
+    const summaryText = `You executed ${totalTrades} total ${pluralize(totalTrades, 'trade')}${symbolText} ${desc}${range}: ${stockCount} ${pluralize(stockCount, 'stock trade')} and ${optionCount} ${pluralize(optionCount, 'option trade')} with a total value of ${formatUSDNoCommas(totalValue)}.`;
+
+    const trades = d.trades || [];
+    if (!trades.length) return summaryText;
+
+    const descLower = desc.toLowerCase();
+    const isShortPeriod = /\b(today|yesterday|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/.test(descLower);
+    const maxDetailsPerType = isShortPeriod ? Number.POSITIVE_INFINITY : 2;
+
+    const stockTrades = trades.filter((t) => t.SecurityType === 'S');
+    const optionTrades = trades.filter((t) => t.SecurityType === 'O');
+
+    const stockPhrasesAll = stockTrades.map((t) => {
+      const shares = Math.trunc(safeParseNumber(t.StockShareQty));
+      const price = safeParseNumber(t.StockTradePrice);
+      if (!shares || !Number.isFinite(price)) return null;
+      const verb = normalizeTradeVerb(t.TradeType);
+      return `${verb} ${shares} ${pluralize(shares, 'share')} of ${t.Symbol} at ${formatUSDNoCommas(price)}`;
+    }).filter((v): v is string => Boolean(v));
+
+    const optionPhrasesAll = optionTrades.map((t) => {
+      const contracts = Math.trunc(safeParseNumber(t.OptionContracts));
+      if (!contracts) return null;
+
+      const verb = normalizeTradeVerb(t.TradeType);
+      const parsed = parseOCCOptionSymbolDetails(t.Symbol);
+      const underlying = parsed?.underlying || t.Symbol;
+      const strikeText = parsed ? formatStrikeForDisplay(parsed.strike) : '';
+      const callPutText = parsed?.callPut || 'option';
+      const premium = safeParseNumber(t.OptionTradePremium);
+      const premiumText = Number.isFinite(premium) && premium !== 0 ? ` at ${formatUSDNoCommas(premium)} premium` : '';
+
+      if (strikeText) {
+        return `${verb} ${contracts} ${underlying} $${strikeText} ${callPutText} ${pluralize(contracts, 'option', 'options')}${premiumText}`;
+      }
+      return `${verb} ${contracts} ${underlying} ${pluralize(contracts, 'option', 'options')}${premiumText}`;
+    }).filter((v): v is string => Boolean(v));
+
+    const stockPhrases = stockPhrasesAll.slice(0, maxDetailsPerType);
+    const optionPhrases = optionPhrasesAll.slice(0, maxDetailsPerType);
+    const stockMore = Math.max(0, stockPhrasesAll.length - stockPhrases.length);
+    const optionMore = Math.max(0, optionPhrasesAll.length - optionPhrases.length);
+
+    const stockSentence = stockPhrases.length
+      ? ` Stock trades included ${joinPhrases(stockPhrases)}${stockMore ? ` (plus ${stockMore} more).` : '.'}`
+      : '';
+    const optionSentence = optionPhrases.length
+      ? ` Option trades included ${joinPhrases(optionPhrases)}${optionMore ? ` (plus ${optionMore} more).` : '.'}`
+      : '';
+
+    return `${summaryText}${stockSentence}${optionSentence}`.trim();
+  }
+
+  if (tradeUI.type === 'detailed') {
+    const d = tradeUI.data as {
+      trades?: Array<{
+        SecurityType: string;
+        TradeType: string;
+      }>;
+      summary?: {
+        totalShares?: number;
+        totalCost?: number;
+        currentValue?: number;
+        symbol?: string;
+      } | null;
+    };
+
+    const trades = d.trades || [];
+    if (trades.length === 0) return null;
+
+    const stockCount = trades.filter((t) => t.SecurityType === 'S').length;
+    const optionCount = trades.filter((t) => t.SecurityType === 'O').length;
+
+    const summary = d.summary || null;
+    const totalShares = summary?.totalShares;
+    const totalCost = summary?.totalCost;
+    const currentValue = summary?.currentValue;
+    const symbol = summary?.symbol || tradeUI.symbol;
+
+    const sharesText = typeof totalShares === 'number' && Number.isFinite(totalShares)
+      ? ` Total shares bought: ${Math.round(totalShares)}.`
+      : '';
+    const costText = typeof totalCost === 'number' && Number.isFinite(totalCost)
+      ? ` Total buy cost: ${formatUSDNoCommas(totalCost)}.`
+      : '';
+    const valueText = typeof currentValue === 'number' && Number.isFinite(currentValue)
+      ? ` Current estimated value: ${formatUSDNoCommas(currentValue)}.`
+      : '';
+
+    return `Here are your ${symbol} trades: ${stockCount} ${pluralize(stockCount, 'stock trade')} and ${optionCount} ${pluralize(optionCount, 'option trade')}.${sharesText}${costText}${valueText}`.trim();
+  }
+
+  if (tradeUI.type === 'profitable') {
+    const d = tradeUI.data as {
+      symbol?: string;
+      timePeriod?: string | null;
+      totalProfitableTrades?: number;
+      totalProfit?: number;
+      trades?: Array<{ profitLoss?: number; buyDate?: string; sellDate?: string }>;
+    };
+    const count = d.totalProfitableTrades ?? 0;
+    const totalProfit = d.totalProfit ?? 0;
+    const symbol = d.symbol || tradeUI.symbol;
+    const period = d.timePeriod ? ` ${d.timePeriod}` : '';
+    const top = (d.trades || []).slice().sort((a, b) => (b.profitLoss || 0) - (a.profitLoss || 0))[0];
+    const topText = top
+      ? ` Top profit was ${formatUSDNoCommas(top.profitLoss)} from ${top.buyDate} to ${top.sellDate}.`
+      : '';
+    return `You have ${count} profitable ${pluralize(count, 'trade')} for ${symbol}${period} with total realized profit ${formatUSDNoCommas(totalProfit)}.${topText}`;
+  }
+
+  if (tradeUI.type === 'average-price') {
+    const d = tradeUI.data as {
+      symbol?: string;
+      averagePrice?: number | null;
+      timePeriod?: string;
+      tradeType?: 'buy' | 'sell' | 'all';
+    };
+    const symbol = d.symbol || tradeUI.symbol;
+    const avg = d.averagePrice;
+    const period = d.timePeriod || tradeUI.timePeriod || intent.timePeriod || 'this year';
+    const action = d.tradeType === 'buy' ? 'bought' : d.tradeType === 'sell' ? 'sold' : 'traded';
+    if (!avg || !Number.isFinite(avg)) {
+      return `I don't see any ${action} trades for ${symbol} ${period}.`;
+    }
+    return `The average price you ${action} ${symbol} ${period} was ${formatUSDNoCommas(avg)} per share.`;
+  }
+
+	  if (tradeUI.type === 'stats') {
+	    const stock = tradeUI.data as { stats?: { highestPrice?: number; highestPriceDate?: string | null; lowestPrice?: number; lowestPriceDate?: string | null; averagePrice?: number; tradeType?: string; timePeriod?: string | null } };
+	    const s = stock.stats;
+	    if (!s) return null;
+
+    const symbol = tradeUI.symbol;
+    const period = s.timePeriod || tradeUI.timePeriod || intent.timePeriod || 'this year';
+    const tradedAs = (tradeUI.tradeType || s.tradeType) === 'sell' ? 'sold' : (tradeUI.tradeType || s.tradeType) === 'buy' ? 'bought' : 'traded';
+    const highText = s.highestPrice ? `Highest price ${tradedAs}: ${formatUSDNoCommas(s.highestPrice)}${s.highestPriceDate ? ` on ${s.highestPriceDate}` : ''}.` : '';
+    const lowText = s.lowestPrice ? ` Lowest price ${tradedAs}: ${formatUSDNoCommas(s.lowestPrice)}${s.lowestPriceDate ? ` on ${s.lowestPriceDate}` : ''}.` : '';
+    const avgText = s.averagePrice ? ` Average price: ${formatUSDNoCommas(s.averagePrice)}.` : '';
+	    return `${symbol} trade statistics for ${period}. ${highText}${lowText}${avgText}`.trim();
+	  }
+
+	  if (tradeUI.type === 'highest-strike') {
+	    type ParsedHighestStrike = {
+	      parsedFromText?: boolean;
+	      symbol: string;
+	      strike: number;
+	      callPut: 'call' | 'put';
+	      tradeType: 'buy' | 'sell';
+	      date: string;
+	      expiration: string;
+	      contracts: number;
+	      premium: number;
+	      isHighest?: boolean;
+	    };
+
+	    const parsed = tradeUI.data as ParsedHighestStrike;
+	    const period = tradeUI.timePeriod || intent.timePeriod || 'this year';
+
+	    // If we explicitly parsed from agent text (legacy), keep date strings as-is so UI + transcript match.
+	    if (parsed.parsedFromText) {
+	      const action = parsed.tradeType === 'sell' ? 'sold' : 'bought';
+	      const premiumVerb = parsed.tradeType === 'sell' ? 'collected' : 'paid';
+	      const perContract = parsed.contracts > 0 ? parsed.premium / parsed.contracts : 0;
+	      return `The highest strike ${parsed.callPut} option you ${action} on ${parsed.symbol} ${period} was the $${parsed.strike} strike. You ${action} ${parsed.contracts} ${pluralize(parsed.contracts, 'contract')} on ${parsed.date} for a total premium ${premiumVerb} of ${formatUSDNoCommas(parsed.premium)} (${formatUSDNoCommas(perContract)} per contract), expiring ${parsed.expiration}.`;
+	    }
+
+	    const d = tradeUI.data as {
+	      trades?: Array<{
+	        Date: string;
+	        Symbol: string;
+	        TradeType: string;
+	        'Call/Put': string;
+	        Strike: string;
+	        Expiration: string;
+	        OptionContracts: string;
+	        NetAmount: string;
+	        OptionTradePremium?: string;
+	      }>;
+	    };
+
+	    const trades = d.trades || [];
+	    if (!trades.length) return null;
+
+	    const highestStrikeTrade = trades.slice().sort((a, b) => parseFloat(b.Strike) - parseFloat(a.Strike))[0];
+	    const contracts = Math.trunc(safeParseNumber(highestStrikeTrade.OptionContracts));
+	    const netAmount = safeParseNumber(highestStrikeTrade.NetAmount);
+	    const grossPremium = getOptionPremiumUSD(highestStrikeTrade);
+	    const totalPremium = netAmount !== 0 ? Math.abs(netAmount) : grossPremium;
+	    const perContract = contracts > 0 ? totalPremium / contracts : 0;
+
+	    const symbol = parseOptionSymbol(highestStrikeTrade.Symbol);
+	    const callPut = highestStrikeTrade['Call/Put'] === 'C' ? 'call' : 'put';
+	    const tradeType = highestStrikeTrade.TradeType === 'B' ? 'buy' : 'sell';
+	    const action = tradeType === 'sell' ? 'sold' : 'bought';
+	    const premiumVerb = tradeType === 'sell' ? 'collected' : 'paid';
+	    const displayDate = formatDateForHighestStrikeCard(highestStrikeTrade.Date);
+	    const displayExpiration = formatDateForHighestStrikeCard(highestStrikeTrade.Expiration);
+
+	    return `The highest strike ${callPut} option you ${action} on ${symbol} ${period} was the $${Number.parseFloat(highestStrikeTrade.Strike)} strike. You ${action} ${contracts} ${pluralize(contracts, 'contract')} on ${displayDate} for a total premium ${premiumVerb} of ${formatUSDNoCommas(totalPremium)} (${formatUSDNoCommas(perContract)} per contract), expiring ${displayExpiration}.`;
+	  }
+
+		  return null;
+		}
+
+
+function buildAveragePriceCalculationExplanation(tradeUI: TradeUIData | null): string | null {
+  if (!tradeUI || tradeUI.type !== 'average-price') return null;
+  const d = tradeUI.data as {
+    symbol?: string;
+    averagePrice?: number | null;
+    timePeriod?: string;
+    tradeType?: 'buy' | 'sell' | 'all';
+    totalShares?: number;
+    breakdown?: {
+      totalNotional: number;
+      trades: Array<{ date: string; shares: number; price: number; notional: number }>;
+    };
+  };
+
+  const symbol = d.symbol || tradeUI.symbol;
+  const period = d.timePeriod || tradeUI.timePeriod || 'this year';
+  const tradeType = d.tradeType || tradeUI.tradeType || 'all';
+  const action = tradeType === 'buy' ? 'bought' : tradeType === 'sell' ? 'sold' : 'traded';
+
+  const breakdown = d.breakdown;
+  const trades = breakdown?.trades || [];
+  const totalShares = d.totalShares;
+  const avg = d.averagePrice;
+
+  if (!trades.length || !totalShares || !avg || !Number.isFinite(avg)) {
+    return `I calculate the average ${action} price as a weighted average: total dollars ÷ total shares. I don't have the trade-by-trade breakdown for ${symbol} ${period} in this view.`;
+  }
+
+  const lines = trades
+    .slice(0, 12)
+    .map((t) => `- ${t.date}: ${Math.round(t.shares)} ${pluralize(Math.round(t.shares), 'share')} at ${formatUSDNoCommas(t.price)} (${formatUSDNoCommas(t.notional)})`);
+  const more = trades.length > 12 ? `\n- …plus ${trades.length - 12} more ${pluralize(trades.length - 12, 'trade')}` : '';
+
+  return `Here’s how I calculated it for ${symbol} ${period}:\n\n${lines.join('\n')}${more}\n\nTotal: ${formatUSDNoCommas(breakdown?.totalNotional ?? 0)} ÷ ${Math.round(totalShares)} ${pluralize(Math.round(totalShares), 'share')} = ${formatUSDNoCommas(avg)} per share.`;
 }
 
 
@@ -712,7 +1046,7 @@ interface ParsedHighestStrikeData {
 function parseHighestStrikeFromText(text: string): ParsedHighestStrikeData | null {
   // Skip messages that are just "checking" without actual results
   const isJustChecking = /I'll check|let me check|checking your|retrieving|looking up/i.test(text);
-  if (isJustChecking) return null;
+  if (isJustChecking && !/(?:highest|lowest|strike|premium|contracts?|bought|sold)/i.test(text)) return null;
 
   // Detect highest/lowest strike responses
   const highestMatch = /(?:highest|maximum|top)\s+strike.*(?:call|put)|(?:sold|bought)\s+(?:a\s+quantity\s+of|\d+\s+contracts?\s+of).*\$\d+\s+strike/i.test(text);
@@ -720,18 +1054,20 @@ function parseHighestStrikeFromText(text: string): ParsedHighestStrikeData | nul
 
   if (!highestMatch && !lowestMatch) return null;
 
-  // Parse strike price: "$220 strike" or "$220"
-  const strikeMatch = text.match(/\$(\d+)\s*strike/i) || text.match(/\$(\d+)/);
-  const strike = strikeMatch ? parseInt(strikeMatch[1]) : 0;
+  // Parse strike price: "$220 strike" or "$192.5"
+  const strikeMatch = text.match(/\$(\d+(?:\.\d+)?)\s*strike/i) || text.match(/\$(\d+(?:\.\d+)?)/);
+  const strike = strikeMatch ? parseFloat(strikeMatch[1]) : 0;
   if (!strike) return null;
 
-  // Parse date: "on September 10th, 2025" or "September 10th"
-  const dateMatch = text.match(/on\s+([A-Z][a-z]+\s+\d{1,2}(?:st|nd|rd|th)?,?\s*\d{4})/i) ||
-                    text.match(/on\s+([A-Z][a-z]+\s+\d{1,2}(?:st|nd|rd|th)?)/i);
+  const dateToken = '([A-Z][a-z]+\\s+\\d{1,2}(?:st|nd|rd|th)?,?\\s*\\d{4}|[A-Z][a-z]+\\s+\\d{1,2}(?:st|nd|rd|th)?|\\d{1,2}\\/\\d{1,2}\\/\\d{2,4})';
+  // Parse trade date: "on September 10, 2025", "trade date September 10", or "on 9/10/2025"
+  const dateMatch = text.match(new RegExp(`(?:on|trade\\s+date|traded)\\s+${dateToken}`, 'i'));
   const dateStr = dateMatch ? dateMatch[1] : '';
 
-  // Parse expiration: "expired on October 17th" or "expiration on October 17th"
-  const expMatch = text.match(/expir(?:ed|ation)\s+(?:on\s+)?([A-Z][a-z]+\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s*\d{4})?)/i);
+  // Parse expiration: "expiration on Oct 17", "expiring Oct 17", "expires on 10/17/2025"
+  const expMatch =
+    text.match(new RegExp(`(?:expir(?:ation|y|es|ing)|expires?)\\s+(?:on\\s+)?${dateToken}`, 'i')) ||
+    text.match(new RegExp(`(?:with\\s+)?expiration\\s+(?:on\\s+)?${dateToken}`, 'i'));
   const expStr = expMatch ? expMatch[1] : '';
 
   // Parse contracts: "15 contracts" or "sold 15 contracts"
@@ -739,8 +1075,11 @@ function parseHighestStrikeFromText(text: string): ParsedHighestStrikeData | nul
   const contracts = contractsMatch ? parseInt(contractsMatch[1]) : 0;
 
   // Parse premium: "$1416 in premium" or "collecting $1416"
-  const premiumMatch = text.match(/(?:collecting|paid|for|total\s+premium\s+of)\s+\$?([\d,]+)/i) ||
-                       text.match(/\$?([\d,]+)\s+(?:in\s+)?premium/i);
+  const premiumMatch =
+    text.match(/premium\s+of\s+\$?\s*([\d,]+(?:\.\d+)?)/i) ||
+    text.match(/(?:collecting|collected|received|paid)\s+\$?\s*([\d,]+(?:\.\d+)?)/i) ||
+    text.match(/total\s+premium\s+(?:collected|paid)?\s*(?:was|of|:)?\s*\$?\s*([\d,]+(?:\.\d+)?)/i) ||
+    text.match(/\$?\s*([\d,]+(?:\.\d+)?)\s+(?:in\s+)?premium/i);
   const premium = premiumMatch ? parseFloat(premiumMatch[1].replace(/,/g, '')) : 0;
 
   // Determine call/put
@@ -784,11 +1123,14 @@ function parseHighestStrikeFromText(text: string): ParsedHighestStrikeData | nul
   };
 }
 
-// Legacy function for backward compatibility
-function detectHighestStrikeQuery(text: string): { isHighest: boolean; callPut: 'call' | 'put' } | null {
-  const parsed = parseHighestStrikeFromText(text);
-  if (!parsed) return null;
-  return { isHighest: parsed.isHighest, callPut: parsed.callPut };
+function isCompleteHighestStrikeParse(parsed: ParsedHighestStrikeData): boolean {
+  return (
+    parsed.strike > 0 &&
+    parsed.contracts > 0 &&
+    parsed.premium > 0 &&
+    parsed.date.trim().length > 0 &&
+    parsed.expiration.trim().length > 0
+  );
 }
 
 // Detect total premium query results
@@ -1087,6 +1429,10 @@ const UnifiedAssistant: React.FC = () => {
   const transcriptRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const keepaliveIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const inputModeRef = useRef<InputMode>(inputMode);
+  useEffect(() => {
+    inputModeRef.current = inputMode;
+  }, [inputMode]);
 
   const agentId = process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID;
   console.log('🎤 ElevenLabs Agent ID being used:', agentId);
@@ -1098,15 +1444,193 @@ const UnifiedAssistant: React.FC = () => {
   // Store the pending query intent detected from user's message
   // This is used to determine which UI card to show when agent responds
   const pendingQueryIntentRef = useRef<QueryIntent | null>(null);
+  // Prefetched trade UI for the pending query (rendered after assistant text)
+  const pendingTradeUIRequestRef = useRef<Promise<TradeUIData | null> | null>(null);
+  // Optional deterministic answer override computed from the same data as the UI card.
+  // This prevents hallucinated numbers that disagree with the rendered UI.
+  const pendingAnswerOverrideRef = useRef<Promise<string | null> | null>(null);
+  // Stores the most recently rendered assistant card, used for follow-ups like
+  // "how are you calculating this?"
+  const lastAssistantTradeUIRef = useRef<TradeUIData | null>(null);
+  // Used to avoid rendering a new UI card for purely explanatory follow-ups.
+  const suppressNextTradeUICardRef = useRef(false);
+  // Voice transcripts can arrive very close to the assistant's response. We optimistically
+  // set a "fast" intent immediately, then optionally refine with the LLM classifier.
+  const pendingVoiceIntentTokenRef = useRef(0);
   // Track the last processed message to prevent duplicates
   // ElevenLabs SDK can sometimes fire onMessage multiple times for the same message
-  const lastProcessedMessageRef = useRef<{ content: string; timestamp: number } | null>(null);
+  const lastProcessedTextMessageRef = useRef<{ content: string; timestamp: number } | null>(null);
+  const lastProcessedVoiceMessageRef = useRef<{ content: string; timestamp: number } | null>(null);
 
-  // Text-only ElevenLabs conversation (no voice, just text)
+  function isIdleNudgeMessage(text: string): boolean {
+    const trimmed = text.trim();
+    if (!trimmed) return true;
+    if (/^\.*$/.test(trimmed)) return true;
+    if (/^(one|just)\s+moment\.?$/i.test(trimmed)) return true;
+    if (/^hello\?\s*are you (still )?there\?/i.test(trimmed)) return true;
+    if (/are you (still )?there\?/i.test(trimmed) && /ready to help you/i.test(trimmed)) return true;
+    if (/i'?m here to help you/i.test(trimmed) && /whenever you're ready|when you return/i.test(trimmed)) return true;
+    return false;
+  }
+
+  function isJustCheckingMessage(text: string): boolean {
+    return /I'll check|let me check|checking your|retrieving|looking up/i.test(text);
+  }
+
+  function isSessionGreetingMessage(text: string): boolean {
+    const trimmed = text.trim();
+    if (!trimmed) return false;
+    if (!/^hello\b/i.test(trimmed)) return false;
+    return /portfolio/i.test(trimmed) && /(what would you like to know|how can i help|ask about)/i.test(trimmed);
+  }
+
+  function isTransientAssistantMessage(text: string): boolean {
+    const trimmed = text.trim();
+    if (isIdleNudgeMessage(trimmed)) return true;
+    if (!isJustCheckingMessage(trimmed)) return false;
+    // Allow "let me check... <answer>" style messages through.
+    return !/(?:executed|here\s+are|found|no\s+trades|total\s+trades|bought|sold|premium|strike|contracts?|shares?)/i.test(trimmed);
+  }
+
+  const clientTools = useMemo(() => {
+    const postJson = async (endpoint: string, body: Record<string, unknown>) => {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      return await res.json();
+    };
+
+    const unwrapResponse = (payload: unknown): string => {
+      if (payload && typeof payload === 'object' && 'response' in payload) {
+        const response = (payload as { response?: unknown }).response;
+        if (typeof response === 'string') return response;
+      }
+      try {
+        return JSON.stringify(payload);
+      } catch {
+        return String(payload);
+      }
+    };
+
+    const getString = (params: Record<string, unknown>, key: string): string | undefined => {
+      const value = params[key];
+      return typeof value === 'string' ? value : undefined;
+    };
+
+    const getToolSymbol = (params: Record<string, unknown>): string | undefined => {
+      return (
+        getString(params, 'symbol') ||
+        getString(params, 'ticker') ||
+        getString(params, 'underlying') ||
+        getString(params, 'company')
+      );
+    };
+
+    const get_trade_summary = async (parameters: Record<string, unknown>) => {
+      const payload = await postJson('/api/elevenlabs/trade-summary', {
+        symbol: getToolSymbol(parameters),
+      });
+      return unwrapResponse(payload);
+    };
+
+    const get_detailed_trades = async (parameters: Record<string, unknown>) => {
+      const payload = await postJson('/api/elevenlabs/detailed-trades', {
+        symbol: getToolSymbol(parameters),
+      });
+      return unwrapResponse(payload);
+    };
+
+    const get_trade_stats = async (parameters: Record<string, unknown>) => {
+      const payload = await postJson('/api/elevenlabs/trade-stats', {
+        symbol: getToolSymbol(parameters),
+        trade_type: getString(parameters, 'trade_type'),
+        time_period: getString(parameters, 'time_period'),
+      });
+      return unwrapResponse(payload);
+    };
+
+    const get_profitable_trades = async (parameters: Record<string, unknown>) => {
+      const payload = await postJson('/api/elevenlabs/profitable-trades', {
+        symbol: getToolSymbol(parameters),
+        time_period: getString(parameters, 'time_period'),
+      });
+      return unwrapResponse(payload);
+    };
+
+    const get_time_based_trades = async (parameters: Record<string, unknown>) => {
+      const payload = await postJson('/api/elevenlabs/time-trades', {
+        symbol: getToolSymbol(parameters),
+        time_period: getString(parameters, 'time_period'),
+        calculation: getString(parameters, 'calculation'),
+        trade_type: getString(parameters, 'trade_type'),
+      });
+      return unwrapResponse(payload);
+    };
+
+    const get_advanced_trades = async (parameters: Record<string, unknown>) => {
+      const payload = await postJson('/api/elevenlabs/advanced-query', {
+        symbol: getToolSymbol(parameters),
+        security_type: getString(parameters, 'security_type'),
+        trade_type: getString(parameters, 'trade_type'),
+        call_put: getString(parameters, 'call_put'),
+        from_date: getString(parameters, 'from_date'),
+        to_date: getString(parameters, 'to_date'),
+        expiration: getString(parameters, 'expiration'),
+        strike: parameters['strike'],
+        aggregation: getString(parameters, 'aggregation'),
+        limit: parameters['limit'],
+        order_by: getString(parameters, 'order_by'),
+      });
+      return unwrapResponse(payload);
+    };
+
+    const get_account_balance = async (parameters: Record<string, unknown>) => {
+      const payload = await postJson('/api/elevenlabs/account-balance', {
+        query_type: getString(parameters, 'query_type'),
+        time_period: getString(parameters, 'time_period'),
+      });
+      return unwrapResponse(payload);
+    };
+
+    const get_fees = async (parameters: Record<string, unknown>) => {
+      const payload = await postJson('/api/elevenlabs/fees', {
+        fee_type: getString(parameters, 'fee_type'),
+        time_period: getString(parameters, 'time_period'),
+        symbol: getToolSymbol(parameters),
+      });
+      return unwrapResponse(payload);
+    };
+
+    return {
+      get_trade_summary,
+      get_detailed_trades,
+      get_trade_stats,
+      get_profitable_trades,
+      get_time_based_trades,
+      get_advanced_trades,
+      get_account_balance,
+      get_fees,
+
+      // Aliases (in case tool names are camelCased in ElevenLabs UI)
+      getTradeSummary: get_trade_summary,
+      getDetailedTrades: get_detailed_trades,
+      getTradeStats: get_trade_stats,
+      getProfitableTrades: get_profitable_trades,
+      getTimeBasedTrades: get_time_based_trades,
+      getAdvancedTrades: get_advanced_trades,
+      getAccountBalance: get_account_balance,
+      getFees: get_fees,
+    };
+  }, []);
+
+// Text-only ElevenLabs conversation (no voice, just text)
   const textOnlyConversation = useConversation({
     textOnly: true,
+    clientTools,
     onMessage: async (message) => {
-      if (message.message && inputMode === 'text') {
+      if (message.message && inputModeRef.current === 'text') {
         const role = message.source === 'user' ? 'user' : 'assistant';
 
         // Skip user messages as we add them immediately on send
@@ -1114,173 +1638,221 @@ const UnifiedAssistant: React.FC = () => {
           return;
         }
 
+        // If the agent greets after the user already asked something, don't let it consume the pending intent.
+        if (role === 'assistant' && pendingQueryIntentRef.current && isSessionGreetingMessage(message.message)) {
+          return;
+        }
+
+        // Skip non-answer assistant nudges ("...", "one moment", etc.)
+        if (role === 'assistant' && isTransientAssistantMessage(message.message)) {
+          return;
+        }
+
+        // If we already have deterministic data for this cycle, prefer it over the agent's text.
+        let assistantContent = message.message;
+        if (role === 'assistant' && pendingAnswerOverrideRef.current) {
+          const answerPromise = pendingAnswerOverrideRef.current;
+          pendingAnswerOverrideRef.current = null;
+          try {
+            const override = await answerPromise;
+            if (override) assistantContent = override;
+          } catch (error) {
+            console.warn('[Answer Override] Failed to build override:', error);
+          }
+        }
+
         // Deduplicate: Skip if this is the same message we just processed (within 2 seconds)
         const now = Date.now();
-        const lastMsg = lastProcessedMessageRef.current;
-        if (lastMsg && lastMsg.content === message.message && (now - lastMsg.timestamp) < 2000) {
+        const lastMsg = lastProcessedTextMessageRef.current;
+        if (lastMsg && lastMsg.content === assistantContent && (now - lastMsg.timestamp) < 2000) {
           console.log('🔍 [Text Mode] Skipping duplicate message');
           return;
         }
-        lastProcessedMessageRef.current = { content: message.message, timestamp: now };
-
-        let tradeUI: TradeUIData | undefined;
+        lastProcessedTextMessageRef.current = { content: assistantContent, timestamp: now };
 
         // For assistant messages, check if we should render trade UI
-        const symbol = extractSymbolOrCompany(message.message);
-        console.log('🔍 [Text Mode] Message:', message.message.substring(0, 150));
+        const symbol = extractSymbolOrCompany(assistantContent);
+        console.log('🔍 [Text Mode] Message:', assistantContent.substring(0, 150));
         console.log('🔍 [Text Mode] Extracted symbol:', symbol);
 
-        // PRIMARY: Use stored intent from user's query (deterministic)
-        const pendingIntent = pendingQueryIntentRef.current;
-        if (pendingIntent) {
-          console.log('🎯 [Intent-Based] Using stored intent:', pendingIntent);
-          pendingQueryIntentRef.current = null; // Clear immediately
-          // IMPORTANT: Only use symbol from intent, don't fall back to extracted symbol
-          // This prevents extracting dollar amounts or other text from agent's response as symbols
-          const intentSymbol = pendingIntent.symbol || '';
-          const data = await fetchTradeData(
-            intentSymbol,
-            pendingIntent.cardType,
-            pendingIntent.tradeType,
-            pendingIntent.timePeriod,
-            {
-              callPut: pendingIntent.callPut,
-              expiration: pendingIntent.expiration,
-              accountQueryType: pendingIntent.accountQueryType,
-              feeType: pendingIntent.feeType,
-            }
-          );
-          if (data) {
-            tradeUI = data;
-            console.log('🎯 [Intent-Based] Successfully rendered card:', pendingIntent.cardType);
-          }
+        const newMessageId = `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        const newMessage: TranscriptMessage = {
+          id: newMessageId,
+          role,
+          content: assistantContent,
+          timestamp: new Date(),
+        };
+        setTranscript(prev => [...prev, newMessage]);
+        setIsSending(false);
+
+        // Save to database
+        if (currentConversationId) {
+          saveMessage(currentConversationId, role, assistantContent, 'text');
         }
 
-        // FALLBACK: Regex-based detection on agent's response
-        // This handles follow-up questions or cases where intent wasn't detected
+        // Compute and attach the UI card after the assistant text is shown
+        void (async () => {
+          if (suppressNextTradeUICardRef.current) {
+            suppressNextTradeUICardRef.current = false;
+            return;
+          }
+          let tradeUI: TradeUIData | undefined;
 
-        // Check for account balance queries FIRST (highest priority)
-        if (!tradeUI) {
-          const accountMatch = detectAccountBalanceQuery(message.message);
-          console.log('🔍 [Text Mode] Account balance match:', accountMatch);
-          if (accountMatch) {
-            console.log('🔍 [Text Mode] Account balance query detected:', accountMatch.queryType);
-            const data = await fetchTradeData('', 'account-balance', undefined, accountMatch.timePeriod, { accountQueryType: accountMatch.queryType });
-            console.log('🔍 [Text Mode] Account balance data:', data);
-            if (data) tradeUI = data;
-          }
-        }
-        // Check for fees/commissions queries
-        if (!tradeUI) {
-          const feesMatch = detectFeesQuery(message.message);
-          console.log('🔍 [Text Mode] Fees match:', feesMatch);
-          if (feesMatch) {
-            console.log('🔍 [Text Mode] Fees query detected:', feesMatch.feeType);
-            const data = await fetchTradeData(feesMatch.symbol || '', 'fees', undefined, feesMatch.timePeriod, { feeType: feesMatch.feeType });
-            console.log('🔍 [Text Mode] Fees data:', data);
-            if (data) tradeUI = data;
-          }
-        }
-        // Check for expiring options (high priority for "expiring tomorrow" queries)
-        // Must check before bulk options since expiring responses also contain "across N trades"
-        if (!tradeUI) {
-          const expiringMatch = detectExpiringOptionsQuery(message.message);
-          if (expiringMatch) {
-            const data = await fetchTradeData(symbol || '', 'expiring-options', expiringMatch.tradeType, undefined, { expiration: expiringMatch.expiration });
-            if (data) tradeUI = data;
-          }
-        }
-        // Check for ALL TRADES (both stocks AND options) - must come BEFORE bulk options
-        // This prevents "15 stock trades and 11 option trades" from showing only options
-        if (!tradeUI && detectAllTradesQuery(message.message) && symbol) {
-          const data = await fetchTradeData(symbol, 'detailed');
-          if (data) tradeUI = data;
-        }
-        // Check for BULK option trades (e.g., "show all short calls on Tesla last month")
-        // This must come BEFORE detectLastOptionQuery to catch multi-trade responses
-        if (!tradeUI) {
-          const bulkOptionsMatch = detectBulkOptionsQuery(message.message);
-          if (bulkOptionsMatch) {
-            const data = await fetchTradeData(symbol || '', 'advanced-options', bulkOptionsMatch.tradeType, bulkOptionsMatch.timePeriod, { callPut: bulkOptionsMatch.callPut });
-            if (data) tradeUI = data;
-          }
-          // Check for "last/most recent" option trade queries (single trade only)
-          else {
-            const lastOptionMatch = detectLastOptionQuery(message.message);
-            if (lastOptionMatch && symbol) {
-              const data = await fetchTradeData(symbol, 'last-option', lastOptionMatch.tradeType, undefined, { callPut: lastOptionMatch.callPut });
-              if (data) tradeUI = data;
-            }
-          }
-        }
-        // Check for highest/lowest strike queries
-        // IMPORTANT: Parse data from agent's text to ensure UI card matches exactly what agent said
-        if (!tradeUI) {
-          const parsedStrike = parseHighestStrikeFromText(message.message);
-          if (parsedStrike) {
-            console.log('🎯 [Text Parse] Using parsed highest-strike data from agent text:', parsedStrike);
-            tradeUI = {
-              type: 'highest-strike',
-              symbol: parsedStrike.symbol,
-              tradeType: parsedStrike.tradeType,
-              callPut: parsedStrike.callPut,
-              data: {
-                parsedFromText: true,
-                ...parsedStrike
+          // PRIMARY: Use stored intent from user's query (deterministic)
+          const pendingIntent = pendingQueryIntentRef.current;
+          const pendingTradeUIRequest = pendingTradeUIRequestRef.current;
+          if (pendingIntent) {
+            console.log('🎯 [Intent-Based] Using stored intent:', pendingIntent);
+            // Consume intent for this assistant response (only once we have a real assistant answer)
+            pendingQueryIntentRef.current = null;
+            pendingTradeUIRequestRef.current = null;
+
+            // SPECIAL CASE: highest-strike must match assistant narrative (dates), so parse from text first
+            if (pendingIntent.cardType === 'highest-strike') {
+              const parsedStrike = parseHighestStrikeFromText(message.message);
+              if (parsedStrike && isCompleteHighestStrikeParse(parsedStrike)) {
+                if (pendingIntent.symbol) parsedStrike.symbol = pendingIntent.symbol;
+                tradeUI = {
+                  type: 'highest-strike',
+                  symbol: parsedStrike.symbol,
+                  tradeType: parsedStrike.tradeType,
+                  callPut: parsedStrike.callPut,
+                  data: {
+                    parsedFromText: true,
+                    ...parsedStrike,
+                  }
+                };
               }
-            };
-          }
-          // Check for total premium queries
-          else {
-            const premiumMatch = detectTotalPremiumQuery(message.message);
-            if (premiumMatch) {
-              const data = await fetchTradeData(symbol || '', 'total-premium', premiumMatch.tradeType, premiumMatch.timePeriod);
+            }
+
+            // Otherwise, prefer the prefetched trade UI if available
+            if (!tradeUI && pendingTradeUIRequest) {
+              const data = await pendingTradeUIRequest;
               if (data) tradeUI = data;
             }
-            // Check for advanced options queries (short/long calls/puts)
-            else {
-              const advancedMatch = detectAdvancedOptionsQuery(message.message);
-              if (advancedMatch) {
-                const data = await fetchTradeData(symbol || '', 'advanced-options', advancedMatch.tradeType, advancedMatch.timePeriod, { callPut: advancedMatch.callPut });
+
+            // Fallback to fetching now if we didn't prefetch (or prefetch failed)
+            if (!tradeUI) {
+              const intentSymbol = pendingIntent.symbol || '';
+              const data = await fetchTradeData(
+                intentSymbol,
+                pendingIntent.cardType,
+                pendingIntent.tradeType,
+                pendingIntent.timePeriod,
+                {
+                  callPut: pendingIntent.callPut,
+                  expiration: pendingIntent.expiration,
+                  accountQueryType: pendingIntent.accountQueryType,
+                  feeType: pendingIntent.feeType,
+                }
+              );
+              if (data) {
+                tradeUI = data;
+                console.log('🎯 [Intent-Based] Successfully rendered card:', pendingIntent.cardType);
+              }
+            }
+          }
+
+          // FALLBACK: Regex-based detection on agent's response
+          if (!tradeUI) {
+            // Check for account balance queries FIRST (highest priority)
+            const accountMatch = detectAccountBalanceQuery(message.message);
+            console.log('🔍 [Text Mode] Account balance match:', accountMatch);
+            if (accountMatch) {
+              console.log('🔍 [Text Mode] Account balance query detected:', accountMatch.queryType);
+              const data = await fetchTradeData('', 'account-balance', undefined, accountMatch.timePeriod, { accountQueryType: accountMatch.queryType });
+              console.log('🔍 [Text Mode] Account balance data:', data);
+              if (data) tradeUI = data;
+            }
+          }
+          if (!tradeUI) {
+            const feesMatch = detectFeesQuery(message.message);
+            console.log('🔍 [Text Mode] Fees match:', feesMatch);
+            if (feesMatch) {
+              console.log('🔍 [Text Mode] Fees query detected:', feesMatch.feeType);
+              const data = await fetchTradeData(feesMatch.symbol || '', 'fees', undefined, feesMatch.timePeriod, { feeType: feesMatch.feeType });
+              console.log('🔍 [Text Mode] Fees data:', data);
+              if (data) tradeUI = data;
+            }
+          }
+          if (!tradeUI) {
+            const expiringMatch = detectExpiringOptionsQuery(message.message);
+            if (expiringMatch) {
+              const data = await fetchTradeData(symbol || '', 'expiring-options', expiringMatch.tradeType, undefined, { expiration: expiringMatch.expiration });
+              if (data) tradeUI = data;
+            }
+          }
+          if (!tradeUI && detectAllTradesQuery(message.message) && symbol) {
+            const data = await fetchTradeData(symbol, 'detailed');
+            if (data) tradeUI = data;
+          }
+          if (!tradeUI) {
+            const bulkOptionsMatch = detectBulkOptionsQuery(message.message);
+            if (bulkOptionsMatch) {
+              const data = await fetchTradeData(symbol || '', 'advanced-options', bulkOptionsMatch.tradeType, bulkOptionsMatch.timePeriod, { callPut: bulkOptionsMatch.callPut });
+              if (data) tradeUI = data;
+            } else {
+              const lastOptionMatch = detectLastOptionQuery(message.message);
+              if (lastOptionMatch && symbol) {
+                const data = await fetchTradeData(symbol, 'last-option', lastOptionMatch.tradeType, undefined, { callPut: lastOptionMatch.callPut });
                 if (data) tradeUI = data;
               }
-              // Check for time-based trades
-              else {
-                const timeMatch = detectTimeBasedTrades(message.message);
-                if (timeMatch) {
-                  const isPortfolioQuery = isPortfolioWideQuery(message.message);
-                  const isDayOfWeekQuery = /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(timeMatch.timePeriod);
-                  const timeSymbol = (isPortfolioQuery || (isDayOfWeekQuery && !symbol)) ? null : symbol;
-                  const data = await fetchTradeData(timeSymbol || '', 'time-based', undefined, timeMatch.timePeriod);
-                  if (data) tradeUI = data;
+            }
+          }
+          if (!tradeUI) {
+            const parsedStrike = parseHighestStrikeFromText(message.message);
+            if (parsedStrike && isCompleteHighestStrikeParse(parsedStrike)) {
+              console.log('🎯 [Text Parse] Using parsed highest-strike data from agent text:', parsedStrike);
+              tradeUI = {
+                type: 'highest-strike',
+                symbol: parsedStrike.symbol,
+                tradeType: parsedStrike.tradeType,
+                callPut: parsedStrike.callPut,
+                data: {
+                  parsedFromText: true,
+                  ...parsedStrike
                 }
-                else if (symbol) {
-                  // Check for average price queries first (simple average, not full stats)
-                  const avgPriceMatch = detectAveragePrice(message.message);
-                  if (avgPriceMatch) {
-                    const data = await fetchTradeData(symbol, 'average-price', avgPriceMatch.tradeType, avgPriceMatch.timePeriod);
+              };
+            } else {
+              const premiumMatch = detectTotalPremiumQuery(message.message);
+              if (premiumMatch) {
+                const data = await fetchTradeData(symbol || '', 'total-premium', premiumMatch.tradeType, premiumMatch.timePeriod);
+                if (data) tradeUI = data;
+              } else {
+                const advancedMatch = detectAdvancedOptionsQuery(message.message);
+                if (advancedMatch) {
+                  const data = await fetchTradeData(symbol || '', 'advanced-options', advancedMatch.tradeType, advancedMatch.timePeriod, { callPut: advancedMatch.callPut });
+                  if (data) tradeUI = data;
+                } else {
+                  const timeMatch = detectTimeBasedTrades(message.message);
+                  if (timeMatch) {
+                    const isPortfolioQuery = isPortfolioWideQuery(message.message);
+                    const isDayOfWeekQuery = /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(timeMatch.timePeriod);
+                    const timeSymbol = (isPortfolioQuery || (isDayOfWeekQuery && !symbol)) ? null : symbol;
+                    const data = await fetchTradeData(timeSymbol || '', 'time-based', undefined, timeMatch.timePeriod);
                     if (data) tradeUI = data;
-                  } else {
-                    // Check other detection in order of priority:
-                    // 1. Trade stats (specific price queries with high/low/avg)
-                    // 2. Profitable trades (specific profit analysis) - check BEFORE detailed
-                    // 3. Detailed trades (general trade listing)
-                    // 4. Trade summary (count overview)
-                    const statsMatch = detectTradeStats(message.message);
-                    if (statsMatch) {
-                      const data = await fetchTradeData(symbol, 'stats', statsMatch.tradeType, statsMatch.timePeriod);
-                      if (data) tradeUI = data;
-                    } else if (detectProfitableTrades(message.message)) {
-                      const data = await fetchTradeData(symbol, 'profitable');
-                      if (data) tradeUI = data;
-                    } else if (detectDetailedTrades(message.message)) {
-                      const data = await fetchTradeData(symbol, 'detailed');
+                  } else if (symbol) {
+                    const avgPriceMatch = detectAveragePrice(message.message);
+                    if (avgPriceMatch) {
+                      const data = await fetchTradeData(symbol, 'average-price', avgPriceMatch.tradeType, avgPriceMatch.timePeriod);
                       if (data) tradeUI = data;
                     } else {
-                      const summaryMatch = detectTradeSummary(message.message);
-                      if (summaryMatch) {
-                        const data = await fetchTradeData(symbol, 'summary');
+                      const statsMatch = detectTradeStats(message.message);
+                      if (statsMatch) {
+                        const data = await fetchTradeData(symbol, 'stats', statsMatch.tradeType, statsMatch.timePeriod);
                         if (data) tradeUI = data;
+                      } else if (detectProfitableTrades(message.message)) {
+                        const data = await fetchTradeData(symbol, 'profitable');
+                        if (data) tradeUI = data;
+                      } else if (detectDetailedTrades(message.message)) {
+                        const data = await fetchTradeData(symbol, 'detailed');
+                        if (data) tradeUI = data;
+                      } else {
+                        const summaryMatch = detectTradeSummary(message.message);
+                        if (summaryMatch) {
+                          const data = await fetchTradeData(symbol, 'summary');
+                          if (data) tradeUI = data;
+                        }
                       }
                     }
                   }
@@ -1288,22 +1860,12 @@ const UnifiedAssistant: React.FC = () => {
               }
             }
           }
-        }
 
-        const newMessage: TranscriptMessage = {
-          id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          role,
-          content: message.message,
-          timestamp: new Date(),
-          tradeUI,
-        };
-        setTranscript(prev => [...prev, newMessage]);
-        setIsSending(false);
-
-        // Save to database
-        if (currentConversationId) {
-          saveMessage(currentConversationId, role, message.message, 'text');
-        }
+          if (tradeUI) {
+            lastAssistantTradeUIRef.current = tradeUI;
+            setTranscript(prev => prev.map((m) => m.id === newMessageId ? { ...m, tradeUI } : m));
+          }
+        })();
       }
     },
     onError: (error) => {
@@ -1318,7 +1880,7 @@ const UnifiedAssistant: React.FC = () => {
     type: 'summary' | 'detailed' | 'stats' | 'profitable' | 'time-based' | 'option-stats' | 'average-price' | 'advanced-options' | 'highest-strike' | 'total-premium' | 'expiring-options' | 'last-option' | 'account-balance' | 'fees',
     tradeType?: 'buy' | 'sell' | 'all',
     timePeriod?: string,
-    extraParams?: { callPut?: 'call' | 'put'; expiration?: string; aggregation?: string; accountQueryType?: AccountQueryType; feeType?: FeeType }
+    extraParams?: { callPut?: 'call' | 'put'; expiration?: string; aggregation?: string; accountQueryType?: AccountQueryType; feeType?: FeeType; includeTrades?: boolean }
   ): Promise<TradeUIData | null> => {
     try {
       let endpoint: string;
@@ -1346,7 +1908,8 @@ const UnifiedAssistant: React.FC = () => {
         return { type, symbol, feeType: extraParams?.feeType, timePeriod, data };
       } else if (type === 'average-price') {
         endpoint = '/api/average-price';
-        body = { symbol, tradeType: tradeType || 'all', timePeriod };
+        const includeTrades = extraParams?.includeTrades ?? true;
+        body = { symbol, tradeType: tradeType || 'all', timePeriod, includeTrades };
         const res = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1430,9 +1993,13 @@ const UnifiedAssistant: React.FC = () => {
         body = { symbol, tradeType: tradeType || 'all' };
       } else if (type === 'profitable') {
         endpoint = '/api/profitable-trades-ui';
+        body = { symbol, timePeriod };
       } else if (type === 'time-based') {
         endpoint = '/api/time-trades-ui';
         body = { symbol: symbol || null, timePeriod };
+      } else if (type === 'detailed') {
+        endpoint = '/api/trades-ui';
+        body = { symbol };
       } else {
         endpoint = '/api/elevenlabs/detailed-trades';
       }
@@ -1453,6 +2020,7 @@ const UnifiedAssistant: React.FC = () => {
 
   // ElevenLabs Conversation Hook - single source of truth for both voice and text
   const elevenLabsConversation = useConversation({
+    clientTools,
     onConnect: () => {
       console.log('ElevenLabs connected');
       // Only clear transcript if not resuming from history
@@ -1471,36 +2039,253 @@ const UnifiedAssistant: React.FC = () => {
       if (message.message) {
         const role = message.source === 'user' ? 'user' : 'assistant';
 
+        // If the agent greets after the user already asked something, don't let it consume the pending intent.
+        if (role === 'assistant' && pendingQueryIntentRef.current && isSessionGreetingMessage(message.message)) {
+          return;
+        }
+
+        // Skip non-answer assistant nudges ("...", "one moment", etc.)
+        if (role === 'assistant' && isTransientAssistantMessage(message.message)) {
+          return;
+        }
+
+        // If we already have deterministic data for this cycle, prefer it over the agent's text.
+        let assistantContent = message.message;
+        if (role === 'assistant' && pendingAnswerOverrideRef.current) {
+          const answerPromise = pendingAnswerOverrideRef.current;
+          pendingAnswerOverrideRef.current = null;
+          try {
+            const override = await answerPromise;
+            if (override) assistantContent = override;
+          } catch (error) {
+            console.warn('[Answer Override] Failed to build override:', error);
+          }
+        }
+
         // Deduplicate: Skip if this is the same message we just processed (within 2 seconds)
         const now = Date.now();
-        const lastMsg = lastProcessedMessageRef.current;
-        if (lastMsg && lastMsg.content === message.message && (now - lastMsg.timestamp) < 2000) {
+        const lastMsg = lastProcessedVoiceMessageRef.current;
+        if (lastMsg && lastMsg.content === assistantContent && (now - lastMsg.timestamp) < 2000) {
           console.log('🔍 [Voice Mode] Skipping duplicate message');
           return;
         }
-        lastProcessedMessageRef.current = { content: message.message, timestamp: now };
+        lastProcessedVoiceMessageRef.current = { content: assistantContent, timestamp: now };
 
-        let tradeUI: TradeUIData | undefined;
+        const newMessageId = `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+        const newMessage: TranscriptMessage = {
+          id: newMessageId,
+          role,
+          content: assistantContent,
+          timestamp: new Date(),
+        };
+        setTranscript(prev => [...prev, newMessage]);
+        setIsSending(false); // Clear sending state when we get a response
 
-        // For assistant messages, check if we should render trade UI
+        // VOICE MODE: When the user's spoken message arrives via ElevenLabs, classify intent here
+        // (typed messages go through handleSendMessage, but spoken messages do not).
+        if (role === 'user') {
+          const userQuery = message.message.trim();
+          if (userQuery.length >= 3) {
+            if (isExplainCalculationQuery(userQuery)) {
+              const override = buildAveragePriceCalculationExplanation(lastAssistantTradeUIRef.current);
+              if (override) {
+                suppressNextTradeUICardRef.current = true;
+                pendingQueryIntentRef.current = null;
+                pendingTradeUIRequestRef.current = null;
+                pendingAnswerOverrideRef.current = Promise.resolve(override);
+                return;
+              }
+            }
+
+            const token = Date.now();
+            pendingVoiceIntentTokenRef.current = token;
+
+            // Fast path: regex intent (sync) so we can prefetch before the assistant responds.
+            const fastIntent = detectUserQueryIntent(userQuery);
+            if (fastIntent) {
+              pendingQueryIntentRef.current = fastIntent;
+              pendingTradeUIRequestRef.current = fetchTradeData(
+                fastIntent.symbol || '',
+                fastIntent.cardType,
+                fastIntent.tradeType,
+                fastIntent.timePeriod,
+                {
+                  callPut: fastIntent.callPut,
+                  expiration: fastIntent.expiration,
+                  accountQueryType: fastIntent.accountQueryType,
+                  feeType: fastIntent.feeType,
+                }
+              );
+              pendingAnswerOverrideRef.current = pendingTradeUIRequestRef.current.then((tradeUI) =>
+                buildAnswerOverride(fastIntent, tradeUI)
+              );
+            } else {
+              // Clear any stale pending intent from prior cycles.
+              pendingQueryIntentRef.current = null;
+              pendingTradeUIRequestRef.current = null;
+              pendingAnswerOverrideRef.current = null;
+            }
+
+            // Slow path: LLM classifier (async). If it differs from the fast intent, refine it,
+            // but only if we haven't already consumed the pending intent for an assistant reply.
+            void (async () => {
+              console.log('🎯 [Voice Intent Detection] User query:', userQuery);
+              const llmIntent = await classifyIntentViaAPI(userQuery);
+              if (!llmIntent) return;
+
+              if (pendingVoiceIntentTokenRef.current !== token) return;
+              if (!pendingQueryIntentRef.current) return;
+
+              const current = pendingQueryIntentRef.current;
+              const isSame =
+                current.cardType === llmIntent.cardType &&
+                (current.symbol || '') === (llmIntent.symbol || '') &&
+                (current.tradeType || '') === (llmIntent.tradeType || '') &&
+                (current.timePeriod || '') === (llmIntent.timePeriod || '') &&
+                (current.callPut || '') === (llmIntent.callPut || '') &&
+                (current.expiration || '') === (llmIntent.expiration || '') &&
+                (current.accountQueryType || '') === (llmIntent.accountQueryType || '') &&
+                (current.feeType || '') === (llmIntent.feeType || '');
+
+              if (isSame) return;
+
+              console.log('🎯 [Voice LLM Classifier] Intent:', llmIntent);
+              pendingQueryIntentRef.current = llmIntent;
+              pendingTradeUIRequestRef.current = fetchTradeData(
+                llmIntent.symbol || '',
+                llmIntent.cardType,
+                llmIntent.tradeType,
+                llmIntent.timePeriod,
+                {
+                  callPut: llmIntent.callPut,
+                  expiration: llmIntent.expiration,
+                  accountQueryType: llmIntent.accountQueryType,
+                  feeType: llmIntent.feeType,
+                }
+              );
+              pendingAnswerOverrideRef.current = pendingTradeUIRequestRef.current.then((tradeUI) =>
+                buildAnswerOverride(llmIntent, tradeUI)
+              );
+            })();
+          }
+        }
+
+        // For assistant messages, compute trade UI asynchronously so the text renders first
         if (role === 'assistant') {
-          const symbol = extractSymbolOrCompany(message.message);
-          console.log('🔍 [Voice Mode] Message:', message.message.substring(0, 100));
+          const symbol = extractSymbolOrCompany(assistantContent);
+          console.log('🔍 [Voice Mode] Message:', assistantContent.substring(0, 100));
           console.log('🔍 [Voice Mode] Extracted symbol:', symbol);
 
-          // PRIMARY: Use stored intent from user's query (deterministic)
-          const pendingIntent = pendingQueryIntentRef.current;
-          if (pendingIntent) {
-            console.log('🎯 [Voice Intent-Based] Using stored intent:', pendingIntent);
-            pendingQueryIntentRef.current = null; // Clear immediately
+          void (async () => {
+            if (suppressNextTradeUICardRef.current) {
+              suppressNextTradeUICardRef.current = false;
+              return;
+            }
+            let tradeUI: TradeUIData | undefined;
 
-            // SPECIAL CASE: For highest-strike, use text parsing to ensure UI matches agent's spoken dates
-            // The API returns different dates than what the agent says, causing date mismatch
-            if (pendingIntent.cardType === 'highest-strike') {
-              console.log('🎯 [Voice Intent-Based] highest-strike detected - using text parsing directly');
+            // PRIMARY: Use stored intent from user's query (deterministic)
+            const pendingIntent = pendingQueryIntentRef.current;
+            const pendingTradeUIRequest = pendingTradeUIRequestRef.current;
+            if (pendingIntent) {
+              console.log('🎯 [Voice Intent-Based] Using stored intent:', pendingIntent);
+              // Consume intent for this assistant response (only once we have a real assistant answer)
+              pendingQueryIntentRef.current = null;
+              pendingTradeUIRequestRef.current = null;
+
+	              if (pendingIntent.cardType === 'highest-strike' && !pendingTradeUIRequest) {
+	                console.log('🎯 [Voice Intent-Based] highest-strike detected - using text parsing fallback');
+	                const parsedStrike = parseHighestStrikeFromText(message.message);
+	                if (parsedStrike && isCompleteHighestStrikeParse(parsedStrike)) {
+	                  if (pendingIntent.symbol) parsedStrike.symbol = pendingIntent.symbol;
+	                  console.log('🎯 [Voice Intent-Based] Parsed highest-strike from text:', parsedStrike);
+	                  tradeUI = {
+	                    type: 'highest-strike',
+	                    symbol: parsedStrike.symbol,
+	                    tradeType: parsedStrike.tradeType,
+	                    callPut: parsedStrike.callPut,
+	                    data: {
+	                      parsedFromText: true,
+	                      ...parsedStrike
+	                    }
+	                  };
+	                }
+	              }
+
+              if (!tradeUI && pendingTradeUIRequest) {
+                const data = await pendingTradeUIRequest;
+                if (data) tradeUI = data;
+              }
+
+              if (!tradeUI) {
+                const intentSymbol = pendingIntent.symbol || '';
+                const data = await fetchTradeData(
+                  intentSymbol,
+                  pendingIntent.cardType,
+                  pendingIntent.tradeType,
+                  pendingIntent.timePeriod,
+                  {
+                    callPut: pendingIntent.callPut,
+                    expiration: pendingIntent.expiration,
+                    accountQueryType: pendingIntent.accountQueryType,
+                    feeType: pendingIntent.feeType,
+                  }
+                );
+                if (data) {
+                  tradeUI = data;
+                  console.log('🎯 [Voice Intent-Based] Successfully rendered card:', pendingIntent.cardType);
+                }
+              }
+            }
+
+            // FALLBACK: Regex-based detection on agent's response (for follow-up questions)
+            if (!tradeUI) {
+              const accountMatch = detectAccountBalanceQuery(message.message);
+              if (accountMatch) {
+                console.log('🔍 Account balance query detected:', accountMatch.queryType);
+                const data = await fetchTradeData('', 'account-balance', undefined, accountMatch.timePeriod, { accountQueryType: accountMatch.queryType });
+                if (data) tradeUI = data;
+              }
+            }
+            if (!tradeUI) {
+              const feesMatch = detectFeesQuery(message.message);
+              if (feesMatch) {
+                console.log('🔍 Fees query detected:', feesMatch.feeType);
+                const data = await fetchTradeData(feesMatch.symbol || '', 'fees', undefined, feesMatch.timePeriod, { feeType: feesMatch.feeType });
+                if (data) tradeUI = data;
+              }
+            }
+            if (!tradeUI) {
+              const expiringMatch = detectExpiringOptionsQuery(message.message);
+              if (expiringMatch) {
+                console.log('🔍 Expiring options detected:', expiringMatch.expiration);
+                const data = await fetchTradeData(symbol || '', 'expiring-options', expiringMatch.tradeType, undefined, { expiration: expiringMatch.expiration });
+                if (data) tradeUI = data;
+              }
+            }
+            if (!tradeUI && detectAllTradesQuery(message.message) && symbol) {
+              console.log('🔍 All trades query detected (both stocks and options)');
+              const data = await fetchTradeData(symbol, 'detailed');
+              if (data) tradeUI = data;
+            }
+            if (!tradeUI) {
+              const bulkOptionsMatch = detectBulkOptionsQuery(message.message);
+              if (bulkOptionsMatch) {
+                console.log('🔍 Bulk options query detected:', bulkOptionsMatch);
+                const data = await fetchTradeData(symbol || '', 'advanced-options', bulkOptionsMatch.tradeType, bulkOptionsMatch.timePeriod, { callPut: bulkOptionsMatch.callPut });
+                if (data) tradeUI = data;
+              } else {
+                const lastOptionMatch = detectLastOptionQuery(message.message);
+                if (lastOptionMatch && symbol) {
+                  console.log('🔍 Last option trade detected:', lastOptionMatch);
+                  const data = await fetchTradeData(symbol, 'last-option', lastOptionMatch.tradeType, undefined, { callPut: lastOptionMatch.callPut });
+                  if (data) tradeUI = data;
+                }
+              }
+            }
+            if (!tradeUI) {
               const parsedStrike = parseHighestStrikeFromText(message.message);
-              if (parsedStrike) {
-                console.log('🎯 [Voice Intent-Based] Parsed highest-strike from text:', parsedStrike);
+              if (parsedStrike && isCompleteHighestStrikeParse(parsedStrike)) {
+                console.log('🎯 [Voice Text Parse] Using parsed highest-strike data from agent text:', parsedStrike);
                 tradeUI = {
                   type: 'highest-strike',
                   symbol: parsedStrike.symbol,
@@ -1511,158 +2296,55 @@ const UnifiedAssistant: React.FC = () => {
                     ...parsedStrike
                   }
                 };
-              }
-            } else {
-              // IMPORTANT: Only use symbol from intent, don't fall back to extracted symbol
-              // This prevents extracting dollar amounts or other text from agent's response as symbols
-              const intentSymbol = pendingIntent.symbol || '';
-              const data = await fetchTradeData(
-                intentSymbol,
-                pendingIntent.cardType,
-                pendingIntent.tradeType,
-                pendingIntent.timePeriod,
-                {
-                  callPut: pendingIntent.callPut,
-                  expiration: pendingIntent.expiration,
-                  accountQueryType: pendingIntent.accountQueryType,
-                  feeType: pendingIntent.feeType,
-                }
-              );
-              if (data) {
-                tradeUI = data;
-                console.log('🎯 [Voice Intent-Based] Successfully rendered card:', pendingIntent.cardType);
-              }
-            }
-          }
-
-          // FALLBACK: Regex-based detection on agent's response (for follow-up questions)
-          // Check for account balance queries FIRST (highest priority)
-          if (!tradeUI) {
-            const accountMatch = detectAccountBalanceQuery(message.message);
-            if (accountMatch) {
-              console.log('🔍 Account balance query detected:', accountMatch.queryType);
-              const data = await fetchTradeData('', 'account-balance', undefined, accountMatch.timePeriod, { accountQueryType: accountMatch.queryType });
-              if (data) tradeUI = data;
-            }
-          }
-          // Check for fees/commissions queries
-          if (!tradeUI) {
-            const feesMatch = detectFeesQuery(message.message);
-            if (feesMatch) {
-              console.log('🔍 Fees query detected:', feesMatch.feeType);
-              const data = await fetchTradeData(feesMatch.symbol || '', 'fees', undefined, feesMatch.timePeriod, { feeType: feesMatch.feeType });
-              if (data) tradeUI = data;
-            }
-          }
-          // Check for expiring options (high priority for "expiring tomorrow" queries)
-          // Must check before bulk options since expiring responses also contain "across N trades"
-          if (!tradeUI) {
-            const expiringMatch = detectExpiringOptionsQuery(message.message);
-            if (expiringMatch) {
-              console.log('🔍 Expiring options detected:', expiringMatch.expiration);
-              const data = await fetchTradeData(symbol || '', 'expiring-options', expiringMatch.tradeType, undefined, { expiration: expiringMatch.expiration });
-              if (data) tradeUI = data;
-            }
-          }
-          // Check for ALL TRADES (both stocks AND options) - must come BEFORE bulk options
-          // This prevents "15 stock trades and 11 option trades" from showing only options
-          if (!tradeUI && detectAllTradesQuery(message.message) && symbol) {
-            console.log('🔍 All trades query detected (both stocks and options)');
-            const data = await fetchTradeData(symbol, 'detailed');
-            if (data) tradeUI = data;
-          }
-          // Check for BULK option trades (e.g., "show all short calls on Tesla last month")
-          // This must come BEFORE detectLastOptionQuery to catch multi-trade responses
-          if (!tradeUI) {
-            const bulkOptionsMatch = detectBulkOptionsQuery(message.message);
-            if (bulkOptionsMatch) {
-              console.log('🔍 Bulk options query detected:', bulkOptionsMatch);
-              const data = await fetchTradeData(symbol || '', 'advanced-options', bulkOptionsMatch.tradeType, bulkOptionsMatch.timePeriod, { callPut: bulkOptionsMatch.callPut });
-              if (data) tradeUI = data;
-            }
-            // Check for "last/most recent" option trade queries (single trade only)
-            else {
-              const lastOptionMatch = detectLastOptionQuery(message.message);
-              if (lastOptionMatch && symbol) {
-                console.log('🔍 Last option trade detected:', lastOptionMatch);
-                const data = await fetchTradeData(symbol, 'last-option', lastOptionMatch.tradeType, undefined, { callPut: lastOptionMatch.callPut });
-                if (data) tradeUI = data;
-              }
-            }
-          }
-          // Check for highest/lowest strike queries
-          // IMPORTANT: Parse data from agent's text to ensure UI card matches exactly what agent said
-          if (!tradeUI) {
-            const parsedStrike = parseHighestStrikeFromText(message.message);
-            if (parsedStrike) {
-              console.log('🎯 [Voice Text Parse] Using parsed highest-strike data from agent text:', parsedStrike);
-              tradeUI = {
-                type: 'highest-strike',
-                symbol: parsedStrike.symbol,
-                tradeType: parsedStrike.tradeType,
-                callPut: parsedStrike.callPut,
-                data: {
-                  parsedFromText: true,
-                  ...parsedStrike
-                }
-              };
-            }
-            // Check for total premium queries
-            else {
-              const premiumMatch = detectTotalPremiumQuery(message.message);
-              if (premiumMatch) {
-                console.log('🔍 Total premium detected:', premiumMatch);
-                const data = await fetchTradeData(symbol || '', 'total-premium', premiumMatch.tradeType, premiumMatch.timePeriod);
-                if (data) tradeUI = data;
-              }
-              // Check for advanced options queries (short/long calls/puts)
-              else {
-                const advancedMatch = detectAdvancedOptionsQuery(message.message);
-                if (advancedMatch) {
-                  console.log('🔍 Advanced options query detected:', advancedMatch);
-                  const data = await fetchTradeData(symbol || '', 'advanced-options', advancedMatch.tradeType, advancedMatch.timePeriod, { callPut: advancedMatch.callPut });
+              } else {
+                const premiumMatch = detectTotalPremiumQuery(message.message);
+                if (premiumMatch) {
+                  console.log('🔍 Total premium detected:', premiumMatch);
+                  const data = await fetchTradeData(symbol || '', 'total-premium', premiumMatch.tradeType, premiumMatch.timePeriod);
                   if (data) tradeUI = data;
-                }
-                // Check for time-based trades
-                else {
-                  const timeMatch = detectTimeBasedTrades(message.message);
-                  if (timeMatch) {
-                    console.log('🔍 Time-based trades detected:', timeMatch.timePeriod);
-                    const isPortfolioQuery = isPortfolioWideQuery(message.message);
-                    const isDayOfWeekQuery = /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(timeMatch.timePeriod);
-                    const timeSymbol = (isPortfolioQuery || (isDayOfWeekQuery && !symbol)) ? null : symbol;
-                    console.log('🔍 Portfolio-wide query:', isPortfolioQuery, 'Day-of-week:', isDayOfWeekQuery, 'Using symbol:', timeSymbol);
-                    const data = await fetchTradeData(timeSymbol || '', 'time-based', undefined, timeMatch.timePeriod);
-                    console.log('🔍 Fetched time-based data:', data);
+                } else {
+                  const advancedMatch = detectAdvancedOptionsQuery(message.message);
+                  if (advancedMatch) {
+                    console.log('🔍 Advanced options query detected:', advancedMatch);
+                    const data = await fetchTradeData(symbol || '', 'advanced-options', advancedMatch.tradeType, advancedMatch.timePeriod, { callPut: advancedMatch.callPut });
                     if (data) tradeUI = data;
-                  }
-                  else if (symbol) {
-                    // Check for average price queries first (simple average, not full stats)
-                    const avgPriceMatch = detectAveragePrice(message.message);
-                    if (avgPriceMatch) {
-                      console.log('🔍 Average price detected:', avgPriceMatch.tradeType, avgPriceMatch.timePeriod);
-                      const data = await fetchTradeData(symbol, 'average-price', avgPriceMatch.tradeType, avgPriceMatch.timePeriod);
-                      console.log('🔍 Fetched average price data:', data);
+                  } else {
+                    const timeMatch = detectTimeBasedTrades(message.message);
+                    if (timeMatch) {
+                      console.log('🔍 Time-based trades detected:', timeMatch.timePeriod);
+                      const isPortfolioQuery = isPortfolioWideQuery(message.message);
+                      const isDayOfWeekQuery = /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(timeMatch.timePeriod);
+                      const timeSymbol = (isPortfolioQuery || (isDayOfWeekQuery && !symbol)) ? null : symbol;
+                      console.log('🔍 Portfolio-wide query:', isPortfolioQuery, 'Day-of-week:', isDayOfWeekQuery, 'Using symbol:', timeSymbol);
+                      const data = await fetchTradeData(timeSymbol || '', 'time-based', undefined, timeMatch.timePeriod);
+                      console.log('🔍 Fetched time-based data:', data);
                       if (data) tradeUI = data;
-                    } else {
-                      // Check other detection in order of priority
-                      const statsMatch = detectTradeStats(message.message);
-                      if (statsMatch) {
-                        const data = await fetchTradeData(symbol, 'stats', statsMatch.tradeType, statsMatch.timePeriod);
-                        if (data) tradeUI = data;
-                      } else if (detectProfitableTrades(message.message)) {
-                        console.log('🔍 Profitable trades detected');
-                        const data = await fetchTradeData(symbol, 'profitable');
-                        if (data) tradeUI = data;
-                      } else if (detectDetailedTrades(message.message)) {
-                        console.log('🔍 Detailed trades detected');
-                        const data = await fetchTradeData(symbol, 'detailed');
+                    } else if (symbol) {
+                      const avgPriceMatch = detectAveragePrice(message.message);
+                      if (avgPriceMatch) {
+                        console.log('🔍 Average price detected:', avgPriceMatch.tradeType, avgPriceMatch.timePeriod);
+                        const data = await fetchTradeData(symbol, 'average-price', avgPriceMatch.tradeType, avgPriceMatch.timePeriod);
+                        console.log('🔍 Fetched average price data:', data);
                         if (data) tradeUI = data;
                       } else {
-                        const summaryMatch = detectTradeSummary(message.message);
-                        if (summaryMatch) {
-                          const data = await fetchTradeData(symbol, 'summary');
+                        const statsMatch = detectTradeStats(message.message);
+                        if (statsMatch) {
+                          const data = await fetchTradeData(symbol, 'stats', statsMatch.tradeType, statsMatch.timePeriod);
                           if (data) tradeUI = data;
+                        } else if (detectProfitableTrades(message.message)) {
+                          console.log('🔍 Profitable trades detected');
+                          const data = await fetchTradeData(symbol, 'profitable');
+                          if (data) tradeUI = data;
+                        } else if (detectDetailedTrades(message.message)) {
+                          console.log('🔍 Detailed trades detected');
+                          const data = await fetchTradeData(symbol, 'detailed');
+                          if (data) tradeUI = data;
+                        } else {
+                          const summaryMatch = detectTradeSummary(message.message);
+                          if (summaryMatch) {
+                            const data = await fetchTradeData(symbol, 'summary');
+                            if (data) tradeUI = data;
+                          }
                         }
                       }
                     }
@@ -1670,23 +2352,18 @@ const UnifiedAssistant: React.FC = () => {
                 }
               }
             }
-          }
-        }
 
-        const newMessage: TranscriptMessage = {
-          id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          role,
-          content: message.message,
-          timestamp: new Date(),
-          tradeUI,
-        };
-        setTranscript(prev => [...prev, newMessage]);
-        setIsSending(false); // Clear sending state when we get a response
+            if (tradeUI) {
+              lastAssistantTradeUIRef.current = tradeUI;
+              setTranscript(prev => prev.map((m) => m.id === newMessageId ? { ...m, tradeUI } : m));
+            }
+          })();
+        }
 
         // Save to database - use refs/state updater to avoid stale closure
         setCurrentConversationId(prevConvId => {
           if (prevConvId) {
-            saveMessage(prevConvId, role, message.message, inputMode);
+            saveMessage(prevConvId, role, assistantContent, inputMode);
 
             // Auto-generate title from first user message
             if (role === 'user' && !voiceTitleSetRef.current) {
@@ -1987,31 +2664,45 @@ const UnifiedAssistant: React.FC = () => {
     }
   };
 
-  const handleSendMessage = useCallback(async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!inputValue.trim() || isSending) return;
+	  const handleSendMessage = useCallback(async (e?: React.FormEvent) => {
+	    if (e) e.preventDefault();
+	    if (!inputValue.trim() || isSending) return;
 
-    const message = inputValue.trim();
-    setInputValue('');
-    setIsSending(true);
+	    const message = inputValue.trim();
+	    setInputValue('');
+	    setIsSending(true);
 
-    // Classify query intent using GPT-based LLM classifier
-    // Falls back to regex-based detection if LLM fails
-    console.log('🎯 [Intent Detection] User query:', message);
-    let intent: QueryIntent | null = await classifyIntentViaAPI(message);
-    if (intent) {
-      console.log('🎯 [LLM Classifier] Intent:', intent);
-    } else {
-      // Fallback to regex-based detection if LLM fails
-      console.log('🎯 [LLM Classifier] Falling back to regex detection');
-      intent = detectUserQueryIntent(message);
-      console.log('🎯 [Regex Detection] Intent:', intent);
-    }
-    pendingQueryIntentRef.current = intent;
-    // NOTE: cardRenderedForCycleRef is reset in render_ui client tool, NOT here
-    // Resetting here would cause late message fragments from previous query to trigger duplicates
+	    const isCalcFollowup = isExplainCalculationQuery(message);
+	    let intent: QueryIntent | null = null;
 
-    let convId = currentConversationId;
+	    if (isCalcFollowup) {
+	      const override = buildAveragePriceCalculationExplanation(lastAssistantTradeUIRef.current);
+	      if (override) {
+	        suppressNextTradeUICardRef.current = true;
+	        pendingQueryIntentRef.current = null;
+	        pendingTradeUIRequestRef.current = null;
+	        pendingAnswerOverrideRef.current = Promise.resolve(override);
+	      }
+	    }
+
+	    if (!isCalcFollowup) {
+	      // Classify query intent using GPT-based LLM classifier
+	      // Falls back to regex-based detection if LLM fails
+	      console.log('🎯 [Intent Detection] User query:', message);
+	      intent = await classifyIntentViaAPI(message);
+	      if (intent) {
+	        console.log('🎯 [LLM Classifier] Intent:', intent);
+	      } else {
+	        // Fallback to regex-based detection if LLM fails
+	        console.log('🎯 [LLM Classifier] Falling back to regex detection');
+	        intent = detectUserQueryIntent(message);
+	        console.log('🎯 [Regex Detection] Intent:', intent);
+	      }
+	    }
+	    // NOTE: cardRenderedForCycleRef is reset in render_ui client tool, NOT here
+	    // Resetting here would cause late message fragments from previous query to trigger duplicates
+
+	    let convId = currentConversationId;
     if (!convId) {
       convId = await createConversation(message.slice(0, 50));
       if (convId) setCurrentConversationId(convId);
@@ -2050,8 +2741,31 @@ const UnifiedAssistant: React.FC = () => {
         }
       }
 
+		      // Store intent and prefetch the trade UI, but render it only after the assistant replies.
+		      pendingQueryIntentRef.current = intent;
+		      pendingTradeUIRequestRef.current = intent
+		        ? fetchTradeData(
+		            intent.symbol || '',
+		            intent.cardType,
+		            intent.tradeType,
+		            intent.timePeriod,
+		            {
+		              callPut: intent.callPut,
+		              expiration: intent.expiration,
+		              accountQueryType: intent.accountQueryType,
+		              feeType: intent.feeType,
+		            }
+		          )
+		        : null;
+		      if (pendingTradeUIRequestRef.current) {
+		        pendingAnswerOverrideRef.current = pendingTradeUIRequestRef.current.then((tradeUI) => buildAnswerOverride(intent, tradeUI));
+		      } else if (!pendingAnswerOverrideRef.current) {
+		        pendingAnswerOverrideRef.current = null;
+		      }
+
       // Send to ElevenLabs text-only conversation
       textOnlyConversation.sendUserMessage(message);
+      setIsSending(false);
       return;
     }
 
@@ -2090,9 +2804,32 @@ const UnifiedAssistant: React.FC = () => {
       }
     }
 
+		    // Store intent and prefetch the trade UI, but render it only after the assistant replies.
+		    pendingQueryIntentRef.current = intent;
+		    pendingTradeUIRequestRef.current = intent
+		      ? fetchTradeData(
+		          intent.symbol || '',
+		          intent.cardType,
+		          intent.tradeType,
+		          intent.timePeriod,
+		          {
+		            callPut: intent.callPut,
+		            expiration: intent.expiration,
+		            accountQueryType: intent.accountQueryType,
+		            feeType: intent.feeType,
+		          }
+		        )
+		      : null;
+		    if (pendingTradeUIRequestRef.current) {
+		      pendingAnswerOverrideRef.current = pendingTradeUIRequestRef.current.then((tradeUI) => buildAnswerOverride(intent, tradeUI));
+		    } else if (!pendingAnswerOverrideRef.current) {
+		      pendingAnswerOverrideRef.current = null;
+		    }
+
     // Send message to ElevenLabs agent (will respond with voice)
     elevenLabsConversation.sendUserMessage(message);
-  }, [inputValue, isSending, inputMode, currentConversationId, conversations, elevenLabsConversation, agentId, textOnlyConversation]);
+    setIsSending(false);
+  }, [inputValue, isSending, inputMode, currentConversationId, conversations, elevenLabsConversation, agentId, textOnlyConversation, fetchTradeData]);
 
   const handleEndChat = useCallback(() => {
     setTranscript([]);
@@ -2152,7 +2889,7 @@ const UnifiedAssistant: React.FC = () => {
 
     if (type === 'detailed') {
       // Check if data already contains trades
-      const queryData = data as { trades?: Array<Record<string, unknown>>; aggregations?: Aggregations; filters?: ActiveFilters };
+      const queryData = data as { trades?: Array<Record<string, unknown>>; summary?: unknown; aggregations?: Aggregations; filters?: ActiveFilters };
       if (queryData.trades && queryData.trades.length > 0) {
         return (
           <div style={{ marginTop: '12px' }}>
@@ -2173,6 +2910,12 @@ const UnifiedAssistant: React.FC = () => {
                 Expiration?: string;
                 'Call/Put'?: string;
               }>}
+              summary={(queryData.summary as {
+                totalShares: number;
+                totalCost: number;
+                currentValue: number;
+                symbol: string;
+              } | null) ?? null}
               filters={queryData.filters}
               aggregations={queryData.aggregations}
             />
@@ -2387,6 +3130,10 @@ const UnifiedAssistant: React.FC = () => {
         totalShares?: number;
         timePeriod: string;
         tradeType: 'buy' | 'sell' | 'all';
+        breakdown?: {
+          totalNotional: number;
+          trades: Array<{ date: string; shares: number; price: number; notional: number }>;
+        };
       };
 
       if (avgData.averagePrice !== null && avgData.averagePrice !== undefined) {
@@ -2401,6 +3148,7 @@ const UnifiedAssistant: React.FC = () => {
               totalShares={avgData.totalShares}
               highestPrice={avgData.highestPrice}
               lowestPrice={avgData.lowestPrice}
+              breakdown={avgData.breakdown}
             />
           </div>
         );
@@ -2533,9 +3281,10 @@ const UnifiedAssistant: React.FC = () => {
         );
         const highestStrikeTrade = sortedByStrike[0];
 
-        // Use NetAmount for actual transaction total (includes fees/adjustments)
-        const contracts = parseInt(highestStrikeTrade.OptionContracts || '0');
-        const totalPremium = Math.abs(parseFloat(highestStrikeTrade.NetAmount || '0'));
+        const contracts = Math.trunc(safeParseNumber(highestStrikeTrade.OptionContracts));
+        const netAmount = safeParseNumber(highestStrikeTrade.NetAmount);
+        const grossPremium = getOptionPremiumUSD(highestStrikeTrade);
+        const totalPremium = netAmount !== 0 ? Math.abs(netAmount) : grossPremium;
 
         return (
           <div style={{ marginTop: '12px' }}>
@@ -2635,7 +3384,7 @@ const UnifiedAssistant: React.FC = () => {
               expirationPeriod={tradeUI.expiration || 'tomorrow'}
               aggregations={expiringData.aggregations ? {
                 tradeCount: expiringData.aggregations.tradeCount,
-                totalPremium: expiringData.aggregations.totalNetAmount, // Use net amount for "Total Value"
+                totalPremium: expiringData.aggregations.totalPremium,
                 callCount: expiringData.aggregations.callCount,
                 putCount: expiringData.aggregations.putCount,
                 totalContracts: expiringData.aggregations.totalContracts,
@@ -2702,10 +3451,11 @@ const UnifiedAssistant: React.FC = () => {
         const trade = lastOptionData.trades[0];
         const isCall = trade['Call/Put'] === 'C';
         const isBuy = trade.TradeType === 'B';
-        const contracts = parseInt(trade.OptionContracts || '0');
-        const premium = parseFloat(trade.OptionTradePremium || '0');
-        const totalValue = Math.abs(parseFloat(trade.NetAmount || '0'));
-        const strike = parseFloat(trade.Strike || '0');
+        const contracts = Math.trunc(safeParseNumber(trade.OptionContracts));
+        const premium = safeParseNumber(trade.OptionTradePremium);
+        const netAmount = safeParseNumber(trade.NetAmount);
+        const totalValue = netAmount !== 0 ? Math.abs(netAmount) : Math.abs(premium * contracts * 100);
+        const strike = safeParseNumber(trade.Strike);
         // Use UnderlyingSymbol for options (e.g., "AAPL") instead of full option symbol (e.g., "AAPL251220C00195000")
         const displaySymbol = trade.UnderlyingSymbol || trade.Symbol;
 

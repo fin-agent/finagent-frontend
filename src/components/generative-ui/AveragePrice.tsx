@@ -13,6 +13,15 @@ interface AveragePriceProps {
   // Optional high/low context
   highestPrice?: number;
   lowestPrice?: number;
+  breakdown?: {
+    totalNotional: number;
+    trades: Array<{
+      date: string;
+      shares: number;
+      price: number;
+      notional: number;
+    }>;
+  };
 }
 
 const formatCurrency = (value: number) => {
@@ -48,7 +57,9 @@ export function AveragePrice({
   totalShares,
   highestPrice,
   lowestPrice,
+  breakdown,
 }: AveragePriceProps) {
+  const [showBreakdown, setShowBreakdown] = React.useState(false);
   const actionLabel = tradeType === 'sell' ? 'Sold' : tradeType === 'buy' ? 'Bought' : 'Traded';
   const typeColor = tradeType === 'sell' ? colors.sell : colors.buy;
 
@@ -188,6 +199,7 @@ export function AveragePrice({
       padding: '12px 18px',
       backgroundColor: colors.bgHeader,
       borderTop: `1px solid ${colors.border}`,
+      gap: '12px',
     },
     footerItem: {
       display: 'flex',
@@ -202,6 +214,59 @@ export function AveragePrice({
       fontSize: '12px',
       fontWeight: 600,
       color: colors.textSecondary,
+    },
+    explainButton: {
+      fontSize: '11px',
+      fontWeight: 600,
+      padding: '6px 10px',
+      borderRadius: '10px',
+      border: `1px solid ${colors.border}`,
+      backgroundColor: 'rgba(255, 255, 255, 0.04)',
+      color: colors.textSecondary,
+      cursor: 'pointer',
+      whiteSpace: 'nowrap' as const,
+    },
+    breakdown: {
+      padding: '14px 18px',
+      borderTop: `1px solid ${colors.border}`,
+      backgroundColor: colors.bgCard,
+    },
+    breakdownTitle: {
+      fontSize: '12px',
+      fontWeight: 700,
+      color: colors.textPrimary,
+      marginBottom: '8px',
+      letterSpacing: '0.5px',
+      textTransform: 'uppercase' as const,
+    },
+    breakdownList: {
+      display: 'flex',
+      flexDirection: 'column' as const,
+      gap: '8px',
+      marginBottom: '10px',
+    },
+    breakdownRow: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      gap: '10px',
+      fontSize: '12px',
+      color: colors.textSecondary,
+    },
+    breakdownLeft: {
+      display: 'flex',
+      flexDirection: 'column' as const,
+      gap: '2px',
+      minWidth: 0,
+    },
+    breakdownRight: {
+      textAlign: 'right' as const,
+      color: colors.textPrimary,
+      fontWeight: 600,
+      whiteSpace: 'nowrap' as const,
+    },
+    breakdownMuted: {
+      color: colors.textMuted,
+      fontSize: '11px',
     },
     rangeBar: {
       display: 'flex',
@@ -243,6 +308,8 @@ export function AveragePrice({
     const position = ((averagePrice - lowestPrice) / range) * 100;
     return Math.max(5, Math.min(95, position)); // Clamp between 5-95%
   };
+
+  const canExplain = !!breakdown?.trades?.length && (totalShares ?? 0) > 0;
 
   return (
     <div style={styles.container}>
@@ -320,7 +387,45 @@ export function AveragePrice({
           <span style={styles.footerLabel}>Type:</span>
           <span style={{ ...styles.footerValue, color: typeColor }}>{actionLabel}</span>
         </div>
+        {canExplain && (
+          <button
+            type="button"
+            style={styles.explainButton}
+            onClick={() => setShowBreakdown((v) => !v)}
+            aria-expanded={showBreakdown}
+          >
+            {showBreakdown ? 'Hide calc' : 'How calculated'}
+          </button>
+        )}
       </div>
+
+      {canExplain && showBreakdown && breakdown && (
+        <div style={styles.breakdown}>
+          <div style={styles.breakdownTitle}>Calculation</div>
+          <div style={styles.breakdownList}>
+            {breakdown.trades.map((t, idx) => (
+              <div key={`${t.date}-${idx}`} style={styles.breakdownRow}>
+                <div style={styles.breakdownLeft}>
+                  <div>{t.date}</div>
+                  <div style={styles.breakdownMuted}>
+                    {Math.round(t.shares).toLocaleString()} shares × {formatCurrency(t.price)}
+                  </div>
+                </div>
+                <div style={styles.breakdownRight}>{formatCurrency(t.notional)}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{ ...styles.breakdownRow, borderTop: `1px solid ${colors.border}`, paddingTop: '10px' }}>
+            <div style={styles.breakdownLeft}>
+              <div style={{ color: colors.textPrimary, fontWeight: 700 }}>Weighted average</div>
+              <div style={styles.breakdownMuted}>
+                {formatCurrency(breakdown.totalNotional)} ÷ {totalShares?.toLocaleString()} shares
+              </div>
+            </div>
+            <div style={styles.breakdownRight}>{formatCurrency(averagePrice)}</div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

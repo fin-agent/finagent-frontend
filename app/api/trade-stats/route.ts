@@ -99,13 +99,19 @@ export async function POST(req: NextRequest) {
     }
 
     const prices = data.map(t => parseFloat(t.StockTradePrice || '0')).filter(p => p > 0);
-    const shares = data.map(t => parseFloat(t.StockShareQty || '0'));
-    const totalShares = shares.reduce((a, b) => a + b, 0);
-    const totalValue = data.reduce((sum, t) => sum + Math.abs(parseFloat(t.NetAmount || '0')), 0);
+    const totalShares = data.reduce((sum, t) => sum + parseFloat(t.StockShareQty || '0'), 0);
+    const totalValue = data.reduce((sum, t) => {
+      const price = parseFloat(t.StockTradePrice || '0');
+      const shares = parseFloat(t.StockShareQty || '0');
+      if (price > 0 && shares > 0) return sum + Math.abs(price * shares);
+      return sum;
+    }, 0);
 
     const highestPrice = Math.max(...prices);
     const lowestPrice = Math.min(...prices);
-    const avgPrice = prices.reduce((a, b) => a + b, 0) / prices.length;
+    const avgPrice = totalShares > 0
+      ? totalValue / totalShares
+      : prices.reduce((a, b) => a + b, 0) / prices.length;
 
     const highestTrade = data.find(t => parseFloat(t.StockTradePrice || '0') === highestPrice);
     const lowestTrade = data.find(t => parseFloat(t.StockTradePrice || '0') === lowestPrice);

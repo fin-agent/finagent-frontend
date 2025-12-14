@@ -1,7 +1,9 @@
 'use client';
 
 import React from 'react';
-import { Calendar, TrendingUp, ArrowUpRight, ArrowDownRight, Clock, Hash } from 'lucide-react';
+import { Calendar, TrendingUp, ArrowUpRight, ArrowDownRight, Clock, Hash, Download } from 'lucide-react';
+import { downloadCsv, toCsv } from '@/src/lib/csv';
+import { getTradeCashFlowUSD } from '@/src/lib/trade-math';
 
 interface Trade {
   TradeID: number;
@@ -12,6 +14,7 @@ interface Trade {
   StockTradePrice?: string;
   StockShareQty?: string;
   OptionContracts?: string;
+  OptionTradePremium?: string;
   NetAmount: string;
   displayDate?: string; // User-friendly date like "Yesterday", "2 days ago"
 }
@@ -97,6 +100,25 @@ export function TimeBasedTrades({
   trades,
   symbol
 }: TimeBasedTradesProps) {
+  const handleDownload = () => {
+    const rows = trades.map((trade) => ({
+      TradeID: trade.TradeID,
+      Date: trade.Date,
+      Symbol: trade.Symbol,
+      SecurityType: trade.SecurityType,
+      TradeType: trade.TradeType,
+      StockTradePrice: trade.StockTradePrice || '',
+      StockShareQty: trade.StockShareQty || '',
+      OptionContracts: trade.OptionContracts || '',
+      OptionTradePremium: trade.OptionTradePremium || '',
+      NetAmount: trade.NetAmount || '',
+    }));
+
+    const filenameBase = symbol ? symbol : 'portfolio';
+    const periodSlug = timePeriod.description.trim().toLowerCase().replace(/\s+/g, '_');
+    downloadCsv(`${filenameBase}_${periodSlug}_trades.csv`, toCsv(rows));
+  };
+
   const styles = {
     container: {
       backgroundColor: colors.bgCard,
@@ -131,6 +153,23 @@ export function TimeBasedTrades({
       backgroundColor: colors.bgCard,
       padding: '4px 8px',
       borderRadius: '4px',
+    },
+    headerActions: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px',
+    },
+    iconButton: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: '32px',
+      height: '32px',
+      borderRadius: '8px',
+      border: `1px solid ${colors.border}`,
+      backgroundColor: colors.bgCard,
+      color: colors.textSecondary,
+      cursor: 'pointer',
     },
     statsGrid: {
       display: 'grid',
@@ -252,9 +291,19 @@ export function TimeBasedTrades({
           <TrendingUp size={16} color={colors.accent} />
           {title}
         </span>
-        <div style={styles.headerBadge}>
-          <Clock size={12} />
-          {timePeriod.tradingDays} day{timePeriod.tradingDays !== 1 ? 's' : ''}
+        <div style={styles.headerActions}>
+          <button
+            type="button"
+            style={styles.iconButton}
+            title="Download CSV"
+            onClick={handleDownload}
+          >
+            <Download size={14} />
+          </button>
+          <div style={styles.headerBadge}>
+            <Clock size={12} />
+            {timePeriod.tradingDays} day{timePeriod.tradingDays !== 1 ? 's' : ''}
+          </div>
         </div>
       </div>
 
@@ -301,7 +350,7 @@ export function TimeBasedTrades({
       {displayTrades.length > 0 && (
         <div style={styles.tradesPreview}>
           {displayTrades.map((trade, idx) => {
-            const netAmount = parseFloat(trade.NetAmount || '0');
+            const cashFlow = getTradeCashFlowUSD(trade);
             const isBuy = trade.TradeType === 'B';
             const isStock = trade.SecurityType === 'S';
 
@@ -333,9 +382,9 @@ export function TimeBasedTrades({
                 <div style={styles.tradeRight}>
                   <div style={{
                     ...styles.tradeAmount,
-                    color: netAmount >= 0 ? colors.buy : colors.sell,
+                    color: cashFlow >= 0 ? colors.buy : colors.sell,
                   }}>
-                    {formatCurrency(netAmount)}
+                    {formatCurrency(cashFlow)}
                   </div>
                   <div style={styles.tradeDate}>
                     {trade.displayDate || trade.Date}

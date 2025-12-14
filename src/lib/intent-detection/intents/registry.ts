@@ -141,7 +141,7 @@ export const intentRegistry: IntentDefinition[] = [
       'Lowest strike put I sold',
     ],
     requiredEntities: ['callPut'],
-    optionalEntities: ['symbol', 'tradeType'],
+    optionalEntities: ['symbol', 'tradeType', 'timePeriod'],
   },
   {
     id: 'options.total_premium',

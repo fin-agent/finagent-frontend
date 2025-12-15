@@ -1,6 +1,16 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
-import { formatCalendarDate } from '@/src/lib/date-utils';
+
+// Format date WITHOUT offset - must match UI display
+function formatDateForVoice(dateStr: string): string {
+  const date = new Date(dateStr);
+  if (Number.isNaN(date.getTime())) return dateStr;
+  return date.toLocaleDateString('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric'
+  });
+}
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -241,8 +251,8 @@ export async function POST(req: NextRequest) {
         const action = trade.TradeType === 'B' ? 'bought' : 'sold';
         const pVerb = trade.TradeType === 'B' ? 'paying' : 'collecting';
         const underlying = trade.UnderlyingSymbol || normalizedSymbol || 'the stock';
-        const tradeDate = formatCalendarDate(trade.Date);
-        const expirationDate = trade.Expiration ? formatCalendarDate(trade.Expiration) : 'N/A';
+        const tradeDate = formatDateForVoice(trade.Date);
+        const expirationDate = trade.Expiration ? formatDateForVoice(trade.Expiration) : 'N/A';
 
         response = `Your most recent ${cp} option on ${underlying} was on ${tradeDate}. You ${action} ${qty} ${qty === 1 ? 'contract' : 'contracts'} of the $${strike} strike, ${pVerb} $${premium.toFixed(2)} total premium ($${perContract.toFixed(2)} per contract). This option expires ${expirationDate}.`;
         break;
@@ -257,8 +267,8 @@ export async function POST(req: NextRequest) {
         const cp = trade['Call/Put'] === 'C' ? 'call' : 'put';
         const action = trade.TradeType === 'B' ? 'bought' : 'sold';
         const underlying = trade.UnderlyingSymbol || normalizedSymbol || 'the stock';
-        const tradeDate = formatCalendarDate(trade.Date);
-        const expirationDate = trade.Expiration ? formatCalendarDate(trade.Expiration) : 'N/A';
+        const tradeDate = formatDateForVoice(trade.Date);
+        const expirationDate = trade.Expiration ? formatDateForVoice(trade.Expiration) : 'N/A';
 
         response = `Your highest strike ${cp} option on ${underlying} was the $${strike} strike. You ${action} ${qty} ${qty === 1 ? 'contract' : 'contracts'} on ${tradeDate} for $${premium.toFixed(2)} total premium, expiring ${expirationDate}.`;
         break;

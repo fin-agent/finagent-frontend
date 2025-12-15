@@ -295,24 +295,15 @@ export async function POST(req: NextRequest) {
     // For options: shares covered = contracts * 100
     const sharesCovered = totalContracts * 100;
 
-    // Calculate gross premium correctly
-    // OptionTradePremium is per-share price, so total = premium * contracts * 100
-    const totalGrossPremium = trades.reduce((sum, t) => {
-      if (t.SecurityType === 'O') {
-        const premium = parseFloat(t.OptionTradePremium || '0');
-        const contracts = parseFloat(t.OptionContracts || '0');
-        return sum + (premium * contracts * 100);
-      }
-      return sum + Math.abs(parseFloat(t.GrossAmount || '0'));
-    }, 0);
-
     // Net amount (what was actually received/paid after fees)
+    // Use NetAmount for all premium calculations to match ElevenLabs voice API exactly
     const totalNetAmount = trades.reduce((sum, t) => sum + Math.abs(parseFloat(t.NetAmount || '0')), 0);
 
     // Average premium per share (for options only)
-    // totalGrossPremium / totalContracts / 100 shares per contract
+    // Uses NetAmount / totalContracts / 100 to match voice API calculation exactly
+    // This ensures voice says "$5.35" and UI shows "$5.35" - no rounding discrepancies
     const avgPremiumPerShare = totalContracts > 0
-      ? totalGrossPremium / totalContracts / 100
+      ? totalNetAmount / totalContracts / 100
       : 0;
 
     const aggregations = {

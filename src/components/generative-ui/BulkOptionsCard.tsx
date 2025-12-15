@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { TrendingDown, TrendingUp, Zap, Target, ChevronDown, ChevronUp, Calendar, Layers, BarChart3 } from 'lucide-react';
-import { getOptionPremiumUSD, safeParseNumber } from '@/src/lib/trade-math';
+import { safeParseNumber } from '@/src/lib/trade-math';
 
 // Parse OCC option symbol to extract expiration date
 function parseExpirationFromSymbol(occSymbol: string): string | null {
@@ -100,22 +100,24 @@ export function BulkOptionsCard({ trades, symbol, callPut, tradeType, timePeriod
   const isCall = callPut === 'call';
 
   // Calculate totals from aggregations or trades
+  // Use NetAmount (not gross premium) to match voice API exactly - no rounding discrepancies
   const totalContracts = aggregations?.totalContracts ??
     trades.reduce((sum, trade) => sum + safeParseNumber(trade.OptionContracts), 0);
   const totalPremium = aggregations?.totalPremium ??
-    trades.reduce((sum, trade) => sum + getOptionPremiumUSD(trade), 0);
+    trades.reduce((sum, trade) => sum + Math.abs(safeParseNumber(trade.NetAmount)), 0);
   const avgPremium = aggregations?.avgPremium ?? (totalContracts > 0 ? totalPremium / totalContracts / 100 : 0);
   const sharesCovered = aggregations?.sharesCovered ?? totalContracts * 100;
   const tradeCount = aggregations?.totalTrades ?? trades.length;
 
   // Group trades by strike for visual breakdown
+  // Use NetAmount for consistency with voice API
   const strikeGroups = trades.reduce((acc, trade) => {
     const strike = trade.Strike || 'Unknown';
     if (!acc[strike]) {
       acc[strike] = { contracts: 0, premium: 0, count: 0 };
     }
     acc[strike].contracts += safeParseNumber(trade.OptionContracts);
-    acc[strike].premium += getOptionPremiumUSD(trade);
+    acc[strike].premium += Math.abs(safeParseNumber(trade.NetAmount));
     acc[strike].count += 1;
     return acc;
   }, {} as Record<string, { contracts: number; premium: number; count: number }>);
@@ -532,8 +534,8 @@ export function BulkOptionsCard({ trades, symbol, callPut, tradeType, timePeriod
 
                 {/* Trade Rows */}
                 {trades.map((trade, i) => {
-                  const fallbackNetAmount = Math.abs(safeParseNumber(trade.NetAmount));
-                  const premiumUSD = getOptionPremiumUSD(trade) || fallbackNetAmount;
+                  // Use NetAmount for consistency with voice API - no rounding discrepancies
+                  const premiumUSD = Math.abs(safeParseNumber(trade.NetAmount));
                   const contracts = safeParseNumber(trade.OptionContracts);
                   const strike = safeParseNumber(trade.Strike);
                   const isTradeCall = trade['Call/Put'] === 'C';

@@ -21,7 +21,16 @@ const formatCurrency = (value: number) => {
     style: 'currency',
     currency: 'USD',
     minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   }).format(value);
+};
+
+// Format per-unit values with exact precision (no rounding)
+const formatExact = (value: number) => {
+  // Show up to 4 decimal places, trim trailing zeros but keep at least 2
+  const formatted = value.toFixed(4);
+  const trimmed = formatted.replace(/(\.\d{2})0+$/, '$1').replace(/(\.\d{3})0$/, '$1');
+  return `$${trimmed}`;
 };
 
 const formatDate = (dateStr: string) => {
@@ -249,7 +258,7 @@ export function HighestStrikeCard({
         }}>
           <DollarSign size={10} color={palette.textMuted} />
           <span style={{ fontSize: '12px', fontWeight: 700, color: palette.textPrimary }}>
-            {formatCurrency(contracts > 0 ? premium / contracts : premium)}
+            {formatExact(contracts > 0 ? premium / contracts : premium)}
           </span>
           <span style={{ fontSize: '10px', color: palette.textMuted }}>/ct</span>
         </div>

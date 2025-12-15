@@ -19,7 +19,16 @@ const formatCurrency = (value: number) => {
     style: 'currency',
     currency: 'USD',
     minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   }).format(value);
+};
+
+// Format per-share values with exact precision (no rounding)
+const formatPerShare = (value: number) => {
+  // Show up to 4 decimal places, trim trailing zeros but keep at least 2
+  const formatted = value.toFixed(4);
+  const trimmed = formatted.replace(/(\.\d{2})0+$/, '$1').replace(/(\.\d{3})0$/, '$1');
+  return `$${trimmed}`;
 };
 
 // Terminal Luxe color palette
@@ -249,7 +258,7 @@ export function TotalPremiumCard({
         }}>
           <span style={{ fontSize: '10px', color: palette.textMuted }}>Avg</span>
           <span style={{ fontSize: '12px', fontWeight: 700, color: palette.textPrimary }}>
-            {formatCurrency(perSharePremium)}
+            {formatPerShare(perSharePremium)}
           </span>
           <span style={{ fontSize: '10px', color: palette.textMuted }}>/sh</span>
         </div>

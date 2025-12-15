@@ -11,8 +11,7 @@ interface LastOptionTradeCardProps {
   expiration: string;
   tradeDate: string;
   contracts: number;
-  premium: number;
-  totalValue: number;
+  totalValue: number;  // Per-share premium is calculated from this (totalValue / shares)
   totalTrades?: number;
   avgPremium?: number;
 }
@@ -22,7 +21,17 @@ const formatCurrency = (value: number) => {
     style: 'currency',
     currency: 'USD',
     minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   }).format(value);
+};
+
+// Format per-share values with exact precision (no rounding)
+const formatPerShare = (value: number) => {
+  // Show up to 4 decimal places, but trim trailing zeros
+  const formatted = value.toFixed(4);
+  // Remove unnecessary trailing zeros but keep at least 2 decimal places
+  const trimmed = formatted.replace(/(\.\d{2})0+$/, '$1').replace(/(\.\d{3})0$/, '$1');
+  return `$${trimmed}`;
 };
 
 const formatDate = (dateStr: string) => {
@@ -67,12 +76,14 @@ export function LastOptionTradeCard({
   expiration,
   tradeDate,
   contracts,
-  premium,
   totalValue,
 }: LastOptionTradeCardProps) {
   const isBuy = tradeType === 'buy';
   const isCall = callPut === 'Call';
   const shares = contracts * 100;
+
+  // Calculate exact per-share premium from totalValue (no rounding)
+  const exactPremiumPerShare = shares > 0 ? Math.abs(totalValue) / shares : 0;
 
   // Dynamic colors based on trade type
   const accentColor = isBuy ? palette.loss : palette.profit;
@@ -234,7 +245,7 @@ export function LastOptionTradeCard({
           </div>
         ))}
 
-        {/* Premium Pill */}
+        {/* Premium Pill - exact per-share calculated from totalValue */}
         <div style={{
           display: 'flex',
           alignItems: 'center',
@@ -246,7 +257,7 @@ export function LastOptionTradeCard({
         }}>
           <DollarSign size={10} color={palette.textMuted} />
           <span style={{ fontSize: '12px', fontWeight: 700, color: palette.textPrimary }}>
-            {formatCurrency(premium)}
+            {formatPerShare(exactPremiumPerShare)}
           </span>
           <span style={{ fontSize: '10px', color: palette.textMuted }}>/sh</span>
         </div>

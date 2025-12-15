@@ -3555,7 +3555,6 @@ const UnifiedAssistant: React.FC = () => {
               expiration={trade.Expiration}
               tradeDate={trade.Date}
               contracts={contracts}
-              premium={premium}
               totalValue={totalValue}
             />
           </div>

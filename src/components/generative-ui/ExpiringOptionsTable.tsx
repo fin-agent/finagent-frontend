@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Clock, ArrowUpRight, ArrowDownRight, Flame, ChevronLeft, ChevronRight, Layers, Target, BarChart3 } from 'lucide-react';
+import { Clock, Flame, ChevronLeft, ChevronRight, Layers, Target, BarChart3 } from 'lucide-react';
 import { safeParseNumber } from '@/src/lib/trade-math';
 
 interface ExpiringOption {
@@ -39,14 +39,6 @@ const formatCurrency = (value: number) => {
   }).format(value);
 };
 
-const formatDate = (dateStr: string) => {
-  const date = new Date(dateStr);
-  return date.toLocaleDateString('en-US', {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-  });
-};
 
 const parseOptionSymbol = (symbol: string): string => {
   const match = symbol.match(/^([A-Z]+)/);
@@ -92,7 +84,7 @@ const palette = {
   warningGlow: 'rgba(255, 166, 77, 0.4)',
 };
 
-const ITEMS_PER_PAGE = 10;
+const ITEMS_PER_PAGE = 5;
 
 export function ExpiringOptionsTable({
   trades,
@@ -362,18 +354,17 @@ export function ExpiringOptionsTable({
         </div>
       </div>
 
-      {/* Compact Table */}
+      {/* Ultra-Compact Table */}
       <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
           <thead>
             <tr>
-              {['SYMBOL', 'TYPE', 'C/P', 'STRIKE', 'EXPIRES', 'QTY', 'VALUE'].map((header) => (
-                <th key={header} style={{
-                  padding: '10px 12px',
-                  textAlign: header === 'VALUE' || header === 'QTY' || header === 'STRIKE' ? 'right' :
-                            header === 'TYPE' || header === 'C/P' ? 'center' : 'left',
+              {['SYM', '', '', 'STRIKE', 'EXP', 'QTY', 'VALUE'].map((header, i) => (
+                <th key={i} style={{
+                  padding: '6px 8px',
+                  textAlign: i >= 3 ? 'right' : 'left',
                   fontFamily: 'inherit',
-                  fontSize: '9px',
+                  fontSize: '8px',
                   fontWeight: 600,
                   color: palette.textDim,
                   textTransform: 'uppercase',
@@ -413,100 +404,94 @@ export function ExpiringOptionsTable({
                   key={trade.TradeID}
                   style={{ backgroundColor: index % 2 === 0 ? palette.surface : palette.void }}
                 >
+                  {/* Symbol */}
                   <td style={{
-                    padding: '10px 12px',
+                    padding: '5px 8px',
                     borderBottom: `1px solid ${palette.border}`,
                     fontWeight: 700,
+                    fontSize: '11px',
                     color: palette.textPrimary,
-                    whiteSpace: 'nowrap',
                   }}>
                     {parseOptionSymbol(trade.Symbol)}
                   </td>
+                  {/* Type badge - minimal */}
                   <td style={{
-                    padding: '10px 12px',
+                    padding: '5px 4px',
                     borderBottom: `1px solid ${palette.border}`,
-                    textAlign: 'center',
                   }}>
                     <span style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '3px',
-                      fontSize: '10px',
-                      fontWeight: 600,
-                      padding: '3px 6px',
-                      borderRadius: '4px',
+                      fontSize: '9px',
+                      fontWeight: 700,
+                      padding: '2px 4px',
+                      borderRadius: '3px',
                       backgroundColor: isBuy ? palette.lossDim : palette.profitDim,
                       color: isBuy ? palette.loss : palette.profit,
                     }}>
-                      {isBuy ? <ArrowUpRight size={10} /> : <ArrowDownRight size={10} />}
                       {isBuy ? 'L' : 'S'}
                     </span>
                   </td>
+                  {/* C/P badge - minimal */}
                   <td style={{
-                    padding: '10px 12px',
+                    padding: '5px 4px',
                     borderBottom: `1px solid ${palette.border}`,
-                    textAlign: 'center',
                   }}>
                     <span style={{
-                      fontSize: '10px',
-                      fontWeight: 600,
-                      padding: '3px 6px',
-                      borderRadius: '4px',
+                      fontSize: '9px',
+                      fontWeight: 700,
+                      padding: '2px 4px',
+                      borderRadius: '3px',
                       backgroundColor: isCall ? palette.callDim : palette.putDim,
                       color: isCall ? palette.call : palette.put,
                     }}>
                       {isCall ? 'C' : 'P'}
                     </span>
                   </td>
+                  {/* Strike */}
                   <td style={{
-                    padding: '10px 12px',
+                    padding: '5px 8px',
                     borderBottom: `1px solid ${palette.border}`,
                     textAlign: 'right',
                     fontWeight: 600,
+                    fontSize: '11px',
                     color: palette.textPrimary,
                   }}>
                     ${strike.toFixed(0)}
                   </td>
+                  {/* Expiration - just countdown */}
                   <td style={{
-                    padding: '10px 12px',
+                    padding: '5px 8px',
                     borderBottom: `1px solid ${palette.border}`,
+                    textAlign: 'right',
                   }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <span style={{ color: palette.textSecondary, fontSize: '11px' }}>
-                        {trade.Expiration ? formatDate(trade.Expiration) : '-'}
-                      </span>
-                      {daysUntil !== null && (
-                        <span style={{
-                          fontSize: '9px',
-                          fontWeight: 600,
-                          padding: '2px 5px',
-                          borderRadius: '4px',
-                          backgroundColor: daysBg,
-                          color: daysColor,
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '2px',
-                        }}>
-                          <Clock size={8} />
-                          {daysUntil === 0 ? 'Today' : daysUntil === 1 ? '1d' : `${daysUntil}d`}
-                        </span>
-                      )}
-                    </div>
+                    <span style={{
+                      fontSize: '9px',
+                      fontWeight: 600,
+                      padding: '2px 5px',
+                      borderRadius: '3px',
+                      backgroundColor: daysBg,
+                      color: daysColor,
+                    }}>
+                      {daysUntil === 0 ? 'Today' : daysUntil === 1 ? '1d' : `${daysUntil}d`}
+                    </span>
                   </td>
+                  {/* Qty */}
                   <td style={{
-                    padding: '10px 12px',
+                    padding: '5px 8px',
                     borderBottom: `1px solid ${palette.border}`,
                     textAlign: 'right',
                     color: palette.textSecondary,
                     fontWeight: 600,
+                    fontSize: '11px',
                   }}>
                     {contracts}×
                   </td>
+                  {/* Value */}
                   <td style={{
-                    padding: '10px 12px',
+                    padding: '5px 8px',
                     borderBottom: `1px solid ${palette.border}`,
                     textAlign: 'right',
                     fontWeight: 700,
+                    fontSize: '11px',
                     color: isBuy ? palette.loss : palette.profit,
                   }}>
                     {formatCurrency(premiumUSD)}

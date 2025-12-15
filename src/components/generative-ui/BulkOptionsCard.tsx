@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { TrendingDown, TrendingUp, Zap, Target, ChevronDown, ChevronUp, Calendar, DollarSign, Layers, BarChart3 } from 'lucide-react';
+import { TrendingDown, TrendingUp, Zap, Target, ChevronDown, ChevronUp, Calendar, Layers, BarChart3 } from 'lucide-react';
 import { getOptionPremiumUSD, safeParseNumber } from '@/src/lib/trade-math';
 
 // Parse OCC option symbol to extract expiration date
@@ -93,7 +93,8 @@ const palette = {
 };
 
 export function BulkOptionsCard({ trades, symbol, callPut, tradeType, timePeriod, aggregations }: BulkOptionsCardProps) {
-  const [isExpanded, setIsExpanded] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
+  const [showTrades, setShowTrades] = useState(false);
 
   const isSell = tradeType === 'sell';
   const isCall = callPut === 'call';
@@ -132,532 +133,479 @@ export function BulkOptionsCard({ trades, symbol, callPut, tradeType, timePeriod
   return (
     <div style={{
       background: `linear-gradient(180deg, ${palette.card} 0%, ${palette.void} 100%)`,
-      borderRadius: '24px',
+      borderRadius: '20px',
       border: `1px solid ${palette.border}`,
       overflow: 'hidden',
-      marginTop: '16px',
-      marginBottom: '16px',
-      boxShadow: `0 24px 48px -12px rgba(0, 0, 0, 0.8), 0 0 0 1px ${palette.border}, inset 0 1px 0 rgba(255,255,255,0.02)`,
+      marginTop: '12px',
+      marginBottom: '12px',
+      boxShadow: `0 16px 32px -8px rgba(0, 0, 0, 0.6), 0 0 0 1px ${palette.border}`,
       fontFamily: '"JetBrains Mono", "SF Mono", "Fira Code", monospace',
       position: 'relative',
     }}>
-      {/* Accent line at top */}
+      {/* Compact Header + Hero Combined */}
       <div style={{
-        position: 'absolute',
-        top: 0,
-        left: '24px',
-        right: '24px',
-        height: '1px',
-        background: `linear-gradient(90deg, transparent 0%, ${accentColor}40 50%, transparent 100%)`,
-      }} />
+        padding: '16px 20px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '16px',
+        background: `radial-gradient(ellipse at left, ${accentDim} 0%, transparent 50%)`,
+      }}>
+        {/* Icon */}
+        <div style={{
+          width: '44px',
+          height: '44px',
+          borderRadius: '12px',
+          background: `linear-gradient(135deg, ${accentColor}20 0%, ${accentColor}05 100%)`,
+          border: `1px solid ${accentColor}30`,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
+        }}>
+          {isSell ? (
+            <TrendingDown size={20} color={accentColor} strokeWidth={2} />
+          ) : (
+            <TrendingUp size={20} color={accentColor} strokeWidth={2} />
+          )}
+        </div>
 
-      {/* Header */}
+        {/* Main Info */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '2px' }}>
+            <span style={{
+              fontSize: '9px',
+              fontWeight: 700,
+              color: accentColor,
+              textTransform: 'uppercase',
+              letterSpacing: '1.5px',
+            }}>
+              {isSell ? 'SHORT' : 'LONG'} {isCall ? 'CALLS' : callPut === 'put' ? 'PUTS' : 'OPTIONS'}
+            </span>
+            <span style={{
+              fontSize: '10px',
+              padding: '2px 6px',
+              borderRadius: '4px',
+              backgroundColor: typeDim,
+              color: typeColor,
+              fontWeight: 600,
+            }}>
+              {isCall ? 'C' : 'P'}
+            </span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+            <span style={{
+              fontSize: '16px',
+              fontWeight: 700,
+              color: palette.textPrimary,
+            }}>
+              {symbol || 'All'}
+            </span>
+            {timePeriod && (
+              <span style={{
+                fontSize: '11px',
+                color: palette.textMuted,
+              }}>
+                {timePeriod}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Premium - Hero Number */}
+        <div style={{ textAlign: 'right', flexShrink: 0 }}>
+          <div style={{
+            fontSize: '9px',
+            color: palette.textMuted,
+            textTransform: 'uppercase',
+            letterSpacing: '1px',
+            marginBottom: '2px',
+          }}>
+            {isSell ? 'Collected' : 'Paid'}
+          </div>
+          <div style={{
+            fontSize: '24px',
+            fontWeight: 800,
+            color: accentColor,
+            lineHeight: 1,
+            textShadow: `0 0 30px ${accentGlow}`,
+          }}>
+            {formatCurrency(totalPremium)}
+          </div>
+        </div>
+      </div>
+
+      {/* Compact Stats Row */}
       <div style={{
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: '20px 24px',
-        borderBottom: `1px solid ${palette.border}`,
+        padding: '12px 20px',
+        borderTop: `1px solid ${palette.border}`,
+        background: palette.surface,
+        gap: '8px',
+        flexWrap: 'wrap',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          {/* Icon with glow */}
-          <div style={{
-            width: '48px',
-            height: '48px',
-            borderRadius: '14px',
-            background: `linear-gradient(135deg, ${accentColor}20 0%, ${accentColor}05 100%)`,
-            border: `1px solid ${accentColor}30`,
+        {[
+          { icon: Layers, label: 'Contracts', value: totalContracts.toLocaleString() },
+          { icon: BarChart3, label: 'Shares', value: sharesCovered.toLocaleString() },
+          { icon: Zap, label: 'Trades', value: tradeCount.toString() },
+          { icon: Target, label: 'Strikes', value: sortedStrikes.length.toString() },
+        ].map((stat) => (
+          <div key={stat.label} style={{
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center',
-            boxShadow: `0 0 24px ${accentGlow}, inset 0 1px 0 ${accentColor}20`,
+            gap: '6px',
           }}>
-            {isSell ? (
-              <TrendingDown size={22} color={accentColor} strokeWidth={2} />
-            ) : (
-              <TrendingUp size={22} color={accentColor} strokeWidth={2} />
-            )}
-          </div>
-          <div>
-            <div style={{
-              fontSize: '10px',
+            <stat.icon size={12} color={palette.textDim} />
+            <span style={{
+              fontSize: '13px',
               fontWeight: 700,
-              color: accentColor,
-              textTransform: 'uppercase',
-              letterSpacing: '2px',
-              marginBottom: '4px',
-              textShadow: `0 0 20px ${accentGlow}`,
-            }}>
-              {isSell ? 'SHORT' : 'LONG'} {isCall ? 'CALLS' : callPut === 'put' ? 'PUTS' : 'OPTIONS'}
-            </div>
-            <div style={{
-              fontSize: '18px',
-              fontWeight: 600,
               color: palette.textPrimary,
-              letterSpacing: '-0.5px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
             }}>
-              {symbol || 'All Symbols'}
-              {timePeriod && (
-                <span style={{
-                  fontSize: '12px',
-                  color: palette.textMuted,
-                  fontWeight: 500,
-                }}>
-                  • {timePeriod}
-                </span>
-              )}
-            </div>
+              {stat.value}
+            </span>
+            <span style={{
+              fontSize: '10px',
+              color: palette.textMuted,
+              textTransform: 'lowercase',
+            }}>
+              {stat.label}
+            </span>
           </div>
-        </div>
+        ))}
 
-        {/* Type badge */}
+        {/* Avg Premium Pill */}
         <div style={{
           display: 'flex',
           alignItems: 'center',
-          gap: '6px',
-          padding: '8px 14px',
+          gap: '4px',
+          padding: '4px 10px',
           borderRadius: '100px',
-          background: typeDim,
-          border: `1px solid ${typeColor}30`,
+          background: palette.elevated,
+          border: `1px solid ${palette.border}`,
         }}>
-          <div style={{
-            width: '6px',
-            height: '6px',
-            borderRadius: '50%',
-            backgroundColor: typeColor,
-            boxShadow: `0 0 8px ${typeColor}`,
-          }} />
-          <span style={{
-            fontSize: '11px',
-            fontWeight: 600,
-            color: typeColor,
-            textTransform: 'uppercase',
-            letterSpacing: '1px',
-          }}>
-            {isCall ? 'CALLS' : callPut === 'put' ? 'PUTS' : 'MIXED'}
+          <span style={{ fontSize: '10px', color: palette.textMuted }}>Avg</span>
+          <span style={{ fontSize: '12px', fontWeight: 700, color: palette.textPrimary }}>
+            ${avgPremium.toFixed(2)}
           </span>
+          <span style={{ fontSize: '10px', color: palette.textMuted }}>/sh</span>
         </div>
       </div>
 
-      {/* Hero Section - Premium Collected */}
-      <div style={{
-        padding: '40px 24px',
-        background: `radial-gradient(ellipse at center top, ${accentDim} 0%, transparent 70%)`,
-        textAlign: 'center',
-        position: 'relative',
-      }}>
-        {/* Subtle grid pattern */}
-        <div style={{
-          position: 'absolute',
-          inset: 0,
-          backgroundImage: `linear-gradient(${palette.border} 1px, transparent 1px), linear-gradient(90deg, ${palette.border} 1px, transparent 1px)`,
-          backgroundSize: '40px 40px',
-          opacity: 0.3,
-          maskImage: 'radial-gradient(ellipse at center, black 0%, transparent 70%)',
-          WebkitMaskImage: 'radial-gradient(ellipse at center, black 0%, transparent 70%)',
-        }} />
-
-        <div style={{ position: 'relative', zIndex: 1 }}>
-          <div style={{
-            fontSize: '11px',
-            fontWeight: 600,
-            color: palette.textMuted,
-            textTransform: 'uppercase',
-            letterSpacing: '3px',
-            marginBottom: '12px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '8px',
-          }}>
-            <DollarSign size={14} color={palette.textMuted} />
-            Premium {isSell ? 'Collected' : 'Paid'}
-          </div>
-
-          {/* The big number */}
-          <div style={{
-            fontSize: '56px',
-            fontWeight: 800,
-            color: accentColor,
-            lineHeight: 1,
-            letterSpacing: '-3px',
-            textShadow: `0 0 60px ${accentGlow}, 0 0 120px ${accentGlow}`,
-            marginBottom: '16px',
-          }}>
-            {formatCurrency(totalPremium)}
-          </div>
-
-          {/* Per share average */}
-          <div style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '8px',
-            padding: '8px 16px',
-            borderRadius: '100px',
-            background: palette.elevated,
-            border: `1px solid ${palette.border}`,
-          }}>
-            <span style={{ fontSize: '12px', color: palette.textMuted }}>Avg</span>
-            <span style={{ fontSize: '14px', fontWeight: 700, color: palette.textPrimary }}>
-              ${avgPremium.toFixed(2)}
-            </span>
-            <span style={{ fontSize: '12px', color: palette.textMuted }}>/share</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Stats Row */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(4, 1fr)',
-        borderTop: `1px solid ${palette.border}`,
-        borderBottom: `1px solid ${palette.border}`,
-      }}>
-        {[
-          { icon: Layers, label: 'Contracts', value: totalContracts.toLocaleString(), color: palette.textPrimary },
-          { icon: BarChart3, label: 'Shares', value: sharesCovered.toLocaleString(), color: palette.textSecondary },
-          { icon: Zap, label: 'Trades', value: tradeCount.toString(), color: palette.gold },
-          { icon: Target, label: 'Strikes', value: sortedStrikes.length.toString(), color: typeColor },
-        ].map((stat, i) => (
-          <div
-            key={stat.label}
-            style={{
-              padding: '20px 16px',
-              textAlign: 'center',
-              borderRight: i < 3 ? `1px solid ${palette.border}` : 'none',
-              background: palette.surface,
-            }}
-          >
-            <stat.icon size={16} color={palette.textDim} style={{ marginBottom: '8px' }} />
-            <div style={{
-              fontSize: '22px',
-              fontWeight: 700,
-              color: stat.color,
-              marginBottom: '4px',
-            }}>
-              {stat.value}
-            </div>
-            <div style={{
-              fontSize: '9px',
-              fontWeight: 600,
-              color: palette.textDim,
-              textTransform: 'uppercase',
-              letterSpacing: '1px',
-            }}>
-              {stat.label}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Call/Put breakdown mini bar */}
-      {(aggregations?.callCount || aggregations?.putCount) && (
-        <div style={{
+      {/* Show Details Toggle */}
+      <button
+        onClick={() => setShowDetails(!showDetails)}
+        style={{
+          width: '100%',
+          padding: '10px 20px',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          gap: '24px',
-          padding: '16px 24px',
-          background: palette.void,
-          borderBottom: `1px solid ${palette.border}`,
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <div style={{
-              width: '8px',
-              height: '8px',
-              borderRadius: '2px',
-              backgroundColor: palette.call,
-              boxShadow: `0 0 8px ${palette.call}50`,
-            }} />
-            <span style={{ fontSize: '12px', color: palette.textSecondary }}>Calls</span>
-            <span style={{ fontSize: '14px', fontWeight: 700, color: palette.call }}>
-              {aggregations?.callCount || 0}
-            </span>
-          </div>
-          <div style={{
-            width: '1px',
-            height: '16px',
-            backgroundColor: palette.border,
-          }} />
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <div style={{
-              width: '8px',
-              height: '8px',
-              borderRadius: '2px',
-              backgroundColor: palette.put,
-              boxShadow: `0 0 8px ${palette.put}50`,
-            }} />
-            <span style={{ fontSize: '12px', color: palette.textSecondary }}>Puts</span>
-            <span style={{ fontSize: '14px', fontWeight: 700, color: palette.put }}>
-              {aggregations?.putCount || 0}
-            </span>
-          </div>
-        </div>
-      )}
+          gap: '8px',
+          backgroundColor: palette.void,
+          border: 'none',
+          borderTop: `1px solid ${palette.border}`,
+          cursor: 'pointer',
+          color: palette.textSecondary,
+          fontSize: '11px',
+          fontFamily: 'inherit',
+          fontWeight: 500,
+          transition: 'all 0.15s ease',
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.backgroundColor = palette.elevated;
+          e.currentTarget.style.color = palette.textPrimary;
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.backgroundColor = palette.void;
+          e.currentTarget.style.color = palette.textSecondary;
+        }}
+      >
+        {showDetails ? 'Hide Details' : 'Show Details'}
+        {showDetails ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+      </button>
 
-      {/* Strike Breakdown - Visual Bar Chart */}
-      {sortedStrikes.length > 0 && (() => {
-        const maxPremium = Math.max(...sortedStrikes.map(([, d]) => d.premium));
-        const displayStrikes = sortedStrikes.slice(0, 5);
-
-        return (
-          <div style={{
-            padding: '20px 24px',
-            background: palette.surface,
-          }}>
+      {/* Expandable Details Section */}
+      {showDetails && (
+        <>
+          {/* Call/Put breakdown mini bar */}
+          {(aggregations?.callCount !== undefined || aggregations?.putCount !== undefined) && (
             <div style={{
-              fontSize: '10px',
-              fontWeight: 600,
-              color: palette.textDim,
-              textTransform: 'uppercase',
-              letterSpacing: '1.5px',
-              marginBottom: '16px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '20px',
+              padding: '12px 20px',
+              background: palette.surface,
+              borderTop: `1px solid ${palette.border}`,
             }}>
-              By Strike Price
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <div style={{
+                  width: '6px',
+                  height: '6px',
+                  borderRadius: '2px',
+                  backgroundColor: palette.call,
+                }} />
+                <span style={{ fontSize: '11px', color: palette.textSecondary }}>Calls</span>
+                <span style={{ fontSize: '13px', fontWeight: 700, color: palette.call }}>
+                  {aggregations?.callCount || 0}
+                </span>
+              </div>
+              <div style={{ width: '1px', height: '12px', backgroundColor: palette.border }} />
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <div style={{
+                  width: '6px',
+                  height: '6px',
+                  borderRadius: '2px',
+                  backgroundColor: palette.put,
+                }} />
+                <span style={{ fontSize: '11px', color: palette.textSecondary }}>Puts</span>
+                <span style={{ fontSize: '13px', fontWeight: 700, color: palette.put }}>
+                  {aggregations?.putCount || 0}
+                </span>
+              </div>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {displayStrikes.map(([strike, data]) => {
-                const barWidth = maxPremium > 0 ? (data.premium / maxPremium) * 100 : 0;
-                return (
-                  <div key={strike} style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <span style={{
-                      width: '50px',
-                      fontSize: '13px',
-                      fontWeight: 700,
-                      color: palette.textPrimary,
-                      textAlign: 'right',
-                      fontFamily: '"JetBrains Mono", monospace',
-                    }}>
-                      ${parseFloat(strike).toFixed(0)}
-                    </span>
-                    <div style={{
-                      flex: 1,
-                      height: '28px',
-                      backgroundColor: palette.elevated,
-                      borderRadius: '6px',
-                      overflow: 'hidden',
-                      position: 'relative',
-                    }}>
-                      <div style={{
-                        width: `${barWidth}%`,
-                        height: '100%',
-                        background: `linear-gradient(90deg, ${accentColor}40 0%, ${accentColor}20 100%)`,
-                        borderRadius: '6px',
-                        transition: 'width 0.3s ease',
-                      }} />
-                      <div style={{
-                        position: 'absolute',
-                        top: 0,
-                        left: '10px',
-                        right: '10px',
-                        height: '100%',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                      }}>
+          )}
+
+          {/* Strike Breakdown - Visual Bar Chart */}
+          {sortedStrikes.length > 0 && (() => {
+            const maxPremium = Math.max(...sortedStrikes.map(([, d]) => d.premium));
+            const displayStrikes = sortedStrikes.slice(0, 5);
+
+            return (
+              <div style={{
+                padding: '14px 20px',
+                background: palette.surface,
+                borderTop: `1px solid ${palette.border}`,
+              }}>
+                <div style={{
+                  fontSize: '9px',
+                  fontWeight: 600,
+                  color: palette.textDim,
+                  textTransform: 'uppercase',
+                  letterSpacing: '1.5px',
+                  marginBottom: '10px',
+                }}>
+                  By Strike Price
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  {displayStrikes.map(([strike, data]) => {
+                    const barWidth = maxPremium > 0 ? (data.premium / maxPremium) * 100 : 0;
+                    return (
+                      <div key={strike} style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                         <span style={{
-                          fontSize: '11px',
-                          color: palette.textSecondary,
-                          fontFamily: '"JetBrains Mono", monospace',
-                        }}>
-                          {data.contracts}×
-                        </span>
-                        <span style={{
+                          width: '44px',
                           fontSize: '12px',
-                          fontWeight: 600,
-                          color: accentColor,
-                          fontFamily: '"JetBrains Mono", monospace',
+                          fontWeight: 700,
+                          color: palette.textPrimary,
+                          textAlign: 'right',
                         }}>
-                          {formatCurrency(data.premium)}
+                          ${parseFloat(strike).toFixed(0)}
+                        </span>
+                        <div style={{
+                          flex: 1,
+                          height: '24px',
+                          backgroundColor: palette.elevated,
+                          borderRadius: '4px',
+                          overflow: 'hidden',
+                          position: 'relative',
+                        }}>
+                          <div style={{
+                            width: `${barWidth}%`,
+                            height: '100%',
+                            background: `linear-gradient(90deg, ${accentColor}40 0%, ${accentColor}15 100%)`,
+                            borderRadius: '4px',
+                          }} />
+                          <div style={{
+                            position: 'absolute',
+                            top: 0,
+                            left: '8px',
+                            right: '8px',
+                            height: '100%',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                          }}>
+                            <span style={{ fontSize: '10px', color: palette.textSecondary }}>
+                              {data.contracts}×
+                            </span>
+                            <span style={{ fontSize: '11px', fontWeight: 600, color: accentColor }}>
+                              {formatCurrency(data.premium)}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {sortedStrikes.length > 5 && (
+                    <div style={{
+                      fontSize: '10px',
+                      color: palette.textDim,
+                      textAlign: 'center',
+                      paddingTop: '2px',
+                    }}>
+                      +{sortedStrikes.length - 5} more strikes
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Expandable Trade List */}
+          <div style={{ borderTop: `1px solid ${palette.border}` }}>
+            <button
+              onClick={() => setShowTrades(!showTrades)}
+              style={{
+                width: '100%',
+                padding: '12px 20px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                backgroundColor: 'transparent',
+                border: 'none',
+                cursor: 'pointer',
+                color: palette.textSecondary,
+                fontSize: '12px',
+                fontFamily: 'inherit',
+                transition: 'background-color 0.15s ease',
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = palette.elevated}
+              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+            >
+              <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Zap size={12} color={accentColor} />
+                <span style={{ color: palette.textPrimary, fontWeight: 500 }}>View All Trades</span>
+                <span style={{
+                  padding: '2px 6px',
+                  borderRadius: '100px',
+                  backgroundColor: palette.border,
+                  fontSize: '10px',
+                  color: palette.textMuted,
+                }}>
+                  {trades.length}
+                </span>
+              </span>
+              <div style={{
+                width: '24px',
+                height: '24px',
+                borderRadius: '6px',
+                backgroundColor: palette.elevated,
+                border: `1px solid ${palette.border}`,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}>
+                {showTrades ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+              </div>
+            </button>
+
+            {showTrades && (
+              <div style={{
+                borderTop: `1px solid ${palette.border}`,
+                maxHeight: '300px',
+                overflowY: 'auto',
+              }}>
+                {/* Table Header */}
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: '70px 70px 55px 70px 50px 90px',
+                  padding: '10px 16px',
+                  backgroundColor: palette.void,
+                  borderBottom: `1px solid ${palette.border}`,
+                  position: 'sticky',
+                  top: 0,
+                  zIndex: 1,
+                }}>
+                  {['DATE', 'STRIKE', 'TYPE', 'EXPIRY', 'QTY', 'PREMIUM'].map((header) => (
+                    <div key={header} style={{
+                      fontSize: '8px',
+                      fontWeight: 700,
+                      color: palette.textDim,
+                      letterSpacing: '0.5px',
+                      textAlign: header === 'PREMIUM' || header === 'QTY' ? 'right' : 'left',
+                    }}>
+                      {header}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Trade Rows */}
+                {trades.map((trade, i) => {
+                  const fallbackNetAmount = Math.abs(safeParseNumber(trade.NetAmount));
+                  const premiumUSD = getOptionPremiumUSD(trade) || fallbackNetAmount;
+                  const contracts = safeParseNumber(trade.OptionContracts);
+                  const strike = safeParseNumber(trade.Strike);
+                  const isTradeCall = trade['Call/Put'] === 'C';
+                  const expiry = trade.Expiration
+                    ? formatDate(trade.Expiration)
+                    : parseExpirationFromSymbol(trade.Symbol);
+                  const rowTypeColor = isTradeCall ? palette.call : palette.put;
+
+                  return (
+                    <div
+                      key={trade.TradeID}
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: '70px 70px 55px 70px 50px 90px',
+                        alignItems: 'center',
+                        padding: '10px 16px',
+                        backgroundColor: i % 2 === 0 ? palette.surface : palette.void,
+                        borderBottom: `1px solid ${palette.border}`,
+                      }}
+                    >
+                      <div style={{ fontSize: '11px', color: palette.textSecondary }}>
+                        {formatDate(trade.Date)}
+                      </div>
+                      <div style={{ fontSize: '12px', fontWeight: 700, color: palette.textPrimary }}>
+                        ${strike.toFixed(0)}
+                      </div>
+                      <div>
+                        <span style={{
+                          fontSize: '9px',
+                          fontWeight: 700,
+                          padding: '2px 5px',
+                          borderRadius: '4px',
+                          backgroundColor: isTradeCall ? palette.callDim : palette.putDim,
+                          color: rowTypeColor,
+                        }}>
+                          {isTradeCall ? 'C' : 'P'}
                         </span>
                       </div>
+                      <div style={{
+                        fontSize: '10px',
+                        color: palette.textMuted,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '3px',
+                      }}>
+                        <Calendar size={9} color={palette.textDim} />
+                        {expiry || '—'}
+                      </div>
+                      <div style={{
+                        fontSize: '11px',
+                        color: palette.textSecondary,
+                        textAlign: 'right',
+                        fontWeight: 600,
+                      }}>
+                        {contracts}×
+                      </div>
+                      <div style={{
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        color: accentColor,
+                        textAlign: 'right',
+                      }}>
+                        {formatCurrency(premiumUSD)}
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
-              {sortedStrikes.length > 5 && (
-                <div style={{
-                  fontSize: '11px',
-                  color: palette.textDim,
-                  textAlign: 'center',
-                  paddingTop: '4px',
-                }}>
-                  +{sortedStrikes.length - 5} more strikes
-                </div>
-              )}
-            </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
-        );
-      })()}
-
-      {/* Expandable Trade List */}
-      <div style={{ borderTop: `1px solid ${palette.border}` }}>
-        <button
-          onClick={() => setIsExpanded(!isExpanded)}
-          style={{
-            width: '100%',
-            padding: '16px 24px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            backgroundColor: 'transparent',
-            border: 'none',
-            cursor: 'pointer',
-            color: palette.textSecondary,
-            fontSize: '13px',
-            fontFamily: 'inherit',
-            transition: 'background-color 0.15s ease',
-          }}
-          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = palette.elevated}
-          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-        >
-          <span style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <Zap size={14} color={accentColor} />
-            <span style={{ color: palette.textPrimary, fontWeight: 500 }}>View All Trades</span>
-            <span style={{
-              padding: '2px 8px',
-              borderRadius: '100px',
-              backgroundColor: palette.border,
-              fontSize: '11px',
-              color: palette.textMuted,
-            }}>
-              {trades.length}
-            </span>
-          </span>
-          <div style={{
-            width: '28px',
-            height: '28px',
-            borderRadius: '8px',
-            backgroundColor: palette.elevated,
-            border: `1px solid ${palette.border}`,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}>
-            {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-          </div>
-        </button>
-
-        {isExpanded && (
-          <div style={{
-            borderTop: `1px solid ${palette.border}`,
-            maxHeight: '400px',
-            overflowY: 'auto',
-          }}>
-            {/* Table Header */}
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: '80px 90px 70px 80px 60px 100px',
-              padding: '14px 20px',
-              backgroundColor: palette.void,
-              borderBottom: `1px solid ${palette.border}`,
-              position: 'sticky',
-              top: 0,
-              zIndex: 1,
-            }}>
-              {['DATE', 'STRIKE', 'TYPE', 'EXPIRY', 'QTY', 'PREMIUM'].map((header) => (
-                <div key={header} style={{
-                  fontSize: '9px',
-                  fontWeight: 700,
-                  color: palette.textDim,
-                  letterSpacing: '1px',
-                  textAlign: header === 'PREMIUM' || header === 'QTY' ? 'right' : 'left',
-                }}>
-                  {header}
-                </div>
-              ))}
-            </div>
-
-            {/* Trade Rows */}
-            {trades.map((trade, i) => {
-              const fallbackNetAmount = Math.abs(safeParseNumber(trade.NetAmount));
-              const premiumUSD = getOptionPremiumUSD(trade) || fallbackNetAmount;
-              const contracts = safeParseNumber(trade.OptionContracts);
-              const strike = safeParseNumber(trade.Strike);
-              const isTradeCall = trade['Call/Put'] === 'C';
-              const expiry = trade.Expiration
-                ? formatDate(trade.Expiration)
-                : parseExpirationFromSymbol(trade.Symbol);
-              const rowTypeColor = isTradeCall ? palette.call : palette.put;
-
-              return (
-                <div
-                  key={trade.TradeID}
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: '80px 90px 70px 80px 60px 100px',
-                    alignItems: 'center',
-                    padding: '14px 20px',
-                    backgroundColor: i % 2 === 0 ? palette.surface : palette.void,
-                    borderBottom: `1px solid ${palette.border}`,
-                    transition: 'background-color 0.1s ease',
-                  }}
-                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = palette.elevated}
-                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = i % 2 === 0 ? palette.surface : palette.void}
-                >
-                  <div style={{
-                    fontSize: '12px',
-                    color: palette.textSecondary,
-                    fontWeight: 500,
-                  }}>
-                    {formatDate(trade.Date)}
-                  </div>
-                  <div style={{
-                    fontSize: '14px',
-                    fontWeight: 700,
-                    color: palette.textPrimary,
-                  }}>
-                    ${strike.toFixed(0)}
-                  </div>
-                  <div>
-                    <span style={{
-                      fontSize: '10px',
-                      fontWeight: 700,
-                      padding: '4px 8px',
-                      borderRadius: '6px',
-                      backgroundColor: isTradeCall ? palette.callDim : palette.putDim,
-                      color: rowTypeColor,
-                      letterSpacing: '0.5px',
-                    }}>
-                      {isTradeCall ? 'CALL' : 'PUT'}
-                    </span>
-                  </div>
-                  <div style={{
-                    fontSize: '12px',
-                    color: palette.textMuted,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                  }}>
-                    <Calendar size={10} color={palette.textDim} />
-                    {expiry || '—'}
-                  </div>
-                  <div style={{
-                    fontSize: '13px',
-                    color: palette.textSecondary,
-                    textAlign: 'right',
-                    fontWeight: 600,
-                  }}>
-                    {contracts}×
-                  </div>
-                  <div style={{
-                    fontSize: '13px',
-                    fontWeight: 700,
-                    color: accentColor,
-                    textAlign: 'right',
-                    textShadow: `0 0 20px ${accentGlow}`,
-                  }}>
-                    {formatCurrency(premiumUSD)}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
+        </>
+      )}
     </div>
   );
 }

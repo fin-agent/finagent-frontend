@@ -1,6 +1,16 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
-import { formatCalendarDate } from '@/src/lib/date-utils';
+
+// Format date WITHOUT offset - must match UI display
+function formatDateForVoice(dateStr: string): string {
+  const date = new Date(dateStr);
+  if (Number.isNaN(date.getTime())) return dateStr;
+  return date.toLocaleDateString('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric'
+  });
+}
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -342,8 +352,8 @@ export async function POST(req: NextRequest) {
       const premiumVerb = trade.TradeType === 'B' ? 'paying' : 'collecting';
       const underlyingSymbol = trade.UnderlyingSymbol || normalizedSymbol || 'the stock';
 
-      const tradeDate = formatCalendarDate(trade.Date);
-      const expirationDate = trade.Expiration ? formatCalendarDate(trade.Expiration) : 'N/A';
+      const tradeDate = formatDateForVoice(trade.Date);
+      const expirationDate = trade.Expiration ? formatDateForVoice(trade.Expiration) : 'N/A';
 
       response = `Your most recent ${callPutText} option on ${underlyingSymbol} was on ${tradeDate}. You ${tradeTypeText} ${qty} ${qty === 1 ? 'contract' : 'contracts'} of the $${strikeVal} strike, ${premiumVerb} $${premium.toFixed(2)} total premium ($${perContract.toFixed(2)} per contract). This option expires ${expirationDate}.`;
     } else if (aggregation === 'total_premium') {
@@ -361,9 +371,9 @@ export async function POST(req: NextRequest) {
       const callPutText = trade['Call/Put'] === 'C' ? 'call' : 'put';
       const tradeTypeText = trade.TradeType === 'B' ? 'bought' : 'sold';
 
-      // Use formatCalendarDate to ensure dates match UI display
-      const tradeDate = formatCalendarDate(trade.Date);
-      const expirationDate = trade.Expiration ? formatCalendarDate(trade.Expiration) : 'N/A';
+      // Use formatDateForVoice to ensure dates match UI display
+      const tradeDate = formatDateForVoice(trade.Date);
+      const expirationDate = trade.Expiration ? formatDateForVoice(trade.Expiration) : 'N/A';
       response = `You ${tradeTypeText} ${qty} contracts of the $${strikeVal} strike ${callPutText} option on ${normalizedSymbol} on ${tradeDate} with expiration ${expirationDate} for a total premium of $${premium.toFixed(2)}.`;
     } else if (aggregation === 'count') {
       response = `Found ${tradeCount} trades`;

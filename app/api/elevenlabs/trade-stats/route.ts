@@ -1,7 +1,18 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
-import { formatCalendarDate, getDateOffset } from '@/src/lib/date-utils';
+import { getDateOffset } from '@/src/lib/date-utils';
 import { parseTimeExpression } from '@/src/lib/date-parser';
+
+// Format date WITHOUT offset - must match UI display
+function formatDateForVoice(dateStr: string): string {
+  const date = new Date(dateStr);
+  if (Number.isNaN(date.getTime())) return dateStr;
+  return date.toLocaleDateString('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric'
+  });
+}
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -149,9 +160,9 @@ export async function POST(req: NextRequest) {
     const highShareQty = parseFloat(highestTrade?.StockShareQty || '0');
     const lowShareQty = parseFloat(lowestTrade?.StockShareQty || '0');
 
-    // Format dates with offset applied for display
-    const highDate = highestTrade?.Date ? formatCalendarDate(highestTrade.Date) : 'N/A';
-    const lowDate = lowestTrade?.Date ? formatCalendarDate(lowestTrade.Date) : 'N/A';
+    // Format dates WITHOUT offset - must match UI display
+    const highDate = highestTrade?.Date ? formatDateForVoice(highestTrade.Date) : 'N/A';
+    const lowDate = lowestTrade?.Date ? formatDateForVoice(lowestTrade.Date) : 'N/A';
 
     let response = `${normalizedSymbol} trade statistics for ${periodDescription}: `;
     response += `Highest price ${typeLabel}: ${formatPrice(highestPrice)} on ${highDate} for ${formatNumber(highShareQty)} shares. `;

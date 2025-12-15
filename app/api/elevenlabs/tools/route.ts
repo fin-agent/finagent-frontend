@@ -1,8 +1,19 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import { parseTimeExpression } from '@/src/lib/date-parser';
-import { getDateOffset, formatCalendarDate } from '@/src/lib/date-utils';
+import { getDateOffset } from '@/src/lib/date-utils';
 import { calculateRealizedMatchesFIFO, filterProfitableTrades } from '@/src/lib/profitable-trades';
+
+// Format date WITHOUT offset - must match UI display
+function formatDateForVoice(dateStr: string): string {
+  const date = new Date(dateStr);
+  if (Number.isNaN(date.getTime())) return dateStr;
+  return date.toLocaleDateString('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric'
+  });
+}
 
 // Initialize Supabase client
 const supabase = createClient(
@@ -165,10 +176,10 @@ async function getTradeStats(symbol: string, tradeType?: string, year?: number, 
     totalShares,
     totalValue,
     highestPrice,
-    highestPriceDate: highestTrade?.Date ? formatCalendarDate(highestTrade.Date) : undefined,
+    highestPriceDate: highestTrade?.Date ? formatDateForVoice(highestTrade.Date) : undefined,
     highestPriceShares: highestTrade ? parseFloat(highestTrade.StockShareQty || '0') : 0,
     lowestPrice,
-    lowestPriceDate: lowestTrade?.Date ? formatCalendarDate(lowestTrade.Date) : undefined,
+    lowestPriceDate: lowestTrade?.Date ? formatDateForVoice(lowestTrade.Date) : undefined,
     lowestPriceShares: lowestTrade ? parseFloat(lowestTrade.StockShareQty || '0') : 0,
     averagePrice: avgPrice,
   };

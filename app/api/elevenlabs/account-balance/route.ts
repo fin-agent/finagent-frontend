@@ -1,6 +1,16 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
-import { formatCalendarDate } from '@/src/lib/date-utils';
+
+// Format date WITHOUT offset - must match UI display
+function formatDateForVoice(dateStr: string): string {
+  const date = new Date(dateStr);
+  if (Number.isNaN(date.getTime())) return dateStr;
+  return date.toLocaleDateString('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric'
+  });
+}
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -37,8 +47,8 @@ function formatCurrency(value: number): string {
   }).format(value);
 }
 
-// Use formatCalendarDate from date-utils for consistent date display with UI
-const formatDate = formatCalendarDate;
+// Use formatDateForVoice for consistent date display WITHOUT offset
+const formatDate = formatDateForVoice;
 
 function getDateRange(timePeriod?: string): { fromDate?: Date; toDate?: Date } {
   const today = new Date();

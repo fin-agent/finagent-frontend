@@ -1,7 +1,18 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import { parseTimeExpression } from '@/src/lib/date-parser';
-import { formatDisplayDate, formatDateRange, formatCalendarDate } from '@/src/lib/date-utils';
+import { formatDisplayDate, formatDateRange } from '@/src/lib/date-utils';
+
+// Format date WITHOUT offset - must match UI display
+function formatDateForVoice(dateStr: string): string {
+  const date = new Date(dateStr);
+  if (Number.isNaN(date.getTime())) return dateStr;
+  return date.toLocaleDateString('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric'
+  });
+}
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -206,8 +217,8 @@ export async function POST(req: NextRequest) {
         totalValue: Math.round(totalValue * 100) / 100,
         trades: trades.map(t => ({
           ...t,
-          // Replace raw DB date with formatted display date (offset applied)
-          Date: formatCalendarDate(t.Date),
+          // Replace raw DB date with formatted display date (NO offset - must match UI)
+          Date: formatDateForVoice(t.Date),
           displayDate: formatDisplayDate(t.Date),
         })),
       }

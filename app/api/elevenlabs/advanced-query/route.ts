@@ -330,7 +330,23 @@ export async function POST(req: NextRequest) {
     let response = '';
     const normalizedSymbol = symbol ? normalizeSymbol(symbol) : '';
 
-    if (aggregation === 'total_premium') {
+    // Special handling for single-trade queries (limit: 1) - "last/most recent" queries
+    if (limit === 1 && data.length === 1 && data[0].SecurityType === 'O') {
+      const trade = data[0];
+      const strikeVal = parseFloat(trade.Strike || '0');
+      const qty = parseFloat(trade.OptionContracts || '0');
+      const premium = Math.abs(parseFloat(trade.NetAmount || '0'));
+      const perContract = qty > 0 ? premium / qty : 0;
+      const callPutText = trade['Call/Put'] === 'C' ? 'call' : 'put';
+      const tradeTypeText = trade.TradeType === 'B' ? 'bought' : 'sold';
+      const premiumVerb = trade.TradeType === 'B' ? 'paying' : 'collecting';
+      const underlyingSymbol = trade.UnderlyingSymbol || normalizedSymbol || 'the stock';
+
+      const tradeDate = formatCalendarDate(trade.Date);
+      const expirationDate = trade.Expiration ? formatCalendarDate(trade.Expiration) : 'N/A';
+
+      response = `Your most recent ${callPutText} option on ${underlyingSymbol} was on ${tradeDate}. You ${tradeTypeText} ${qty} ${qty === 1 ? 'contract' : 'contracts'} of the $${strikeVal} strike, ${premiumVerb} $${premium.toFixed(2)} total premium ($${perContract.toFixed(2)} per contract). This option expires ${expirationDate}.`;
+    } else if (aggregation === 'total_premium') {
       const action = tradeType === 'sell' ? 'collected' : 'paid';
       response = `You ${action} a total of $${totalNetAmount.toFixed(2)} in premium on ${tradeCount} ${normalizedSymbol || ''} ${callPut || ''} option trades (${totalContracts} contracts covering ${sharesCovered} shares)`;
       if (fromDate || toDate) {

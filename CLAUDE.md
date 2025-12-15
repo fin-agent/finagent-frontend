@@ -47,7 +47,7 @@ The full voice agent flow uses production webhooks. Test API logic locally with 
 
 ### Key Directories
 
-- `app/api/elevenlabs/` - Webhook endpoints called by ElevenLabs agent (tools, profitable-trades, trade-summary, detailed-trades, advanced-query, account-balance, fees)
+- `app/api/elevenlabs/` - Webhook endpoints called by ElevenLabs agent (tools, profitable-trades, trade-summary, detailed-trades, advanced-query, options, account-balance, fees)
 - `app/api/` - UI data endpoints (profitable-trades-ui, trade-stats, trades-ui, advanced-query-ui, account-balance-ui, fees-ui, conversations, messages)
 - `src/components/generative-ui/` - Dynamic UI cards (ProfitableTrades, TradeStats, TradesTable, TradeSummary, AdvancedOptionsTable, TradeQueryCard, AccountSummary, FeesSummary, etc.)
 - `src/components/UnifiedAssistant.tsx` - Main chat/voice interface
@@ -266,9 +266,10 @@ AZURE_OPENAI_API_VERSION=2024-10-21  # Optional, defaults to 2024-10-21
 | `get_trade_stats` | Highest/lowest prices, averages |
 | `get_profitable_trades` | FIFO-matched profitable trades |
 | `get_time_based_trades` | Trades for specific time periods |
-| `advanced_query` | Flexible option queries (short/long calls/puts, by date/expiration/strike) |
+| `get_options` | **Dedicated options tool** with 5 query types: `last` (single most recent), `bulk` (multiple trades), `expiring` (by expiration), `highest_strike`, `total_premium` |
 | `get_account_balance` | Account balance, equity, buying power, margin info |
 | `get_fees` | Commissions, interest charges, and locate fees |
+| `advanced_query` | Legacy flexible queries (use `get_options` for options) |
 
 ## Testing
 

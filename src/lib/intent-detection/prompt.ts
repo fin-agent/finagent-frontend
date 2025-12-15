@@ -40,6 +40,34 @@ ${intents.map(i => `### ${i.id}
   - "debit interest" / "margin interest" / "interest charged" / "short interest" -> "debit_interest"
   - "locate fee" / "borrow fee" / "stock borrow" -> "locate_fee"
 
+## Intent Disambiguation Rules
+
+IMPORTANT: When a query contains overlapping signals, use these rules:
+
+1. **Options keywords override time periods**: If the query mentions "calls", "puts", "options", "short", "long", "strike", or "premium", classify as an OPTIONS intent even if a time period is present.
+   - "Show all short calls on TSLA last month" → options.bulk (NOT trades.time_based)
+   - "Total premium I paid last 12 months" → options.total_premium (NOT trades.time_based)
+
+2. **"Last/most recent/latest" for single items**: Words like "last", "most recent", or "latest" before "option/call/put" mean the SINGLE most recent trade. Note: "options" (plural) STILL means single most recent in this context!
+   - "Show my last call option" → options.last_trade
+   - "Most recent put I bought" → options.last_trade
+   - "Show the last call options I bought" → options.last_trade (NOT options.bulk!)
+   - "Last put options I sold on AAPL" → options.last_trade
+
+3. **"All/show all" for bulk queries**: Words like "all", "show all", "list all" with options indicate multiple trades.
+   - "Show all my calls" → options.bulk
+   - "All puts I sold" → options.bulk
+
+4. **Highest/lowest strike**: Questions about "highest strike" or "lowest strike" go to options.highest_strike.
+   - "Highest strike call I sold on AAPL" → options.highest_strike
+
+5. **Expiring options**: Questions about expiration dates go to options.expiring.
+   - "Options expiring tomorrow" → options.expiring
+
+6. **Time-based trades (no option keywords)**: Only use trades.time_based when asking about GENERAL trades with a time period and NO option-specific keywords.
+   - "What did I trade yesterday?" → trades.time_based
+   - "My trades last week" → trades.time_based
+
 ## Response Format
 
 Respond with ONLY valid JSON:
@@ -68,5 +96,20 @@ Query: "How much buying power do I have?"
 Response: {"intent": "account.summary", "confidence": 0.92, "entities": {"accountQueryType": "buying_power"}}
 
 Query: "Show all my short calls on Tesla last month"
-Response: {"intent": "options.bulk", "confidence": 0.96, "entities": {"symbol": "TSLA", "callPut": "call", "tradeType": "sell", "timePeriod": "last month"}}`;
+Response: {"intent": "options.bulk", "confidence": 0.96, "entities": {"symbol": "TSLA", "callPut": "call", "tradeType": "sell", "timePeriod": "last month"}}
+
+Query: "Total premium I paid for buying SPY options last 12 months"
+Response: {"intent": "options.total_premium", "confidence": 0.95, "entities": {"symbol": "SPY", "tradeType": "buy", "timePeriod": "last 12 months"}}
+
+Query: "Show last call options I bought on AAPL"
+Response: {"intent": "options.last_trade", "confidence": 0.94, "entities": {"symbol": "AAPL", "callPut": "call", "tradeType": "buy"}}
+
+Query: "Show the last call options I bought in Apple"
+Response: {"intent": "options.last_trade", "confidence": 0.96, "entities": {"symbol": "AAPL", "callPut": "call", "tradeType": "buy"}}
+
+Query: "Highest strike call option I sold on AAPL this year"
+Response: {"intent": "options.highest_strike", "confidence": 0.97, "entities": {"symbol": "AAPL", "callPut": "call", "tradeType": "sell", "timePeriod": "this year"}}
+
+Query: "What did I trade last month?"
+Response: {"intent": "trades.time_based", "confidence": 0.92, "entities": {"timePeriod": "last month"}}`;
 }

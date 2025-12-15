@@ -16,7 +16,6 @@ import { HighestStrikeCard } from './generative-ui/HighestStrikeCard';
 import { TotalPremiumCard } from './generative-ui/TotalPremiumCard';
 import { ExpiringOptionsTable } from './generative-ui/ExpiringOptionsTable';
 import { LastOptionTradeCard } from './generative-ui/LastOptionTradeCard';
-import { TradeQueryCard } from './generative-ui/TradeQueryCard';
 import { AccountSummary, type AccountQueryType } from './generative-ui/AccountSummary';
 import { FeesSummary, type FeeType } from './generative-ui/FeesSummary';
 import type { ClassificationResult } from '@/src/lib/intent-detection';
@@ -64,6 +63,55 @@ interface QueryIntent {
   expiration?: string;
   accountQueryType?: AccountQueryType;
   feeType?: FeeType;
+}
+
+// High-signal option intents where regex patterns are very reliable
+function isHighSignalOptionIntent(intent: QueryIntent | null): boolean {
+  if (!intent) return false;
+  return (
+    intent.cardType === 'last-option' ||
+    intent.cardType === 'highest-strike' ||
+    intent.cardType === 'total-premium' ||
+    intent.cardType === 'expiring-options' ||
+    intent.cardType === 'advanced-options'
+  );
+}
+
+interface QueryIntentWithConfidence extends QueryIntent {
+  confidence?: number;
+}
+
+function chooseIntent(
+  userQuery: string,
+  llmIntent: QueryIntentWithConfidence | null,
+  regexIntent: QueryIntent | null
+): QueryIntent | null {
+  // If both agree, use LLM (has more entity extraction)
+  if (llmIntent && regexIntent && llmIntent.cardType === regexIntent.cardType) {
+    console.log('🎯 [Intent Choice] LLM and regex agree:', llmIntent.cardType);
+    return llmIntent;
+  }
+
+  // If LLM is highly confident (>= 0.85), trust it even if regex differs
+  if (llmIntent && (llmIntent.confidence ?? 0) >= 0.85) {
+    console.log('🎯 [Intent Choice] LLM high confidence:', llmIntent.cardType, `(${((llmIntent.confidence ?? 0) * 100).toFixed(0)}%)`);
+    return llmIntent;
+  }
+
+  // For high-signal option patterns (clear regex match), prefer regex when LLM is uncertain
+  if (isHighSignalOptionIntent(regexIntent) && (!llmIntent || (llmIntent.confidence ?? 0) < 0.85)) {
+    console.log('🎯 [Intent Choice] Regex high-signal pattern:', regexIntent?.cardType);
+    return regexIntent;
+  }
+
+  // Default: prefer LLM if available, otherwise regex
+  if (llmIntent) {
+    console.log('🎯 [Intent Choice] Using LLM:', llmIntent.cardType);
+    return llmIntent;
+  }
+
+  console.log('🎯 [Intent Choice] Fallback to regex:', regexIntent?.cardType || 'null');
+  return regexIntent;
 }
 
 function formatUSDNoCommas(value: unknown): string {
@@ -299,6 +347,44 @@ function buildAnswerOverride(intent: QueryIntent | null, tradeUI: TradeUIData | 
 	    return `${symbol} trade statistics for ${period}. ${highText}${lowText}${avgText}`.trim();
 	  }
 
+  if (tradeUI.type === 'last-option') {
+    const d = tradeUI.data as {
+      trades?: Array<{
+        Date: string;
+        Symbol: string;
+        TradeType: string;
+        'Call/Put': string;
+        Strike: string;
+        Expiration: string;
+        OptionContracts: string;
+        OptionTradePremium?: string;
+        NetAmount: string;
+        UnderlyingSymbol?: string;
+      }>;
+    };
+
+    const trades = d.trades || [];
+    if (!trades.length) return null;
+
+    // Get the most recent (first) trade
+    const trade = trades[0];
+    const parsed = parseOCCOptionSymbolDetails(trade.Symbol);
+    const underlying = trade.UnderlyingSymbol || parsed?.underlying || tradeUI.symbol || 'unknown';
+    const contracts = Math.trunc(safeParseNumber(trade.OptionContracts));
+    const strike = safeParseNumber(trade.Strike);
+    const netAmount = safeParseNumber(trade.NetAmount);
+    const grossPremium = getOptionPremiumUSD(trade);
+    const totalPremium = netAmount !== 0 ? Math.abs(netAmount) : grossPremium;
+    const perContract = contracts > 0 ? totalPremium / contracts : 0;
+    const callPut = trade['Call/Put'] === 'C' ? 'call' : 'put';
+    const action = trade.TradeType === 'B' ? 'bought' : 'sold';
+    const premiumVerb = trade.TradeType === 'B' ? 'paying' : 'collecting';
+    const displayDate = formatDateForHighestStrikeCard(trade.Date);
+    const displayExpiration = formatDateForHighestStrikeCard(trade.Expiration);
+
+    return `Your most recent ${callPut} option trade on ${underlying} was on ${displayDate}. You ${action} ${contracts} ${pluralize(contracts, 'contract')} of the $${formatStrikeForDisplay(strike)} strike, ${premiumVerb} ${formatUSDNoCommas(totalPremium)} total premium (${formatUSDNoCommas(perContract)} per contract). This option expires ${displayExpiration}.`;
+  }
+
 	  if (tradeUI.type === 'highest-strike') {
 	    type ParsedHighestStrike = {
 	      parsedFromText?: boolean;
@@ -484,7 +570,24 @@ function detectUserQueryIntent(query: string): QueryIntent | null {
     return { cardType: 'expiring-options', expiration: expirationMatch?.[1] || 'tomorrow', symbol };
   }
 
-  // 4. Bulk options queries (all short/long calls/puts, option trades)
+  // 4. Last/most recent option trade (must come before bulk options)
+  // Matches: "last call option", "last call options", "most recent put", "latest option"
+  // Note: "options" plural still means "the last one" in context like "last call options I bought"
+  if (/\b(last|most\s+recent|latest)\s+(call|put|options?)\b/i.test(lowerQuery)) {
+    return { cardType: 'last-option', symbol, tradeType, callPut };
+  }
+
+  // 5. Highest/lowest strike (must come before bulk options)
+  if (/\b(highest|lowest)\s+strike\b/i.test(lowerQuery)) {
+    return { cardType: 'highest-strike', symbol, tradeType, callPut, timePeriod };
+  }
+
+  // 6. Total premium (must come before bulk options)
+  if (/\btotal\s+premium\b/i.test(lowerQuery) || /\bpremium\s+(collected|paid|received)\b/i.test(lowerQuery)) {
+    return { cardType: 'total-premium', symbol, tradeType, timePeriod };
+  }
+
+  // 7. Bulk options queries (all short/long calls/puts, option trades)
   // Matches: "show all the short calls", "all my short puts", "short call options on TSLA"
   const isBulkOptionsQuery =
     // Pattern: "show [me] [all] [the] [my] short/long calls/puts [options]"
@@ -500,21 +603,6 @@ function detectUserQueryIntent(query: string): QueryIntent | null {
 
   if (isBulkOptionsQuery) {
     return { cardType: 'advanced-options', symbol, tradeType, callPut, timePeriod };
-  }
-
-  // 5. Last/most recent option trade
-  if (/\b(last|most\s+recent|latest)\s+(call|put|option)\b/i.test(lowerQuery)) {
-    return { cardType: 'last-option', symbol, tradeType, callPut };
-  }
-
-  // 6. Highest/lowest strike
-  if (/\b(highest|lowest)\s+strike\b/i.test(lowerQuery)) {
-    return { cardType: 'highest-strike', symbol, tradeType, callPut, timePeriod };
-  }
-
-  // 7. Total premium
-  if (/\btotal\s+premium\b/i.test(lowerQuery) || /\bpremium\s+(collected|paid|received)\b/i.test(lowerQuery)) {
-    return { cardType: 'total-premium', symbol, tradeType, timePeriod };
   }
 
   // 8. Average price (simple average query - before general stats)
@@ -569,7 +657,7 @@ function detectUserQueryIntent(query: string): QueryIntent | null {
  * Classify intent using GPT-based LLM classifier (via API)
  * Returns null if classification fails or confidence is too low
  */
-async function classifyIntentViaAPI(query: string): Promise<QueryIntent | null> {
+async function classifyIntentViaAPI(query: string): Promise<QueryIntentWithConfidence | null> {
   try {
     const response = await fetch('/api/classify-intent', {
       method: 'POST',
@@ -590,7 +678,7 @@ async function classifyIntentViaAPI(query: string): Promise<QueryIntent | null> 
       return null;
     }
 
-    // Map ClassificationResult to QueryIntent format
+    // Map ClassificationResult to QueryIntentWithConfidence format (includes confidence)
     return {
       cardType: result.cardType as QueryIntent['cardType'],
       symbol: result.entities.symbol,
@@ -600,6 +688,7 @@ async function classifyIntentViaAPI(query: string): Promise<QueryIntent | null> 
       expiration: result.entities.expiration,
       accountQueryType: result.entities.accountQueryType,
       feeType: result.entities.feeType,
+      confidence: result.confidence,
     };
   } catch (error) {
     console.error('[LLM Classifier] Error:', error);
@@ -1923,8 +2012,7 @@ const UnifiedAssistant: React.FC = () => {
         const data = await res.json();
         return { type, symbol, tradeType, timePeriod, data };
       } else if (type === 'last-option') {
-        // Fetch ALL option trades matching the criteria (not just 1)
-        // The render logic will decide whether to show single card or bulk card
+        // Fetch the most recent option trade matching the criteria
         endpoint = '/api/advanced-query-ui';
         body = {
           symbol: symbol || undefined,
@@ -1933,7 +2021,7 @@ const UnifiedAssistant: React.FC = () => {
           callPut: extraParams?.callPut === 'call' ? 'C' : extraParams?.callPut === 'put' ? 'P' : undefined,
           orderBy: 'date',
           orderDir: 'desc',
-          // No limit - fetch all trades to match what agent reports
+          limit: 1,
         };
         const res = await fetch(endpoint, {
           method: 'POST',
@@ -2152,6 +2240,11 @@ const UnifiedAssistant: React.FC = () => {
               if (!pendingQueryIntentRef.current) return;
 
               const current = pendingQueryIntentRef.current;
+              // If regex detected a high-signal option pattern and LLM is not highly confident, keep regex
+              if (isHighSignalOptionIntent(current) && (llmIntent.confidence ?? 0) < 0.85) {
+                console.log('🤖 [LLM] Keeping regex high-signal intent:', current.cardType, '(LLM confidence:', `${((llmIntent.confidence ?? 0) * 100).toFixed(0)}%)`);
+                return;
+              }
               const isSame =
                 current.cardType === llmIntent.cardType &&
                 (current.symbol || '') === (llmIntent.symbol || '') &&
@@ -2701,18 +2794,17 @@ const UnifiedAssistant: React.FC = () => {
 	    }
 
 	    if (!isCalcFollowup) {
-	      // Classify query intent using GPT-based LLM classifier
-	      // Falls back to regex-based detection if LLM fails
+	      // Classify query intent using GPT-based LLM classifier with confidence-based selection
 	      console.log('🎯 [Intent Detection] User query:', message);
-	      intent = await classifyIntentViaAPI(message);
-	      if (intent) {
-	        console.log('🎯 [LLM Classifier] Intent:', intent);
-	      } else {
-	        // Fallback to regex-based detection if LLM fails
-	        console.log('🎯 [LLM Classifier] Falling back to regex detection');
-	        intent = detectUserQueryIntent(message);
-	        console.log('🎯 [Regex Detection] Intent:', intent);
+	      const regexIntent = detectUserQueryIntent(message);
+	      const llmIntent = await classifyIntentViaAPI(message);
+	      if (llmIntent) {
+	        console.log('🎯 [LLM Classifier] Intent:', llmIntent.cardType, `(${((llmIntent.confidence ?? 0) * 100).toFixed(0)}% confidence)`, '| entities:', { symbol: llmIntent.symbol, timePeriod: llmIntent.timePeriod, tradeType: llmIntent.tradeType, callPut: llmIntent.callPut });
 	      }
+	      if (regexIntent) {
+	        console.log('🎯 [Regex Detection] Intent:', regexIntent.cardType, '| entities:', { symbol: regexIntent.symbol, timePeriod: regexIntent.timePeriod, tradeType: regexIntent.tradeType, callPut: regexIntent.callPut });
+	      }
+	      intent = chooseIntent(message, llmIntent, regexIntent);
 	    }
 	    // NOTE: cardRenderedForCycleRef is reset in render_ui client tool, NOT here
 	    // Resetting here would cause late message fragments from previous query to trigger duplicates
@@ -3205,29 +3297,6 @@ const UnifiedAssistant: React.FC = () => {
         };
       };
 
-      // Build query description from filters
-      const queryParts: string[] = ['Show all the'];
-      if (tradeUI.tradeType === 'sell') queryParts.push('short');
-      else if (tradeUI.tradeType === 'buy') queryParts.push('long');
-      if (tradeUI.callPut) queryParts.push(tradeUI.callPut);
-      queryParts.push('options');
-      if (symbol) queryParts.push(`on ${symbol}`);
-      if (tradeUI.timePeriod) queryParts.push(`traded ${tradeUI.timePeriod}`);
-      const queryText = queryParts.join(' ');
-
-      // Build filter object for TradeQueryCard
-      const filters = advancedData.filters || {};
-      const cardFilters = {
-        fromDate: filters.fromDate,
-        toDate: filters.toDate,
-        symbol: filters.symbol || symbol,
-        securityType: filters.securityType === 'O' ? 'Option' : filters.securityType === 'S' ? 'Stock' : undefined,
-        tradeType: filters.tradeType === 'S' ? 'Sell' : filters.tradeType === 'B' ? 'Buy' : undefined,
-        callPut: filters.callPut === 'C' ? 'Call' : filters.callPut === 'P' ? 'Put' : undefined,
-        strike: filters.strike,
-        expiration: filters.expiration,
-      };
-
       return (
         <div style={{ marginTop: '12px' }}>
           {advancedData.trades && advancedData.trades.length > 0 && (
@@ -3339,11 +3408,22 @@ const UnifiedAssistant: React.FC = () => {
           callCount: number;
           putCount: number;
         };
+        filters?: {
+          symbol?: string;
+          securityType?: string;
+          tradeType?: string;
+          callPut?: string;
+          fromDate?: string;
+          toDate?: string;
+          expiration?: string;
+          strike?: number;
+        };
       };
 
       console.log('🎨 premiumData.aggregations:', premiumData.aggregations);
       console.log('🎨 Will render card:', !!premiumData.aggregations);
       if (premiumData.aggregations) {
+        const displayTimePeriod = tradeUI.timePeriod || 'all time';
         return (
           <div style={{ marginTop: '12px' }}>
             <TotalPremiumCard
@@ -3353,8 +3433,8 @@ const UnifiedAssistant: React.FC = () => {
               totalContracts={premiumData.aggregations.totalContracts}
               callCount={premiumData.aggregations.callCount}
               putCount={premiumData.aggregations.putCount}
-              tradeType={tradeUI.tradeType || 'buy'}
-              timePeriod={tradeUI.timePeriod || 'last 12 months'}
+              tradeType={tradeUI.tradeType || 'all'}
+              timePeriod={displayTimePeriod}
             />
           </div>
         );
@@ -3384,6 +3464,16 @@ const UnifiedAssistant: React.FC = () => {
           callCount?: number;
           putCount?: number;
           totalContracts?: number;
+        };
+        filters?: {
+          symbol?: string;
+          securityType?: string;
+          tradeType?: string;
+          callPut?: string;
+          fromDate?: string;
+          toDate?: string;
+          expiration?: string;
+          strike?: number;
         };
       };
 
@@ -3429,36 +3519,21 @@ const UnifiedAssistant: React.FC = () => {
           callCount: number;
           putCount: number;
         };
+        filters?: {
+          symbol?: string;
+          securityType?: string;
+          tradeType?: string;
+          callPut?: string;
+          fromDate?: string;
+          toDate?: string;
+          expiration?: string;
+          strike?: number;
+        };
       };
 
       if (lastOptionData.trades && lastOptionData.trades.length > 0) {
-        // If multiple trades, use BulkOptionsCard for aggregate view
-        if (lastOptionData.trades.length > 1 || (lastOptionData.aggregations && lastOptionData.aggregations.totalTrades > 1)) {
-          const trade = lastOptionData.trades[0];
-          const isCall = trade['Call/Put'] === 'C';
-          const isBuy = trade.TradeType === 'B';
-          const displaySymbol = trade.UnderlyingSymbol || trade.Symbol;
-
-          return (
-            <div style={{ marginTop: '12px' }}>
-              <BulkOptionsCard
-                trades={lastOptionData.trades}
-                symbol={displaySymbol}
-                callPut={isCall ? 'call' : 'put'}
-                tradeType={isBuy ? 'buy' : 'sell'}
-                aggregations={{
-                  totalTrades: lastOptionData.aggregations?.totalTrades || lastOptionData.trades.length,
-                  totalPremium: lastOptionData.aggregations?.totalPremium || 0,
-                  totalContracts: lastOptionData.aggregations?.totalContracts,
-                  callCount: lastOptionData.aggregations?.callCount || 0,
-                  putCount: lastOptionData.aggregations?.putCount || 0,
-                }}
-              />
-            </div>
-          );
-        }
-
-        // Single trade - use LastOptionTradeCard
+        // ALWAYS show single trade card for 'last-option' type - user asked for THE last trade
+        // Take only the first (most recent) trade regardless of how many are in the response
         const trade = lastOptionData.trades[0];
         const isCall = trade['Call/Put'] === 'C';
         const isBuy = trade.TradeType === 'B';

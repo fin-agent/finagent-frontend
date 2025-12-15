@@ -4,31 +4,26 @@ import { parseTimeExpression } from '@/src/lib/date-parser';
 import { getDateOffset } from '@/src/lib/date-utils';
 import { calculateRealizedMatchesFIFO, filterProfitableTrades } from '@/src/lib/profitable-trades';
 
-// Format date WITHOUT timezone conversion - parse YYYY-MM-DD directly
-// This avoids the issue where new Date('2025-09-09') is interpreted as UTC
-// and then shifted when formatted, causing 1-day discrepancies
+// Format date in PACIFIC TIMEZONE to match UI display
+// The UI renders dates in the user's browser (typically Pacific time)
+// Database stores dates as YYYY-MM-DD which JS interprets as UTC midnight
+// UTC midnight = previous day evening in Pacific, so we need Pacific formatting
 function formatDateForVoice(dateStr: string): string {
   if (!dateStr) return 'N/A';
 
-  // Extract YYYY-MM-DD part (ignore any time component)
+  // Extract YYYY-MM-DD part and interpret as UTC midnight
   const datePart = dateStr.split('T')[0];
-  const parts = datePart.split('-');
+  const date = new Date(datePart + 'T00:00:00Z');
 
-  if (parts.length === 3) {
-    const year = parseInt(parts[0]);
-    const month = parseInt(parts[1]);
-    const day = parseInt(parts[2]);
+  if (isNaN(date.getTime())) return dateStr;
 
-    const months = ['January', 'February', 'March', 'April', 'May', 'June',
-                    'July', 'August', 'September', 'October', 'November', 'December'];
-
-    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
-      return `${months[month - 1]} ${day}, ${year}`;
-    }
-  }
-
-  // Fallback: return original string if parsing fails
-  return dateStr;
+  // Format in Pacific timezone to match browser display
+  return date.toLocaleDateString('en-US', {
+    timeZone: 'America/Los_Angeles',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric'
+  });
 }
 
 // Initialize Supabase client

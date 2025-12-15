@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Clock, Calendar, Target, DollarSign, Layers, TrendingUp, TrendingDown } from 'lucide-react';
+import { Clock, Calendar, Target, DollarSign, Layers } from 'lucide-react';
 
 interface LastOptionTradeCardProps {
   symbol: string;
@@ -28,33 +28,35 @@ const formatCurrency = (value: number) => {
 const formatDate = (dateStr: string) => {
   const date = new Date(dateStr);
   return date.toLocaleDateString('en-US', {
-    weekday: 'short',
     month: 'short',
     day: 'numeric',
-    year: 'numeric'
   });
 };
 
-// Terminal Luxe color palette with cyan accent for "recent/time" theme
-const colors = {
-  bgVoid: '#000000',
-  bgSurface: '#0a0a0a',
-  bgElevated: '#141414',
-  bgCard: '#1a1a1a',
-  bgHeader: '#1f1f1f',
-  border: '#2a2a2a',
-  borderAccent: '#333333',
+// Terminal Luxe color palette
+const palette = {
+  void: '#000000',
+  surface: '#050505',
+  elevated: '#0a0a0a',
+  card: '#0f0f0f',
+  border: '#1a1a1a',
+  borderLight: '#252525',
   textPrimary: '#ffffff',
-  textSecondary: '#8c8c8e',
-  textMuted: '#5a5a5c',
-  accent: '#00c806',
+  textSecondary: '#a0a0a0',
+  textMuted: '#606060',
+  textDim: '#404040',
+  profit: '#00ff88',
+  profitDim: 'rgba(0, 255, 136, 0.08)',
+  profitGlow: 'rgba(0, 255, 136, 0.4)',
+  loss: '#ff4466',
+  lossDim: 'rgba(255, 68, 102, 0.08)',
+  call: '#00d4ff',
+  callDim: 'rgba(0, 212, 255, 0.12)',
+  put: '#ff66b2',
+  putDim: 'rgba(255, 102, 178, 0.12)',
   cyan: '#06b6d4',
-  cyanDim: 'rgba(6, 182, 212, 0.15)',
+  cyanDim: 'rgba(6, 182, 212, 0.12)',
   cyanGlow: 'rgba(6, 182, 212, 0.4)',
-  buy: '#00c806',
-  sell: '#ff5252',
-  call: '#4da6ff',
-  put: '#ffa64d',
 };
 
 export function LastOptionTradeCard({
@@ -67,321 +69,188 @@ export function LastOptionTradeCard({
   contracts,
   premium,
   totalValue,
-  totalTrades,
-  avgPremium,
 }: LastOptionTradeCardProps) {
   const isBuy = tradeType === 'buy';
   const isCall = callPut === 'Call';
-  const actionLabel = isBuy ? 'Bought' : 'Sold';
+  const shares = contracts * 100;
 
-  const styles: Record<string, React.CSSProperties> = {
-    container: {
-      backgroundColor: colors.bgCard,
-      borderRadius: '16px',
-      border: `1px solid ${colors.border}`,
+  // Dynamic colors based on trade type
+  const accentColor = isBuy ? palette.loss : palette.profit;
+  const accentGlow = isBuy ? 'rgba(255, 68, 102, 0.3)' : palette.profitGlow;
+  const typeColor = isCall ? palette.call : palette.put;
+  const typeDim = isCall ? palette.callDim : palette.putDim;
+
+  return (
+    <div style={{
+      background: `linear-gradient(180deg, ${palette.card} 0%, ${palette.void} 100%)`,
+      borderRadius: '20px',
+      border: `1px solid ${palette.border}`,
       overflow: 'hidden',
       marginTop: '12px',
       marginBottom: '12px',
-      boxShadow: '0 4px 24px rgba(0, 0, 0, 0.4)',
+      boxShadow: `0 16px 32px -8px rgba(0, 0, 0, 0.6), 0 0 0 1px ${palette.border}`,
+      fontFamily: '"JetBrains Mono", "SF Mono", "Fira Code", monospace',
       position: 'relative',
-    },
-    glowAccent: {
-      position: 'absolute',
-      top: 0,
-      left: 0,
-      right: 0,
-      height: '3px',
-      background: `linear-gradient(90deg, ${colors.cyan}, #22d3ee, ${colors.cyan})`,
-      boxShadow: `0 0 20px ${colors.cyanGlow}`,
-    },
-    header: {
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      padding: '20px 24px',
-      background: `linear-gradient(135deg, ${colors.bgHeader} 0%, ${colors.bgElevated} 100%)`,
-      borderBottom: `1px solid ${colors.border}`,
-    },
-    headerLeft: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '16px',
-    },
-    iconContainer: {
-      width: '52px',
-      height: '52px',
-      borderRadius: '14px',
-      background: `linear-gradient(135deg, ${colors.cyan} 0%, #0891b2 100%)`,
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      boxShadow: `0 4px 16px ${colors.cyanGlow}`,
-    },
-    headerText: {
-      display: 'flex',
-      flexDirection: 'column' as const,
-      gap: '4px',
-    },
-    title: {
-      fontFamily: '"JetBrains Mono", monospace',
-      fontSize: '16px',
-      fontWeight: 600,
-      color: colors.textPrimary,
-      letterSpacing: '-0.3px',
-    },
-    subtitle: {
-      fontSize: '13px',
-      color: colors.textMuted,
-      display: 'flex',
-      alignItems: 'center',
-      gap: '6px',
-    },
-    badges: {
-      display: 'flex',
-      gap: '8px',
-    },
-    badge: {
-      padding: '6px 12px',
-      borderRadius: '8px',
-      fontSize: '12px',
-      fontWeight: 600,
-      fontFamily: '"JetBrains Mono", monospace',
-      textTransform: 'uppercase' as const,
-      letterSpacing: '0.5px',
-    },
-    buyBadge: {
-      backgroundColor: 'rgba(0, 200, 6, 0.15)',
-      color: colors.buy,
-      border: '1px solid rgba(0, 200, 6, 0.3)',
-    },
-    sellBadge: {
-      backgroundColor: 'rgba(255, 82, 82, 0.15)',
-      color: colors.sell,
-      border: '1px solid rgba(255, 82, 82, 0.3)',
-    },
-    callBadge: {
-      backgroundColor: 'rgba(77, 166, 255, 0.15)',
-      color: colors.call,
-      border: '1px solid rgba(77, 166, 255, 0.3)',
-    },
-    putBadge: {
-      backgroundColor: 'rgba(255, 166, 77, 0.15)',
-      color: colors.put,
-      border: '1px solid rgba(255, 166, 77, 0.3)',
-    },
-    heroSection: {
-      padding: '32px 24px',
-      background: `linear-gradient(180deg, ${colors.cyanDim} 0%, transparent 100%)`,
-      textAlign: 'center' as const,
-      borderBottom: `1px solid ${colors.border}`,
-    },
-    heroLabel: {
-      fontSize: '12px',
-      color: colors.textMuted,
-      textTransform: 'uppercase' as const,
-      letterSpacing: '1.5px',
-      marginBottom: '8px',
-      fontFamily: '"JetBrains Mono", monospace',
-    },
-    heroSymbol: {
-      fontFamily: '"JetBrains Mono", monospace',
-      fontSize: '36px',
-      fontWeight: 700,
-      color: colors.textPrimary,
-      letterSpacing: '-1px',
-      marginBottom: '4px',
-    },
-    heroStrike: {
-      fontFamily: '"JetBrains Mono", monospace',
-      fontSize: '28px',
-      fontWeight: 600,
-      color: colors.cyan,
-      textShadow: `0 0 30px ${colors.cyanGlow}`,
-    },
-    heroSubtext: {
-      fontSize: '14px',
-      color: colors.textSecondary,
-      marginTop: '12px',
-    },
-    detailsGrid: {
-      display: 'grid',
-      gridTemplateColumns: 'repeat(2, 1fr)',
-      gap: '1px',
-      backgroundColor: colors.border,
-    },
-    detailItem: {
-      backgroundColor: colors.bgCard,
-      padding: '20px',
-      display: 'flex',
-      flexDirection: 'column' as const,
-      gap: '8px',
-    },
-    detailLabel: {
-      fontSize: '11px',
-      color: colors.textMuted,
-      textTransform: 'uppercase' as const,
-      letterSpacing: '1px',
-      fontFamily: '"JetBrains Mono", monospace',
-      display: 'flex',
-      alignItems: 'center',
-      gap: '6px',
-    },
-    detailValue: {
-      fontFamily: '"JetBrains Mono", monospace',
-      fontSize: '16px',
-      fontWeight: 600,
-      color: colors.textPrimary,
-    },
-    totalSection: {
-      padding: '20px 24px',
-      background: `linear-gradient(135deg, ${colors.bgElevated} 0%, ${colors.bgCard} 100%)`,
-      display: 'flex',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      borderTop: `1px solid ${colors.border}`,
-    },
-    totalLabel: {
-      fontSize: '13px',
-      color: colors.textSecondary,
-      display: 'flex',
-      alignItems: 'center',
-      gap: '8px',
-    },
-    totalValue: {
-      fontFamily: '"JetBrains Mono", monospace',
-      fontSize: '22px',
-      fontWeight: 700,
-      color: isBuy ? colors.sell : colors.buy,
-    },
-    summaryBar: {
-      padding: '16px 24px',
-      backgroundColor: colors.bgElevated,
-      display: 'flex',
-      justifyContent: 'center',
-      gap: '24px',
-      borderTop: `1px solid ${colors.border}`,
-    },
-    summaryItem: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '8px',
-      fontSize: '13px',
-      color: colors.textSecondary,
-    },
-    summaryValue: {
-      fontFamily: '"JetBrains Mono", monospace',
-      fontWeight: 600,
-      color: colors.textPrimary,
-    },
-  };
+    }}>
+      {/* Compact Header + Hero Combined */}
+      <div style={{
+        padding: '16px 20px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '16px',
+        background: `radial-gradient(ellipse at left, ${palette.cyanDim} 0%, transparent 50%)`,
+      }}>
+        {/* Icon */}
+        <div style={{
+          width: '44px',
+          height: '44px',
+          borderRadius: '12px',
+          background: `linear-gradient(135deg, ${palette.cyan}20 0%, ${palette.cyan}05 100%)`,
+          border: `1px solid ${palette.cyan}30`,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
+        }}>
+          <Clock size={20} color={palette.cyan} strokeWidth={2} />
+        </div>
 
-  return (
-    <div style={styles.container}>
-      {/* Cyan glow accent for "recent" theme */}
-      <div style={styles.glowAccent} />
-
-      {/* Header */}
-      <div style={styles.header}>
-        <div style={styles.headerLeft}>
-          <div style={styles.iconContainer}>
-            <Clock size={26} color="#fff" strokeWidth={2.5} />
+        {/* Main Info */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '2px' }}>
+            <span style={{
+              fontSize: '9px',
+              fontWeight: 700,
+              color: palette.cyan,
+              textTransform: 'uppercase',
+              letterSpacing: '1.5px',
+            }}>
+              LAST {isCall ? 'CALL' : 'PUT'}
+            </span>
+            <span style={{
+              fontSize: '10px',
+              padding: '2px 6px',
+              borderRadius: '4px',
+              backgroundColor: isBuy ? palette.lossDim : palette.profitDim,
+              color: accentColor,
+              fontWeight: 600,
+            }}>
+              {isBuy ? 'BUY' : 'SELL'}
+            </span>
+            <span style={{
+              fontSize: '10px',
+              padding: '2px 6px',
+              borderRadius: '4px',
+              backgroundColor: typeDim,
+              color: typeColor,
+              fontWeight: 600,
+            }}>
+              {isCall ? 'C' : 'P'}
+            </span>
           </div>
-          <div style={styles.headerText}>
-            <div style={styles.title}>Most Recent {callPut} Option</div>
-            <div style={styles.subtitle}>
-              <Calendar size={12} />
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+            <span style={{
+              fontSize: '16px',
+              fontWeight: 700,
+              color: palette.textPrimary,
+            }}>
+              {symbol}
+            </span>
+            <span style={{
+              fontSize: '14px',
+              fontWeight: 600,
+              color: palette.cyan,
+            }}>
+              ${strike.toFixed(0)}
+            </span>
+            <span style={{
+              fontSize: '11px',
+              color: palette.textMuted,
+            }}>
               {formatDate(tradeDate)}
-            </div>
+            </span>
           </div>
         </div>
-        <div style={styles.badges}>
-          <span style={{
-            ...styles.badge,
-            ...(isBuy ? styles.buyBadge : styles.sellBadge),
+
+        {/* Total Value - Hero Number */}
+        <div style={{ textAlign: 'right', flexShrink: 0 }}>
+          <div style={{
+            fontSize: '9px',
+            color: palette.textMuted,
+            textTransform: 'uppercase',
+            letterSpacing: '1px',
+            marginBottom: '2px',
           }}>
-            {actionLabel}
-          </span>
-          <span style={{
-            ...styles.badge,
-            ...(isCall ? styles.callBadge : styles.putBadge),
+            {isBuy ? 'Paid' : 'Received'}
+          </div>
+          <div style={{
+            fontSize: '22px',
+            fontWeight: 800,
+            color: accentColor,
+            lineHeight: 1,
+            textShadow: `0 0 30px ${accentGlow}`,
           }}>
-            {callPut}
+            {isBuy ? '-' : '+'}{formatCurrency(Math.abs(totalValue))}
+          </div>
+        </div>
+      </div>
+
+      {/* Compact Stats Row */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '12px 20px',
+        borderTop: `1px solid ${palette.border}`,
+        background: palette.surface,
+        gap: '8px',
+        flexWrap: 'wrap',
+      }}>
+        {[
+          { icon: Layers, label: 'Contracts', value: contracts.toString() },
+          { icon: Target, label: 'Shares', value: shares.toLocaleString() },
+          { icon: Calendar, label: 'Expires', value: formatDate(expiration) },
+        ].map((stat) => (
+          <div key={stat.label} style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+          }}>
+            <stat.icon size={12} color={palette.textDim} />
+            <span style={{
+              fontSize: '13px',
+              fontWeight: 700,
+              color: palette.textPrimary,
+            }}>
+              {stat.value}
+            </span>
+            <span style={{
+              fontSize: '10px',
+              color: palette.textMuted,
+              textTransform: 'lowercase',
+            }}>
+              {stat.label}
+            </span>
+          </div>
+        ))}
+
+        {/* Premium Pill */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '4px',
+          padding: '4px 10px',
+          borderRadius: '100px',
+          background: palette.elevated,
+          border: `1px solid ${palette.border}`,
+        }}>
+          <DollarSign size={10} color={palette.textMuted} />
+          <span style={{ fontSize: '12px', fontWeight: 700, color: palette.textPrimary }}>
+            {formatCurrency(premium)}
           </span>
+          <span style={{ fontSize: '10px', color: palette.textMuted }}>/sh</span>
         </div>
       </div>
-
-      {/* Hero Section - Symbol & Strike */}
-      <div style={styles.heroSection}>
-        <div style={styles.heroLabel}>Latest Trade</div>
-        <div style={styles.heroSymbol}>{symbol}</div>
-        <div style={styles.heroStrike}>${strike.toFixed(2)} Strike</div>
-        <div style={styles.heroSubtext}>
-          {actionLabel} {contracts} contract{contracts !== 1 ? 's' : ''} @ {formatCurrency(premium)}/share
-        </div>
-      </div>
-
-      {/* Details Grid */}
-      <div style={styles.detailsGrid}>
-        <div style={styles.detailItem}>
-          <div style={styles.detailLabel}>
-            <Calendar size={12} color={colors.cyan} />
-            Expiration
-          </div>
-          <div style={styles.detailValue}>{formatDate(expiration)}</div>
-        </div>
-        <div style={styles.detailItem}>
-          <div style={styles.detailLabel}>
-            <Layers size={12} color={colors.cyan} />
-            Contracts
-          </div>
-          <div style={styles.detailValue}>{contracts}</div>
-          <div style={{ fontSize: '11px', color: colors.textMuted, marginTop: '2px' }}>
-            {(contracts * 100).toLocaleString()} shares
-          </div>
-        </div>
-        <div style={styles.detailItem}>
-          <div style={styles.detailLabel}>
-            <Target size={12} color={colors.cyan} />
-            Strike Price
-          </div>
-          <div style={styles.detailValue}>{formatCurrency(strike)}</div>
-        </div>
-        <div style={styles.detailItem}>
-          <div style={styles.detailLabel}>
-            <DollarSign size={12} color={colors.cyan} />
-            Premium/Share
-          </div>
-          <div style={styles.detailValue}>{formatCurrency(premium)}</div>
-          <div style={{ fontSize: '11px', color: colors.textMuted, marginTop: '2px' }}>
-            {formatCurrency(premium * 100)}/contract
-          </div>
-        </div>
-      </div>
-
-      {/* Total Value Section */}
-      <div style={styles.totalSection}>
-        <div style={styles.totalLabel}>
-          {isBuy ? <TrendingDown size={18} color={colors.sell} /> : <TrendingUp size={18} color={colors.buy} />}
-          Total {isBuy ? 'Paid' : 'Received'}
-        </div>
-        <div style={styles.totalValue}>
-          {isBuy ? '-' : '+'}{formatCurrency(Math.abs(totalValue))}
-        </div>
-      </div>
-
-      {/* Summary Bar (if multiple trades) */}
-      {totalTrades && totalTrades > 1 && (
-        <div style={styles.summaryBar}>
-          <div style={styles.summaryItem}>
-            Total Trades: <span style={styles.summaryValue}>{totalTrades}</span>
-          </div>
-          {avgPremium && (
-            <div style={styles.summaryItem}>
-              Avg Premium: <span style={styles.summaryValue}>{formatCurrency(avgPremium)}</span>
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }

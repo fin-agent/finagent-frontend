@@ -318,7 +318,7 @@ export async function POST(req: NextRequest) {
     const aggregations = {
       tradeCount: trades.length,
       totalTrades: trades.length,
-      totalPremium: totalGrossPremium,       // Gross premium (premium * contracts * 100)
+      totalPremium: totalNetAmount,           // Net amount after fees (matches ElevenLabs response)
       totalNetAmount,                         // Net amount after fees
       avgPremium: avgPremiumPerShare,          // Average premium per share
       totalQuantity: trades.reduce((sum, t) => {

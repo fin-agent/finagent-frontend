@@ -22,16 +22,6 @@ const formatCurrency = (value: number) => {
   }).format(value);
 };
 
-const formatLargeCurrency = (value: number) => {
-  if (value >= 1000000) {
-    return `$${(value / 1000000).toFixed(2)}M`;
-  }
-  if (value >= 1000) {
-    return `$${(value / 1000).toFixed(1)}K`;
-  }
-  return formatCurrency(value);
-};
-
 // Terminal Luxe color palette
 const colors = {
   bgVoid: '#000000',
@@ -275,7 +265,7 @@ export function TotalPremiumCard({
           Premium {actionLabel}
         </div>
         <div style={styles.heroValue}>
-          {formatLargeCurrency(totalPremium)}
+          {formatCurrency(totalPremium)}
         </div>
         <div style={styles.heroSubtext}>
           from {actionVerb.toLowerCase()} {totalTrades} option{totalTrades !== 1 ? 's' : ''}

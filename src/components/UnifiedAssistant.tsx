@@ -3230,10 +3230,6 @@ const UnifiedAssistant: React.FC = () => {
 
       return (
         <div style={{ marginTop: '12px' }}>
-          <TradeQueryCard
-            query={queryText}
-            filters={cardFilters}
-          />
           {advancedData.trades && advancedData.trades.length > 0 && (
             <BulkOptionsCard
               trades={advancedData.trades}

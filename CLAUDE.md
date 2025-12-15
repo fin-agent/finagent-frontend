@@ -110,6 +110,7 @@ User Query → /api/classify-intent → Azure OpenAI GPT-5.2 → { intent, confi
 - Endpoint format: `https://<resource>.openai.azure.com/openai/deployments/<deployment>/chat/completions?api-version=2024-10-21`
 - Prioritizes `AZURE_EXISTING_AIPROJECT_ENDPOINT` over `AZURE_OPENAI_ENDPOINT` (the former uses the standard openai.azure.com format)
 - API key passed via `api-key` header
+- **Environment Priority**: Classifier reads `.env.local` directly to bypass conflicting shell environment variables (important when shell has different Azure credentials)
 
 **Key Files:**
 - `src/lib/intent-detection/classifier.ts` - Azure OpenAI API call with structured JSON output
@@ -210,7 +211,13 @@ Both support time period parameters: "today", "this week", "last month", "this y
 
 ### UI Component Styling
 
-Both `AccountSummary` and `FeesSummary` components use **inline React styles** (not Tailwind classes) for reliable rendering. This avoids Tailwind JIT compilation issues where classes stored in JavaScript variables aren't scanned.
+All generative UI components use **inline React styles** (not Tailwind classes) for reliable rendering. This avoids Tailwind JIT compilation issues where classes stored in JavaScript variables aren't scanned.
+
+**Terminal Luxe Design System** (BulkOptionsCard, TotalPremiumCard):
+- Dark void backgrounds (`#000000` to `#0f0f0f` gradients)
+- Accent colors: profit green (`#00ff88`), loss red (`#ff4466`), call blue (`#00d4ff`), put pink (`#ff66b2`)
+- Subtle glow effects on important metrics
+- Consistent border styling (`#1a1a1a`)
 
 **AccountSummary Tabular Layout:**
 - Uses `DataRow` component for label/value pairs with proper alignment
@@ -222,6 +229,13 @@ Both `AccountSummary` and `FeesSummary` components use **inline React styles** (
 - Fee type icons and accent colors per category
 - Hero amount display with gradient text
 - Recent activity breakdown section
+
+### Option Premium Calculations
+
+Advanced query UI uses **net amount** (after fees) for premium totals to match ElevenLabs voice responses:
+- `totalPremium` = sum of `NetAmount` fields (includes commission deductions)
+- `avgPremium` = average premium per share across trades
+- This ensures UI cards show the same values the voice agent speaks
 
 ## Environment Variables
 

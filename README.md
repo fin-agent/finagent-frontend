@@ -645,6 +645,23 @@ flowchart TD
 | `AccountSummary` | "cash balance", "buying power", "account equity", "margin" | Account balances, equity, buying power, margin status, position values (tabular layout) |
 | `FeesSummary` | "commission", "fees", "interest" | Trading commissions, credit/debit interest, locate fees with breakdown |
 
+### Terminal Luxe Design System
+
+All generative UI components use a consistent dark theme design system:
+
+| Element | Color |
+|---------|-------|
+| Void background | `#000000` |
+| Card background | `#0f0f0f` |
+| Border | `#1a1a1a` |
+| Profit/Positive | `#00ff88` |
+| Loss/Negative | `#ff4466` |
+| Call options | `#00d4ff` |
+| Put options | `#ff66b2` |
+| Gold accent | `#ffd700` |
+
+Components use inline React styles rather than Tailwind to avoid JIT compilation issues with dynamically generated class names.
+
 ---
 
 ## API Routes
@@ -888,6 +905,8 @@ AZURE_OPENAI_API_KEY=<key>
 AZURE_OPENAI_MODEL=gpt-5.2
 ```
 
+**Note:** The classifier reads `.env.local` directly to bypass any conflicting shell environment variables. This is important when the shell has different Azure credentials (e.g., for other AI tools).
+
 ---
 
 ## Project Structure
@@ -1057,7 +1076,7 @@ curl -X POST http://localhost:3000/api/elevenlabs/detailed-trades \
 | Category | Technology |
 |----------|-----------|
 | **Frontend** | Next.js 15, React 19, TypeScript |
-| **Styling** | Inline styles (dark theme) |
+| **Styling** | Inline React styles (Terminal Luxe dark theme) |
 | **Backend** | Next.js API Routes |
 | **Database** | Supabase PostgreSQL |
 | **Voice AI** | ElevenLabs Conversational AI |

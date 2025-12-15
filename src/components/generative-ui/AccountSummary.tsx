@@ -56,16 +56,8 @@ const colors = {
   white: '#ffffff',
 };
 
-const formatCurrency = (value: number | undefined, compact = false) => {
+const formatCurrency = (value: number | undefined) => {
   if (value === undefined || value === null) return '—';
-  if (compact && Math.abs(value) >= 1000) {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      notation: 'compact',
-      maximumFractionDigits: 1,
-    }).format(value);
-  }
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',

@@ -4,25 +4,62 @@
 import { buildDeveloperPrompt } from './prompt';
 import { intentRegistry } from './intents/registry';
 import type { ClassificationResult, ExtractedEntities, GPTClassificationResponse } from './types';
+import * as dotenv from 'dotenv';
+import * as fs from 'fs';
+import * as path from 'path';
 
-const deploymentName = process.env.AZURE_OPENAI_MODEL || 'gpt-5.2';
-const apiVersion = process.env.AZURE_OPENAI_API_VERSION || '2024-10-21';
+// Load .env.local explicitly to override any shell environment variables
+// This is critical because shell env vars (for codex-cli) can override .env.local values
+let envLocalConfig: Record<string, string> = {};
+
+function loadEnvLocal(): Record<string, string> {
+  if (Object.keys(envLocalConfig).length > 0) return envLocalConfig;
+
+  try {
+    const envLocalPath = path.resolve(process.cwd(), '.env.local');
+    if (fs.existsSync(envLocalPath)) {
+      const envContent = fs.readFileSync(envLocalPath, 'utf-8');
+      const parsed = dotenv.parse(envContent);
+      envLocalConfig = parsed;
+      console.log('🔧 [LLM Classifier] Loaded .env.local directly (bypassing shell env vars)');
+    }
+  } catch (error) {
+    console.warn('⚠️ [LLM Classifier] Could not load .env.local:', error);
+  }
+  return envLocalConfig;
+}
+
+// Get env var with priority: .env.local > process.env
+function getEnvVar(key: string, defaultValue: string = ''): string {
+  const envLocal = loadEnvLocal();
+  // Prioritize .env.local over shell environment variables
+  return envLocal[key]?.trim() || process.env[key]?.trim() || defaultValue;
+}
+
+function getDeploymentName(): string {
+  return getEnvVar('AZURE_OPENAI_MODEL', 'gpt-5.2');
+}
+
+function getApiVersion(): string {
+  return getEnvVar('AZURE_OPENAI_API_VERSION', '2024-10-21');
+}
 
 function getApiKey(): string {
-  return process.env.AZURE_OPENAI_API_KEY?.trim() || '';
+  return getEnvVar('AZURE_OPENAI_API_KEY');
 }
 
 // Cache the Azure config
-let cachedConfig: { baseURL: string; rawEndpoint: string } | null = null;
+let cachedConfig: { baseURL: string; rawEndpoint: string; deploymentName: string } | null = null;
 
-function getAzureConfig(): { baseURL: string; rawEndpoint: string } {
+function getAzureConfig(): { baseURL: string; rawEndpoint: string; deploymentName: string } {
   if (cachedConfig) return cachedConfig;
+
+  const deploymentName = getDeploymentName();
 
   // Prioritize AZURE_EXISTING_AIPROJECT_ENDPOINT (openai.azure.com) which works with the API key
   const rawEndpoint =
-    process.env.AZURE_EXISTING_AIPROJECT_ENDPOINT?.trim() ||
-    process.env.AZURE_OPENAI_ENDPOINT?.trim() ||
-    '';
+    getEnvVar('AZURE_EXISTING_AIPROJECT_ENDPOINT') ||
+    getEnvVar('AZURE_OPENAI_ENDPOINT');
 
   if (!rawEndpoint) {
     throw new Error('Missing AZURE_OPENAI_ENDPOINT or AZURE_EXISTING_AIPROJECT_ENDPOINT');
@@ -37,7 +74,7 @@ function getAzureConfig(): { baseURL: string; rawEndpoint: string } {
     const url = new URL(rawEndpoint);
     // Azure OpenAI URL format: https://<resource>.openai.azure.com/openai/deployments/<deployment>
     const baseURL = `${url.origin}/openai/deployments/${deploymentName}`;
-    cachedConfig = { baseURL, rawEndpoint };
+    cachedConfig = { baseURL, rawEndpoint, deploymentName };
     return cachedConfig;
   } catch {
     throw new Error(`Invalid endpoint URL: "${rawEndpoint}"`);
@@ -56,12 +93,13 @@ function getDeveloperPrompt(): string {
 
 export async function classifyIntent(userQuery: string): Promise<ClassificationResult | null> {
   try {
-    const { rawEndpoint, baseURL } = getAzureConfig();
+    const { rawEndpoint, baseURL, deploymentName } = getAzureConfig();
     const apiKey = getApiKey();
+    const apiVersion = getApiVersion();
 
     console.log('🤖 [LLM Classifier] ================================');
     console.log('🤖 [LLM Classifier] Query:', userQuery);
-    console.log('🤖 [LLM Classifier] Raw endpoint:', rawEndpoint || '(not set)');
+    console.log('🤖 [LLM Classifier] Raw endpoint (from .env.local):', rawEndpoint || '(not set)');
     console.log('🤖 [LLM Classifier] Base URL:', baseURL);
     console.log('🤖 [LLM Classifier] Model/Deployment:', deploymentName);
     console.log('🤖 [LLM Classifier] API Version:', apiVersion);
@@ -109,6 +147,7 @@ export async function classifyIntent(userQuery: string): Promise<ClassificationR
       return null;
     }
 
+    console.log('🤖 [LLM Classifier] Raw response content:', content);
     const result = JSON.parse(content) as GPTClassificationResponse;
 
     console.log(`[Intent Classifier] Query: "${userQuery.substring(0, 50)}..." -> Intent: ${result.intent} (${(result.confidence * 100).toFixed(0)}% conf) [${elapsed}ms]`);

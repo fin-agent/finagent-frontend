@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Clock, ArrowUpRight, ArrowDownRight, Flame, ChevronLeft, ChevronRight } from 'lucide-react';
-import { getOptionPremiumUSD, safeParseNumber } from '@/src/lib/trade-math';
+import { Clock, ArrowUpRight, ArrowDownRight, Flame, ChevronLeft, ChevronRight, Layers, Target, BarChart3 } from 'lucide-react';
+import { safeParseNumber } from '@/src/lib/trade-math';
 
 interface ExpiringOption {
   TradeID: number;
@@ -20,7 +20,7 @@ interface ExpiringOption {
 
 interface ExpiringOptionsTableProps {
   trades: ExpiringOption[];
-  expirationPeriod: string; // "tomorrow", "this week", "this month"
+  expirationPeriod: string;
   aggregations?: {
     tradeCount?: number;
     totalPremium?: number;
@@ -47,11 +47,7 @@ const formatDate = (dateStr: string) => {
   });
 };
 
-// Parse OCC option symbol to extract underlying ticker
-// Format: AAPL251121P00175000 -> AAPL
 const parseOptionSymbol = (symbol: string): string => {
-  // OCC format: 1-6 char ticker + 6 digit date + C/P + 8 digit strike
-  // Match letters at the start (the ticker)
   const match = symbol.match(/^([A-Z]+)/);
   if (match) {
     return match[1];
@@ -59,7 +55,6 @@ const parseOptionSymbol = (symbol: string): string => {
   return symbol;
 };
 
-// Calculate days until expiration
 const getDaysUntil = (expirationStr: string): number => {
   const exp = new Date(expirationStr);
   const today = new Date();
@@ -69,26 +64,31 @@ const getDaysUntil = (expirationStr: string): number => {
   return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 };
 
-// Terminal Luxe color palette with urgency indicators
-const colors = {
-  bgVoid: '#000000',
-  bgSurface: '#0a0a0a',
-  bgElevated: '#141414',
-  bgCard: '#1a1a1a',
-  bgHeader: '#1f1f1f',
-  border: '#2a2a2a',
+// Terminal Luxe color palette
+const palette = {
+  void: '#000000',
+  surface: '#050505',
+  elevated: '#0a0a0a',
+  card: '#0f0f0f',
+  border: '#1a1a1a',
   textPrimary: '#ffffff',
-  textSecondary: '#8c8c8e',
-  textMuted: '#5a5a5c',
-  accent: '#00c806',
+  textSecondary: '#a0a0a0',
+  textMuted: '#606060',
+  textDim: '#404040',
+  profit: '#00ff88',
+  profitDim: 'rgba(0, 255, 136, 0.08)',
+  loss: '#ff4466',
+  lossDim: 'rgba(255, 68, 102, 0.08)',
+  call: '#00d4ff',
+  callDim: 'rgba(0, 212, 255, 0.12)',
+  put: '#ff66b2',
+  putDim: 'rgba(255, 102, 178, 0.12)',
   urgent: '#ff5252',
-  urgentDim: 'rgba(255, 82, 82, 0.15)',
+  urgentDim: 'rgba(255, 82, 82, 0.12)',
+  urgentGlow: 'rgba(255, 82, 82, 0.4)',
   warning: '#ffa64d',
-  warningDim: 'rgba(255, 166, 77, 0.15)',
-  buy: '#00c806',
-  sell: '#ff5252',
-  call: '#4da6ff',
-  put: '#ffa64d',
+  warningDim: 'rgba(255, 166, 77, 0.12)',
+  warningGlow: 'rgba(255, 166, 77, 0.4)',
 };
 
 const ITEMS_PER_PAGE = 10;
@@ -100,403 +100,413 @@ export function ExpiringOptionsTable({
 }: ExpiringOptionsTableProps) {
   const [currentPage, setCurrentPage] = useState(1);
   const isUrgent = expirationPeriod.toLowerCase() === 'tomorrow';
-  const accentColor = isUrgent ? colors.urgent : colors.warning;
 
-  // Pagination calculations
+  // Dynamic colors based on urgency
+  const accentColor = isUrgent ? palette.urgent : palette.warning;
+  const accentDim = isUrgent ? palette.urgentDim : palette.warningDim;
+  const accentGlow = isUrgent ? palette.urgentGlow : palette.warningGlow;
+
+  // Pagination
   const totalPages = Math.ceil(trades.length / ITEMS_PER_PAGE);
   const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
   const endIndex = startIndex + ITEMS_PER_PAGE;
   const currentTrades = trades.slice(startIndex, endIndex);
 
-  // Calculate aggregations from trades if not provided
+  // Calculate aggregations - use NetAmount for consistency
   const aggregations = {
     tradeCount: externalAggregations?.tradeCount ?? trades.length,
     totalPremium: externalAggregations?.totalPremium ?? trades.reduce((sum, trade) => {
-      const premiumUSD = getOptionPremiumUSD(trade);
-      return sum + (premiumUSD || Math.abs(safeParseNumber(trade.NetAmount)));
+      return sum + Math.abs(safeParseNumber(trade.NetAmount));
     }, 0),
     callCount: externalAggregations?.callCount ?? trades.filter(t => t['Call/Put'] === 'C').length,
     putCount: externalAggregations?.putCount ?? trades.filter(t => t['Call/Put'] === 'P').length,
     totalContracts: externalAggregations?.totalContracts ?? trades.reduce((sum, trade) => sum + safeParseNumber(trade.OptionContracts), 0),
   };
 
-  const styles: Record<string, React.CSSProperties> = {
-    container: {
-      backgroundColor: colors.bgCard,
-      borderRadius: '16px',
-      border: `1px solid ${colors.border}`,
-      overflow: 'hidden',
-      marginTop: '12px',
-      marginBottom: '12px',
-      boxShadow: '0 4px 24px rgba(0, 0, 0, 0.4)',
-      position: 'relative',
-    },
-    urgentBar: {
-      position: 'absolute',
-      top: 0,
-      left: 0,
-      right: 0,
-      height: '3px',
-      background: isUrgent
-        ? `linear-gradient(90deg, ${colors.urgent}, #ff7070, ${colors.urgent})`
-        : `linear-gradient(90deg, ${colors.warning}, #ffcc70, ${colors.warning})`,
-      animation: isUrgent ? 'pulse 2s infinite' : 'none',
-    },
-    header: {
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      padding: '18px 24px',
-      background: `linear-gradient(135deg, ${colors.bgHeader} 0%, ${colors.bgElevated} 100%)`,
-      borderBottom: `1px solid ${colors.border}`,
-    },
-    headerLeft: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '14px',
-    },
-    iconWrapper: {
-      width: '44px',
-      height: '44px',
-      borderRadius: '12px',
-      background: isUrgent
-        ? `linear-gradient(135deg, ${colors.urgent} 0%, #cc4141 100%)`
-        : `linear-gradient(135deg, ${colors.warning} 0%, #cc8541 100%)`,
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      boxShadow: isUrgent
-        ? '0 4px 16px rgba(255, 82, 82, 0.4)'
-        : '0 4px 16px rgba(255, 166, 77, 0.4)',
-      animation: isUrgent ? 'glow 2s infinite' : 'none',
-    },
-    headerText: {
-      display: 'flex',
-      flexDirection: 'column',
-      gap: '2px',
-    },
-    headerTitle: {
-      fontFamily: '"JetBrains Mono", monospace',
-      fontSize: '16px',
-      fontWeight: 700,
-      color: colors.textPrimary,
-      display: 'flex',
-      alignItems: 'center',
-      gap: '8px',
-    },
-    headerSubtitle: {
-      fontSize: '12px',
-      color: colors.textMuted,
-    },
-    urgentBadge: {
-      fontFamily: '"JetBrains Mono", monospace',
-      fontSize: '10px',
-      fontWeight: 700,
-      padding: '4px 10px',
-      borderRadius: '6px',
-      backgroundColor: colors.urgentDim,
-      color: colors.urgent,
-      textTransform: 'uppercase',
-      letterSpacing: '0.5px',
-      display: 'flex',
-      alignItems: 'center',
-      gap: '4px',
-    },
-    countBadge: {
-      fontFamily: '"JetBrains Mono", monospace',
-      fontSize: '24px',
-      fontWeight: 800,
-      color: accentColor,
-      display: 'flex',
-      alignItems: 'baseline',
-      gap: '4px',
-    },
-    countLabel: {
-      fontSize: '12px',
-      fontWeight: 600,
-      color: colors.textMuted,
-    },
-    summaryBar: {
-      display: 'grid',
-      gridTemplateColumns: 'repeat(4, 1fr)',
-      gap: '1px',
-      backgroundColor: colors.border,
-      borderBottom: `1px solid ${colors.border}`,
-    },
-    summaryItem: {
-      padding: '14px 12px',
-      backgroundColor: colors.bgElevated,
-      textAlign: 'center',
-    },
-    summaryLabel: {
-      fontFamily: '"JetBrains Mono", monospace',
-      fontSize: '9px',
-      fontWeight: 600,
-      color: colors.textMuted,
-      textTransform: 'uppercase',
-      letterSpacing: '0.8px',
-      marginBottom: '6px',
-    },
-    summaryValue: {
-      fontFamily: '"JetBrains Mono", monospace',
-      fontSize: '15px',
-      fontWeight: 700,
-      color: colors.textPrimary,
-    },
-    tableWrapper: {
-      overflowX: 'auto',
-      WebkitOverflowScrolling: 'touch',
-    },
-    table: {
-      width: '100%',
-      borderCollapse: 'collapse',
-      fontSize: '13px',
-    },
-    th: {
-      padding: '12px 14px',
-      textAlign: 'left',
-      fontFamily: '"JetBrains Mono", monospace',
-      fontSize: '10px',
-      fontWeight: 600,
-      color: colors.textMuted,
-      textTransform: 'uppercase',
-      letterSpacing: '0.5px',
-      borderBottom: `1px solid ${colors.border}`,
-      backgroundColor: colors.bgSurface,
-      whiteSpace: 'nowrap',
-    },
-    td: {
-      padding: '14px 14px',
-      borderBottom: `1px solid ${colors.border}`,
-      color: colors.textPrimary,
-      whiteSpace: 'nowrap',
-      fontFamily: '"JetBrains Mono", monospace',
-      fontSize: '13px',
-    },
-    expirationCell: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '8px',
-    },
-    daysIndicator: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '4px',
-      fontSize: '11px',
-      fontWeight: 600,
-      padding: '3px 8px',
-      borderRadius: '6px',
-    },
-    badge: {
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: '4px',
-      fontSize: '11px',
-      fontWeight: 600,
-      padding: '4px 8px',
-      borderRadius: '6px',
-    },
-    strikePill: {
-      fontFamily: '"JetBrains Mono", monospace',
-      fontSize: '12px',
-      fontWeight: 600,
-      padding: '4px 10px',
-      borderRadius: '8px',
-      backgroundColor: colors.bgHeader,
-      color: colors.textPrimary,
-      border: `1px solid ${colors.border}`,
-    },
-    emptyState: {
-      padding: '48px 24px',
-      textAlign: 'center',
-      color: colors.textMuted,
-    },
-    emptyIcon: {
-      width: '56px',
-      height: '56px',
-      borderRadius: '14px',
-      backgroundColor: colors.bgHeader,
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      margin: '0 auto 16px',
-    },
-  };
-
   if (trades.length === 0) {
     return (
-      <div style={styles.container}>
-        <div style={styles.urgentBar} />
-        <div style={styles.header}>
-          <div style={styles.headerLeft}>
-            <div style={styles.iconWrapper}>
-              <Clock size={22} color="#fff" strokeWidth={2} />
+      <div style={{
+        background: `linear-gradient(180deg, ${palette.card} 0%, ${palette.void} 100%)`,
+        borderRadius: '20px',
+        border: `1px solid ${palette.border}`,
+        overflow: 'hidden',
+        marginTop: '12px',
+        marginBottom: '12px',
+        boxShadow: `0 16px 32px -8px rgba(0, 0, 0, 0.6), 0 0 0 1px ${palette.border}`,
+        fontFamily: '"JetBrains Mono", "SF Mono", "Fira Code", monospace',
+      }}>
+        <div style={{
+          padding: '16px 20px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '16px',
+          background: `radial-gradient(ellipse at left, ${accentDim} 0%, transparent 50%)`,
+        }}>
+          <div style={{
+            width: '44px',
+            height: '44px',
+            borderRadius: '12px',
+            background: `linear-gradient(135deg, ${accentColor}20 0%, ${accentColor}05 100%)`,
+            border: `1px solid ${accentColor}30`,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0,
+          }}>
+            <Clock size={20} color={accentColor} strokeWidth={2} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{
+              fontSize: '9px',
+              fontWeight: 700,
+              color: accentColor,
+              textTransform: 'uppercase',
+              letterSpacing: '1.5px',
+              marginBottom: '2px',
+            }}>
+              EXPIRING {expirationPeriod.toUpperCase()}
             </div>
-            <div style={styles.headerText}>
-              <span style={styles.headerTitle}>
-                Options Expiring {expirationPeriod}
-              </span>
-              <span style={styles.headerSubtitle}>No options found</span>
+            <div style={{ fontSize: '14px', color: palette.textMuted }}>
+              No options found
             </div>
           </div>
-        </div>
-        <div style={styles.emptyState}>
-          <div style={styles.emptyIcon}>
-            <Clock size={28} color={colors.textMuted} />
-          </div>
-          <p style={{ margin: 0, fontSize: '15px', fontWeight: 500 }}>
-            No options expiring {expirationPeriod}
-          </p>
-          <p style={{ margin: '8px 0 0', fontSize: '12px' }}>
-            You don&apos;t have any open positions expiring in this period
-          </p>
         </div>
       </div>
     );
   }
 
   return (
-    <div style={styles.container}>
-      <div style={styles.urgentBar} />
+    <div style={{
+      background: `linear-gradient(180deg, ${palette.card} 0%, ${palette.void} 100%)`,
+      borderRadius: '20px',
+      border: `1px solid ${palette.border}`,
+      overflow: 'hidden',
+      marginTop: '12px',
+      marginBottom: '12px',
+      boxShadow: `0 16px 32px -8px rgba(0, 0, 0, 0.6), 0 0 0 1px ${palette.border}`,
+      fontFamily: '"JetBrains Mono", "SF Mono", "Fira Code", monospace',
+      position: 'relative',
+    }}>
+      {/* Urgent top bar */}
+      {isUrgent && (
+        <div style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          height: '2px',
+          background: `linear-gradient(90deg, ${palette.urgent}, ${palette.warning}, ${palette.urgent})`,
+        }} />
+      )}
 
-      {/* Header */}
-      <div style={styles.header}>
-        <div style={styles.headerLeft}>
-          <div style={styles.iconWrapper}>
-            {isUrgent ? (
-              <Flame size={22} color="#fff" strokeWidth={2} />
-            ) : (
-              <Clock size={22} color="#fff" strokeWidth={2} />
+      {/* Compact Header + Hero Combined */}
+      <div style={{
+        padding: '16px 20px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '16px',
+        background: `radial-gradient(ellipse at left, ${accentDim} 0%, transparent 50%)`,
+      }}>
+        {/* Icon */}
+        <div style={{
+          width: '44px',
+          height: '44px',
+          borderRadius: '12px',
+          background: `linear-gradient(135deg, ${accentColor}20 0%, ${accentColor}05 100%)`,
+          border: `1px solid ${accentColor}30`,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
+        }}>
+          {isUrgent ? (
+            <Flame size={20} color={accentColor} strokeWidth={2} />
+          ) : (
+            <Clock size={20} color={accentColor} strokeWidth={2} />
+          )}
+        </div>
+
+        {/* Main Info */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '2px' }}>
+            <span style={{
+              fontSize: '9px',
+              fontWeight: 700,
+              color: accentColor,
+              textTransform: 'uppercase',
+              letterSpacing: '1.5px',
+            }}>
+              EXPIRING {expirationPeriod.toUpperCase()}
+            </span>
+            {isUrgent && (
+              <span style={{
+                fontSize: '10px',
+                padding: '2px 6px',
+                borderRadius: '4px',
+                backgroundColor: palette.urgentDim,
+                color: palette.urgent,
+                fontWeight: 600,
+              }}>
+                URGENT
+              </span>
             )}
           </div>
-          <div style={styles.headerText}>
-            <span style={styles.headerTitle}>
-              Options Expiring {expirationPeriod}
-            </span>
-            <span style={styles.headerSubtitle}>
-              {aggregations.tradeCount} position{aggregations.tradeCount !== 1 ? 's' : ''} require attention
-            </span>
+          <div style={{
+            fontSize: '14px',
+            color: palette.textSecondary,
+          }}>
+            {aggregations.tradeCount} position{aggregations.tradeCount !== 1 ? 's' : ''} require attention
           </div>
         </div>
-        <div style={styles.countBadge}>
-          {aggregations.totalContracts}
-          <span style={styles.countLabel}>contracts</span>
+
+        {/* Total Contracts - Hero Number */}
+        <div style={{ textAlign: 'right', flexShrink: 0 }}>
+          <div style={{
+            fontSize: '9px',
+            color: palette.textMuted,
+            textTransform: 'uppercase',
+            letterSpacing: '1px',
+            marginBottom: '2px',
+          }}>
+            Contracts
+          </div>
+          <div style={{
+            fontSize: '24px',
+            fontWeight: 800,
+            color: accentColor,
+            lineHeight: 1,
+            textShadow: `0 0 30px ${accentGlow}`,
+          }}>
+            {aggregations.totalContracts}
+          </div>
         </div>
       </div>
 
-      {/* Summary Bar */}
-      <div style={styles.summaryBar}>
-        <div style={styles.summaryItem}>
-          <div style={styles.summaryLabel}>Positions</div>
-          <div style={styles.summaryValue}>{aggregations.tradeCount}</div>
-        </div>
-        <div style={styles.summaryItem}>
-          <div style={styles.summaryLabel}>Contracts</div>
-          <div style={styles.summaryValue}>{aggregations.totalContracts}</div>
-        </div>
-        <div style={styles.summaryItem}>
-          <div style={styles.summaryLabel}>Calls / Puts</div>
-          <div style={styles.summaryValue}>
-            <span style={{ color: colors.call }}>{aggregations.callCount}</span>
-            <span style={{ color: colors.textMuted }}> / </span>
-            <span style={{ color: colors.put }}>{aggregations.putCount}</span>
+      {/* Compact Stats Row */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '12px 20px',
+        borderTop: `1px solid ${palette.border}`,
+        background: palette.surface,
+        gap: '8px',
+        flexWrap: 'wrap',
+      }}>
+        {[
+          { icon: BarChart3, label: 'Positions', value: aggregations.tradeCount.toString() },
+          { icon: Layers, label: 'Contracts', value: aggregations.totalContracts.toString() },
+        ].map((stat) => (
+          <div key={stat.label} style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+          }}>
+            <stat.icon size={12} color={palette.textDim} />
+            <span style={{
+              fontSize: '13px',
+              fontWeight: 700,
+              color: palette.textPrimary,
+            }}>
+              {stat.value}
+            </span>
+            <span style={{
+              fontSize: '10px',
+              color: palette.textMuted,
+              textTransform: 'lowercase',
+            }}>
+              {stat.label}
+            </span>
+          </div>
+        ))}
+
+        {/* Call/Put breakdown */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+        }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+          }}>
+            <div style={{ width: '6px', height: '6px', borderRadius: '2px', backgroundColor: palette.call }} />
+            <span style={{ fontSize: '12px', fontWeight: 700, color: palette.call }}>{aggregations.callCount}</span>
+          </div>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+          }}>
+            <div style={{ width: '6px', height: '6px', borderRadius: '2px', backgroundColor: palette.put }} />
+            <span style={{ fontSize: '12px', fontWeight: 700, color: palette.put }}>{aggregations.putCount}</span>
           </div>
         </div>
-        <div style={styles.summaryItem}>
-          <div style={styles.summaryLabel}>Total Value</div>
-          <div style={{ ...styles.summaryValue, color: colors.accent }}>
+
+        {/* Total Value Pill */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '4px',
+          padding: '4px 10px',
+          borderRadius: '100px',
+          background: palette.elevated,
+          border: `1px solid ${palette.border}`,
+        }}>
+          <Target size={10} color={palette.textMuted} />
+          <span style={{ fontSize: '12px', fontWeight: 700, color: palette.profit }}>
             {formatCurrency(aggregations.totalPremium)}
-          </div>
+          </span>
         </div>
       </div>
 
-      {/* Table */}
-      <div style={styles.tableWrapper}>
-        <table style={styles.table}>
+      {/* Compact Table */}
+      <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
           <thead>
             <tr>
-              <th style={styles.th}>Symbol</th>
-              <th style={{ ...styles.th, textAlign: 'center' }}>Type</th>
-              <th style={{ ...styles.th, textAlign: 'center' }}>C/P</th>
-              <th style={{ ...styles.th, textAlign: 'right' }}>Strike</th>
-              <th style={styles.th}>Expiration</th>
-              <th style={{ ...styles.th, textAlign: 'right' }}>Contracts</th>
-              <th style={{ ...styles.th, textAlign: 'right' }}>Value</th>
+              {['SYMBOL', 'TYPE', 'C/P', 'STRIKE', 'EXPIRES', 'QTY', 'VALUE'].map((header) => (
+                <th key={header} style={{
+                  padding: '10px 12px',
+                  textAlign: header === 'VALUE' || header === 'QTY' || header === 'STRIKE' ? 'right' :
+                            header === 'TYPE' || header === 'C/P' ? 'center' : 'left',
+                  fontFamily: 'inherit',
+                  fontSize: '9px',
+                  fontWeight: 600,
+                  color: palette.textDim,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px',
+                  borderBottom: `1px solid ${palette.border}`,
+                  backgroundColor: palette.void,
+                  whiteSpace: 'nowrap',
+                }}>
+                  {header}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
             {currentTrades.map((trade, index) => {
-              const fallbackNetAmount = safeParseNumber(trade.NetAmount);
-              const premiumUSD = getOptionPremiumUSD(trade) || Math.abs(fallbackNetAmount);
+              const premiumUSD = Math.abs(safeParseNumber(trade.NetAmount));
               const contracts = safeParseNumber(trade.OptionContracts);
               const strike = safeParseNumber(trade.Strike);
               const isCall = trade['Call/Put'] === 'C';
               const isBuy = trade.TradeType === 'B';
               const daysUntil = trade.Expiration ? getDaysUntil(trade.Expiration) : null;
 
-              let daysColor = colors.textMuted;
-              let daysBg = colors.bgHeader;
+              let daysColor = palette.textMuted;
+              let daysBg = palette.elevated;
               if (daysUntil !== null) {
                 if (daysUntil <= 1) {
-                  daysColor = colors.urgent;
-                  daysBg = colors.urgentDim;
+                  daysColor = palette.urgent;
+                  daysBg = palette.urgentDim;
                 } else if (daysUntil <= 3) {
-                  daysColor = colors.warning;
-                  daysBg = colors.warningDim;
+                  daysColor = palette.warning;
+                  daysBg = palette.warningDim;
                 }
               }
 
               return (
                 <tr
                   key={trade.TradeID}
-                  style={{
-                    backgroundColor: index % 2 === 0 ? colors.bgCard : colors.bgElevated,
-                  }}
+                  style={{ backgroundColor: index % 2 === 0 ? palette.surface : palette.void }}
                 >
-                  <td style={{ ...styles.td, fontWeight: 600 }}>{parseOptionSymbol(trade.Symbol)}</td>
-                  <td style={{ ...styles.td, textAlign: 'center' }}>
+                  <td style={{
+                    padding: '10px 12px',
+                    borderBottom: `1px solid ${palette.border}`,
+                    fontWeight: 700,
+                    color: palette.textPrimary,
+                    whiteSpace: 'nowrap',
+                  }}>
+                    {parseOptionSymbol(trade.Symbol)}
+                  </td>
+                  <td style={{
+                    padding: '10px 12px',
+                    borderBottom: `1px solid ${palette.border}`,
+                    textAlign: 'center',
+                  }}>
                     <span style={{
-                      ...styles.badge,
-                      backgroundColor: isBuy ? 'rgba(0, 200, 6, 0.15)' : 'rgba(255, 82, 82, 0.15)',
-                      color: isBuy ? colors.buy : colors.sell,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '3px',
+                      fontSize: '10px',
+                      fontWeight: 600,
+                      padding: '3px 6px',
+                      borderRadius: '4px',
+                      backgroundColor: isBuy ? palette.lossDim : palette.profitDim,
+                      color: isBuy ? palette.loss : palette.profit,
                     }}>
-                      {isBuy ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
-                      {isBuy ? 'Long' : 'Short'}
+                      {isBuy ? <ArrowUpRight size={10} /> : <ArrowDownRight size={10} />}
+                      {isBuy ? 'L' : 'S'}
                     </span>
                   </td>
-                  <td style={{ ...styles.td, textAlign: 'center' }}>
+                  <td style={{
+                    padding: '10px 12px',
+                    borderBottom: `1px solid ${palette.border}`,
+                    textAlign: 'center',
+                  }}>
                     <span style={{
-                      ...styles.badge,
-                      backgroundColor: isCall ? 'rgba(77, 166, 255, 0.15)' : 'rgba(255, 166, 77, 0.15)',
-                      color: isCall ? colors.call : colors.put,
+                      fontSize: '10px',
+                      fontWeight: 600,
+                      padding: '3px 6px',
+                      borderRadius: '4px',
+                      backgroundColor: isCall ? palette.callDim : palette.putDim,
+                      color: isCall ? palette.call : palette.put,
                     }}>
-                      {isCall ? 'Call' : 'Put'}
+                      {isCall ? 'C' : 'P'}
                     </span>
                   </td>
-                  <td style={{ ...styles.td, textAlign: 'right' }}>
-                    <span style={styles.strikePill}>${strike.toFixed(0)}</span>
+                  <td style={{
+                    padding: '10px 12px',
+                    borderBottom: `1px solid ${palette.border}`,
+                    textAlign: 'right',
+                    fontWeight: 600,
+                    color: palette.textPrimary,
+                  }}>
+                    ${strike.toFixed(0)}
                   </td>
-                  <td style={styles.td}>
-                    <div style={styles.expirationCell}>
-                      <span>{trade.Expiration ? formatDate(trade.Expiration) : '-'}</span>
+                  <td style={{
+                    padding: '10px 12px',
+                    borderBottom: `1px solid ${palette.border}`,
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ color: palette.textSecondary, fontSize: '11px' }}>
+                        {trade.Expiration ? formatDate(trade.Expiration) : '-'}
+                      </span>
                       {daysUntil !== null && (
                         <span style={{
-                          ...styles.daysIndicator,
+                          fontSize: '9px',
+                          fontWeight: 600,
+                          padding: '2px 5px',
+                          borderRadius: '4px',
                           backgroundColor: daysBg,
                           color: daysColor,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '2px',
                         }}>
-                          <Clock size={10} />
-                          {daysUntil === 0 ? 'Today' : daysUntil === 1 ? '1 day' : `${daysUntil} days`}
+                          <Clock size={8} />
+                          {daysUntil === 0 ? 'Today' : daysUntil === 1 ? '1d' : `${daysUntil}d`}
                         </span>
                       )}
                     </div>
                   </td>
-                  <td style={{ ...styles.td, textAlign: 'right' }}>{contracts}</td>
                   <td style={{
-                    ...styles.td,
+                    padding: '10px 12px',
+                    borderBottom: `1px solid ${palette.border}`,
                     textAlign: 'right',
-                    color: trade.TradeType === 'B' ? colors.sell : colors.buy,
+                    color: palette.textSecondary,
                     fontWeight: 600,
+                  }}>
+                    {contracts}×
+                  </td>
+                  <td style={{
+                    padding: '10px 12px',
+                    borderBottom: `1px solid ${palette.border}`,
+                    textAlign: 'right',
+                    fontWeight: 700,
+                    color: isBuy ? palette.loss : palette.profit,
                   }}>
                     {formatCurrency(premiumUSD)}
                   </td>
@@ -507,36 +517,26 @@ export function ExpiringOptionsTable({
         </table>
       </div>
 
-      {/* Pagination */}
+      {/* Compact Pagination */}
       {totalPages > 1 && (
         <div style={{
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: '14px 20px',
-          borderTop: `1px solid ${colors.border}`,
-          backgroundColor: colors.bgElevated,
+          padding: '10px 20px',
+          borderTop: `1px solid ${palette.border}`,
+          backgroundColor: palette.void,
         }}>
-          {/* Page info */}
           <div style={{
-            fontFamily: '"JetBrains Mono", monospace',
-            fontSize: '11px',
-            color: colors.textMuted,
-            letterSpacing: '0.3px',
+            fontSize: '10px',
+            color: palette.textMuted,
           }}>
-            <span style={{ color: colors.textSecondary }}>{startIndex + 1}-{Math.min(endIndex, trades.length)}</span>
+            <span style={{ color: palette.textSecondary }}>{startIndex + 1}-{Math.min(endIndex, trades.length)}</span>
             <span> of </span>
-            <span style={{ color: colors.textSecondary }}>{trades.length}</span>
-            <span> options</span>
+            <span style={{ color: palette.textSecondary }}>{trades.length}</span>
           </div>
 
-          {/* Navigation controls */}
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-          }}>
-            {/* Previous button */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
             <button
               onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
               disabled={currentPage === 1}
@@ -544,63 +544,33 @@ export function ExpiringOptionsTable({
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                width: '32px',
-                height: '32px',
-                borderRadius: '8px',
-                border: `1px solid ${currentPage === 1 ? colors.border : colors.textMuted}`,
-                backgroundColor: currentPage === 1 ? colors.bgCard : colors.bgHeader,
-                color: currentPage === 1 ? colors.textMuted : colors.textPrimary,
+                width: '28px',
+                height: '28px',
+                borderRadius: '6px',
+                border: `1px solid ${currentPage === 1 ? palette.border : palette.textDim}`,
+                backgroundColor: palette.elevated,
+                color: currentPage === 1 ? palette.textDim : palette.textPrimary,
                 cursor: currentPage === 1 ? 'not-allowed' : 'pointer',
-                transition: 'all 0.15s ease',
                 opacity: currentPage === 1 ? 0.5 : 1,
               }}
-              onMouseEnter={(e) => {
-                if (currentPage !== 1) {
-                  e.currentTarget.style.backgroundColor = colors.bgSurface;
-                  e.currentTarget.style.borderColor = accentColor;
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (currentPage !== 1) {
-                  e.currentTarget.style.backgroundColor = colors.bgHeader;
-                  e.currentTarget.style.borderColor = colors.textMuted;
-                }
-              }}
             >
-              <ChevronLeft size={16} />
+              <ChevronLeft size={14} />
             </button>
 
-            {/* Page indicators */}
             <div style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '4px',
-              padding: '0 8px',
+              gap: '2px',
+              padding: '0 6px',
             }}>
               {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => {
-                // Show limited page numbers with ellipsis for many pages
-                const showPage = page === 1 ||
-                  page === totalPages ||
-                  Math.abs(page - currentPage) <= 1;
-                const showEllipsis = page === 2 && currentPage > 3 ||
-                  page === totalPages - 1 && currentPage < totalPages - 2;
+                const showPage = page === 1 || page === totalPages || Math.abs(page - currentPage) <= 1;
+                const showEllipsis = (page === 2 && currentPage > 3) || (page === totalPages - 1 && currentPage < totalPages - 2);
 
                 if (!showPage && !showEllipsis) return null;
 
                 if (showEllipsis && !showPage) {
-                  return (
-                    <span
-                      key={`ellipsis-${page}`}
-                      style={{
-                        fontFamily: '"JetBrains Mono", monospace',
-                        fontSize: '11px',
-                        color: colors.textMuted,
-                        padding: '0 2px',
-                      }}
-                    >
-                      ···
-                    </span>
-                  );
+                  return <span key={`e-${page}`} style={{ fontSize: '10px', color: palette.textDim }}>···</span>;
                 }
 
                 return (
@@ -608,35 +578,15 @@ export function ExpiringOptionsTable({
                     key={page}
                     onClick={() => setCurrentPage(page)}
                     style={{
-                      fontFamily: '"JetBrains Mono", monospace',
-                      fontSize: '11px',
+                      fontSize: '10px',
                       fontWeight: page === currentPage ? 700 : 500,
-                      minWidth: '28px',
-                      height: '28px',
-                      borderRadius: '6px',
-                      border: page === currentPage
-                        ? `1px solid ${accentColor}`
-                        : '1px solid transparent',
-                      backgroundColor: page === currentPage
-                        ? `${accentColor}20`
-                        : 'transparent',
-                      color: page === currentPage
-                        ? accentColor
-                        : colors.textMuted,
+                      minWidth: '24px',
+                      height: '24px',
+                      borderRadius: '4px',
+                      border: page === currentPage ? `1px solid ${accentColor}` : '1px solid transparent',
+                      backgroundColor: page === currentPage ? `${accentColor}20` : 'transparent',
+                      color: page === currentPage ? accentColor : palette.textMuted,
                       cursor: 'pointer',
-                      transition: 'all 0.15s ease',
-                    }}
-                    onMouseEnter={(e) => {
-                      if (page !== currentPage) {
-                        e.currentTarget.style.backgroundColor = colors.bgHeader;
-                        e.currentTarget.style.color = colors.textPrimary;
-                      }
-                    }}
-                    onMouseLeave={(e) => {
-                      if (page !== currentPage) {
-                        e.currentTarget.style.backgroundColor = 'transparent';
-                        e.currentTarget.style.color = colors.textMuted;
-                      }
                     }}
                   >
                     {page}
@@ -645,7 +595,6 @@ export function ExpiringOptionsTable({
               })}
             </div>
 
-            {/* Next button */}
             <button
               onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
               disabled={currentPage === totalPages}
@@ -653,45 +602,21 @@ export function ExpiringOptionsTable({
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                width: '32px',
-                height: '32px',
-                borderRadius: '8px',
-                border: `1px solid ${currentPage === totalPages ? colors.border : colors.textMuted}`,
-                backgroundColor: currentPage === totalPages ? colors.bgCard : colors.bgHeader,
-                color: currentPage === totalPages ? colors.textMuted : colors.textPrimary,
+                width: '28px',
+                height: '28px',
+                borderRadius: '6px',
+                border: `1px solid ${currentPage === totalPages ? palette.border : palette.textDim}`,
+                backgroundColor: palette.elevated,
+                color: currentPage === totalPages ? palette.textDim : palette.textPrimary,
                 cursor: currentPage === totalPages ? 'not-allowed' : 'pointer',
-                transition: 'all 0.15s ease',
                 opacity: currentPage === totalPages ? 0.5 : 1,
               }}
-              onMouseEnter={(e) => {
-                if (currentPage !== totalPages) {
-                  e.currentTarget.style.backgroundColor = colors.bgSurface;
-                  e.currentTarget.style.borderColor = accentColor;
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (currentPage !== totalPages) {
-                  e.currentTarget.style.backgroundColor = colors.bgHeader;
-                  e.currentTarget.style.borderColor = colors.textMuted;
-                }
-              }}
             >
-              <ChevronRight size={16} />
+              <ChevronRight size={14} />
             </button>
           </div>
         </div>
       )}
-
-      <style>{`
-        @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.6; }
-        }
-        @keyframes glow {
-          0%, 100% { box-shadow: 0 4px 16px rgba(255, 82, 82, 0.4); }
-          50% { box-shadow: 0 4px 24px rgba(255, 82, 82, 0.6); }
-        }
-      `}</style>
     </div>
   );
 }

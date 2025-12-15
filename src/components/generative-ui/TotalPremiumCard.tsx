@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Banknote, Calendar, TrendingUp, TrendingDown, BarChart3, Layers } from 'lucide-react';
+import { Banknote, Calendar, Layers, BarChart3, TrendingUp, TrendingDown } from 'lucide-react';
 
 interface TotalPremiumCardProps {
   symbol: string;
@@ -23,24 +23,27 @@ const formatCurrency = (value: number) => {
 };
 
 // Terminal Luxe color palette
-const colors = {
-  bgVoid: '#000000',
-  bgSurface: '#0a0a0a',
-  bgElevated: '#141414',
-  bgCard: '#1a1a1a',
-  bgHeader: '#1f1f1f',
-  border: '#2a2a2a',
+const palette = {
+  void: '#000000',
+  surface: '#050505',
+  elevated: '#0a0a0a',
+  card: '#0f0f0f',
+  border: '#1a1a1a',
   textPrimary: '#ffffff',
-  textSecondary: '#8c8c8e',
-  textMuted: '#5a5a5c',
-  accent: '#00c806',
-  accentDim: 'rgba(0, 200, 6, 0.15)',
-  buy: '#00c806',
-  sell: '#ff5252',
-  call: '#4da6ff',
-  put: '#ffa64d',
+  textSecondary: '#a0a0a0',
+  textMuted: '#606060',
+  textDim: '#404040',
+  profit: '#00ff88',
+  profitDim: 'rgba(0, 255, 136, 0.08)',
+  profitGlow: 'rgba(0, 255, 136, 0.4)',
+  loss: '#ff4466',
+  lossDim: 'rgba(255, 68, 102, 0.08)',
+  call: '#00d4ff',
+  callDim: 'rgba(0, 212, 255, 0.12)',
+  put: '#ff66b2',
+  putDim: 'rgba(255, 102, 178, 0.12)',
   cyan: '#06b6d4',
-  cyanDim: 'rgba(6, 182, 212, 0.15)',
+  cyanDim: 'rgba(6, 182, 212, 0.12)',
 };
 
 export function TotalPremiumCard({
@@ -54,273 +57,203 @@ export function TotalPremiumCard({
   putCount = 0,
 }: TotalPremiumCardProps) {
   const isSell = tradeType === 'sell';
-  const actionLabel = isSell ? 'Collected' : tradeType === 'all' ? 'Total' : 'Paid';
-  const actionVerb = isSell ? 'Selling' : tradeType === 'all' ? 'Trading' : 'Buying';
-  // Calculate shares covered (1 contract = 100 shares)
   const totalShares = totalContracts * 100;
-  // Per share premium (what options traders care about)
   const perSharePremium = totalShares > 0 ? totalPremium / totalShares : 0;
 
-  const styles: Record<string, React.CSSProperties> = {
-    container: {
-      backgroundColor: colors.bgCard,
-      borderRadius: '16px',
-      border: `1px solid ${colors.border}`,
+  // Dynamic colors
+  const accentColor = isSell ? palette.profit : palette.loss;
+  const accentDim = isSell ? palette.profitDim : palette.lossDim;
+  const accentGlow = isSell ? palette.profitGlow : 'rgba(255, 68, 102, 0.3)';
+  const Icon = isSell ? TrendingUp : TrendingDown;
+
+  return (
+    <div style={{
+      background: `linear-gradient(180deg, ${palette.card} 0%, ${palette.void} 100%)`,
+      borderRadius: '20px',
+      border: `1px solid ${palette.border}`,
       overflow: 'hidden',
       marginTop: '12px',
       marginBottom: '12px',
-      boxShadow: '0 4px 24px rgba(0, 0, 0, 0.4)',
+      boxShadow: `0 16px 32px -8px rgba(0, 0, 0, 0.6), 0 0 0 1px ${palette.border}`,
+      fontFamily: '"JetBrains Mono", "SF Mono", "Fira Code", monospace',
       position: 'relative',
-    },
-    accentBar: {
-      position: 'absolute',
-      top: 0,
-      left: 0,
-      right: 0,
-      height: '3px',
-      background: isSell
-        ? `linear-gradient(90deg, ${colors.accent}, #00ff08, ${colors.accent})`
-        : `linear-gradient(90deg, ${colors.sell}, #ff7070, ${colors.sell})`,
-    },
-    header: {
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      padding: '20px 24px',
-      background: `linear-gradient(180deg, ${colors.bgHeader} 0%, ${colors.bgCard} 100%)`,
-      borderBottom: `1px solid ${colors.border}`,
-    },
-    headerLeft: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '14px',
-    },
-    iconWrapper: {
-      width: '44px',
-      height: '44px',
-      borderRadius: '12px',
-      background: isSell
-        ? `linear-gradient(135deg, ${colors.accent} 0%, #008a04 100%)`
-        : `linear-gradient(135deg, ${colors.sell} 0%, #cc4141 100%)`,
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      boxShadow: isSell
-        ? '0 4px 12px rgba(0, 200, 6, 0.3)'
-        : '0 4px 12px rgba(255, 82, 82, 0.3)',
-    },
-    headerText: {
-      display: 'flex',
-      flexDirection: 'column',
-      gap: '2px',
-    },
-    headerTitle: {
-      fontFamily: '"JetBrains Mono", monospace',
-      fontSize: '11px',
-      fontWeight: 600,
-      color: colors.textMuted,
-      textTransform: 'uppercase',
-      letterSpacing: '1px',
-    },
-    headerSymbol: {
-      fontSize: '18px',
-      fontWeight: 700,
-      color: colors.textPrimary,
-    },
-    periodBadge: {
-      fontFamily: '"JetBrains Mono", monospace',
-      fontSize: '11px',
-      fontWeight: 600,
-      padding: '6px 12px',
-      borderRadius: '8px',
-      backgroundColor: colors.cyanDim,
-      color: colors.cyan,
-      display: 'flex',
-      alignItems: 'center',
-      gap: '6px',
-    },
-    heroSection: {
-      padding: '40px 24px',
-      textAlign: 'center',
-      background: `radial-gradient(ellipse at top, ${colors.bgElevated} 0%, ${colors.bgCard} 100%)`,
-      position: 'relative',
-    },
-    heroLabel: {
-      fontFamily: '"JetBrains Mono", monospace',
-      fontSize: '12px',
-      fontWeight: 600,
-      color: colors.textSecondary,
-      textTransform: 'uppercase',
-      letterSpacing: '2px',
-      marginBottom: '16px',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: '8px',
-    },
-    heroValue: {
-      fontFamily: '"JetBrains Mono", monospace',
-      fontSize: '48px',
-      fontWeight: 800,
-      color: isSell ? colors.accent : colors.sell,
-      lineHeight: 1,
-      letterSpacing: '-2px',
-      textShadow: isSell
-        ? '0 0 40px rgba(0, 200, 6, 0.4)'
-        : '0 0 40px rgba(255, 82, 82, 0.4)',
-    },
-    heroSubtext: {
-      fontFamily: '"JetBrains Mono", monospace',
-      fontSize: '13px',
-      color: colors.textMuted,
-      marginTop: '16px',
-    },
-    statsGrid: {
-      display: 'grid',
-      gridTemplateColumns: 'repeat(4, 1fr)',
-      gap: '1px',
-      backgroundColor: colors.border,
-      borderTop: `1px solid ${colors.border}`,
-    },
-    statItem: {
-      padding: '18px 12px',
-      backgroundColor: colors.bgElevated,
-      textAlign: 'center',
-    },
-    statIcon: {
-      marginBottom: '8px',
-    },
-    statLabel: {
-      fontFamily: '"JetBrains Mono", monospace',
-      fontSize: '9px',
-      fontWeight: 600,
-      color: colors.textMuted,
-      textTransform: 'uppercase',
-      letterSpacing: '0.8px',
-      marginBottom: '6px',
-    },
-    statValue: {
-      fontFamily: '"JetBrains Mono", monospace',
-      fontSize: '16px',
-      fontWeight: 700,
-      color: colors.textPrimary,
-    },
-    breakdown: {
-      padding: '16px 24px',
-      backgroundColor: colors.bgSurface,
-      borderTop: `1px solid ${colors.border}`,
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: '24px',
-    },
-    breakdownItem: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '8px',
-    },
-    breakdownDot: {
-      width: '8px',
-      height: '8px',
-      borderRadius: '50%',
-    },
-    breakdownLabel: {
-      fontFamily: '"JetBrains Mono", monospace',
-      fontSize: '12px',
-      color: colors.textSecondary,
-    },
-    breakdownValue: {
-      fontFamily: '"JetBrains Mono", monospace',
-      fontSize: '13px',
-      fontWeight: 600,
-      color: colors.textPrimary,
-    },
-  };
+    }}>
+      {/* Compact Header + Hero Combined */}
+      <div style={{
+        padding: '16px 20px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '16px',
+        background: `radial-gradient(ellipse at left, ${accentDim} 0%, transparent 50%)`,
+      }}>
+        {/* Icon */}
+        <div style={{
+          width: '44px',
+          height: '44px',
+          borderRadius: '12px',
+          background: `linear-gradient(135deg, ${accentColor}20 0%, ${accentColor}05 100%)`,
+          border: `1px solid ${accentColor}30`,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
+        }}>
+          <Banknote size={20} color={accentColor} strokeWidth={2} />
+        </div>
 
-  return (
-    <div style={styles.container}>
-      <div style={styles.accentBar} />
+        {/* Main Info */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '2px' }}>
+            <span style={{
+              fontSize: '9px',
+              fontWeight: 700,
+              color: accentColor,
+              textTransform: 'uppercase',
+              letterSpacing: '1.5px',
+            }}>
+              TOTAL PREMIUM
+            </span>
+            <span style={{
+              fontSize: '10px',
+              padding: '2px 6px',
+              borderRadius: '4px',
+              backgroundColor: accentDim,
+              color: accentColor,
+              fontWeight: 600,
+            }}>
+              {isSell ? 'SELL' : tradeType === 'all' ? 'ALL' : 'BUY'}
+            </span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+            <span style={{
+              fontSize: '16px',
+              fontWeight: 700,
+              color: palette.textPrimary,
+            }}>
+              {symbol}
+            </span>
+            <span style={{
+              fontSize: '11px',
+              color: palette.textMuted,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+            }}>
+              <Calendar size={10} />
+              {timePeriod}
+            </span>
+          </div>
+        </div>
 
-      {/* Header */}
-      <div style={styles.header}>
-        <div style={styles.headerLeft}>
-          <div style={styles.iconWrapper}>
-            <Banknote size={22} color="#fff" strokeWidth={2} />
+        {/* Premium - Hero Number */}
+        <div style={{ textAlign: 'right', flexShrink: 0 }}>
+          <div style={{
+            fontSize: '9px',
+            color: palette.textMuted,
+            textTransform: 'uppercase',
+            letterSpacing: '1px',
+            marginBottom: '2px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'flex-end',
+            gap: '4px',
+          }}>
+            <Icon size={10} />
+            {isSell ? 'Collected' : 'Paid'}
           </div>
-          <div style={styles.headerText}>
-            <span style={styles.headerTitle}>Total Premium {actionLabel}</span>
-            <span style={styles.headerSymbol}>{symbol} Options</span>
-          </div>
-        </div>
-        <div style={styles.periodBadge}>
-          <Calendar size={12} />
-          {timePeriod}
-        </div>
-      </div>
-
-      {/* Hero Premium */}
-      <div style={styles.heroSection}>
-        <div style={styles.heroLabel}>
-          {isSell ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
-          Premium {actionLabel}
-        </div>
-        <div style={styles.heroValue}>
-          {formatCurrency(totalPremium)}
-        </div>
-        <div style={styles.heroSubtext}>
-          from {actionVerb.toLowerCase()} {totalTrades} option{totalTrades !== 1 ? 's' : ''}
-        </div>
-      </div>
-
-      {/* Stats Grid */}
-      <div style={styles.statsGrid}>
-        <div style={styles.statItem}>
-          <div style={styles.statIcon}>
-            <BarChart3 size={16} color={colors.textMuted} />
-          </div>
-          <div style={styles.statLabel}>Trades</div>
-          <div style={styles.statValue}>{totalTrades}</div>
-        </div>
-        <div style={styles.statItem}>
-          <div style={styles.statIcon}>
-            <Layers size={16} color={colors.textMuted} />
-          </div>
-          <div style={styles.statLabel}>Contracts</div>
-          <div style={styles.statValue}>{totalContracts}</div>
-        </div>
-        <div style={styles.statItem}>
-          <div style={styles.statIcon}>
-            <TrendingUp size={16} color={colors.textMuted} />
-          </div>
-          <div style={styles.statLabel}>Per Share</div>
-          <div style={styles.statValue}>{formatCurrency(perSharePremium)}</div>
-        </div>
-        <div style={styles.statItem}>
-          <div style={styles.statIcon}>
-            <Banknote size={16} color={colors.textMuted} />
-          </div>
-          <div style={styles.statLabel}>Per Contract</div>
-          <div style={styles.statValue}>
-            {formatCurrency(totalContracts > 0 ? totalPremium / totalContracts : 0)}
+          <div style={{
+            fontSize: '24px',
+            fontWeight: 800,
+            color: accentColor,
+            lineHeight: 1,
+            textShadow: `0 0 30px ${accentGlow}`,
+          }}>
+            {formatCurrency(totalPremium)}
           </div>
         </div>
       </div>
 
-      {/* Call/Put Breakdown */}
-      {(callCount > 0 || putCount > 0) && (
-        <div style={styles.breakdown}>
-          <div style={styles.breakdownItem}>
-            <div style={{ ...styles.breakdownDot, backgroundColor: colors.call }} />
-            <span style={styles.breakdownLabel}>Calls</span>
-            <span style={styles.breakdownValue}>{callCount}</span>
+      {/* Compact Stats Row */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '12px 20px',
+        borderTop: `1px solid ${palette.border}`,
+        background: palette.surface,
+        gap: '8px',
+        flexWrap: 'wrap',
+      }}>
+        {[
+          { icon: BarChart3, label: 'Trades', value: totalTrades.toString() },
+          { icon: Layers, label: 'Contracts', value: totalContracts.toLocaleString() },
+        ].map((stat) => (
+          <div key={stat.label} style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+          }}>
+            <stat.icon size={12} color={palette.textDim} />
+            <span style={{
+              fontSize: '13px',
+              fontWeight: 700,
+              color: palette.textPrimary,
+            }}>
+              {stat.value}
+            </span>
+            <span style={{
+              fontSize: '10px',
+              color: palette.textMuted,
+              textTransform: 'lowercase',
+            }}>
+              {stat.label}
+            </span>
           </div>
-          <div style={styles.breakdownItem}>
-            <div style={{ ...styles.breakdownDot, backgroundColor: colors.put }} />
-            <span style={styles.breakdownLabel}>Puts</span>
-            <span style={styles.breakdownValue}>{putCount}</span>
+        ))}
+
+        {/* Call/Put breakdown */}
+        {(callCount > 0 || putCount > 0) && (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+          }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+            }}>
+              <div style={{ width: '6px', height: '6px', borderRadius: '2px', backgroundColor: palette.call }} />
+              <span style={{ fontSize: '12px', fontWeight: 700, color: palette.call }}>{callCount}</span>
+            </div>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+            }}>
+              <div style={{ width: '6px', height: '6px', borderRadius: '2px', backgroundColor: palette.put }} />
+              <span style={{ fontSize: '12px', fontWeight: 700, color: palette.put }}>{putCount}</span>
+            </div>
           </div>
+        )}
+
+        {/* Avg Premium Pill */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '4px',
+          padding: '4px 10px',
+          borderRadius: '100px',
+          background: palette.elevated,
+          border: `1px solid ${palette.border}`,
+        }}>
+          <span style={{ fontSize: '10px', color: palette.textMuted }}>Avg</span>
+          <span style={{ fontSize: '12px', fontWeight: 700, color: palette.textPrimary }}>
+            {formatCurrency(perSharePremium)}
+          </span>
+          <span style={{ fontSize: '10px', color: palette.textMuted }}>/sh</span>
         </div>
-      )}
+      </div>
     </div>
   );
 }

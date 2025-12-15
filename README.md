@@ -534,6 +534,36 @@ const calendarDate = formatCalendarDate("2025-11-18");
 3. **Trading Days**: "Last 5 trading days" approximates to ~7 calendar days (5 × 7/5) since the DB doesn't track market holidays
 4. **Offset Recalculation**: The offset is recalculated on each call to handle date changes during long sessions
 
+### Voice/UI Date Synchronization (Pacific Timezone)
+
+**Critical**: ElevenLabs webhook dates must use Pacific timezone to match browser UI display.
+
+**The Problem:**
+- Database stores dates as `YYYY-MM-DD` (e.g., `2025-09-10`)
+- Browser interprets this as UTC midnight, which displays as the **previous day** in Pacific timezone
+- So `2025-09-10` UTC midnight → Sep 9 evening Pacific → UI shows "Sep 9, 2025"
+- Vercel webhooks run in UTC, so without timezone handling, voice says "September 10" while UI shows "Sep 9"
+
+**The Solution:**
+All ElevenLabs webhooks use `formatDateForVoice()` with explicit Pacific timezone:
+
+```typescript
+function formatDateForVoice(dateStr: string): string {
+  if (!dateStr) return 'N/A';
+  const datePart = dateStr.split('T')[0];
+  const date = new Date(datePart + 'T00:00:00Z');
+  if (isNaN(date.getTime())) return dateStr;
+  return date.toLocaleDateString('en-US', {
+    timeZone: 'America/Los_Angeles',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric'
+  });
+}
+```
+
+This ensures the voice agent says the exact same date that appears in the UI cards.
+
 ---
 
 ## Database Schema

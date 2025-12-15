@@ -190,6 +190,44 @@ The database contains demo data with fixed dates. Date utilities convert between
 
 **Usage in UI endpoints**: Import from `@/src/lib/date-utils` (note: `@` alias maps to project root, not `src/`)
 
+### Voice/UI Date Synchronization (Pacific Timezone)
+
+**Critical**: ElevenLabs webhook dates MUST use Pacific timezone to match browser UI display.
+
+**The Problem:**
+- Database stores dates as `YYYY-MM-DD` (e.g., `2025-09-10`)
+- Browser interprets this as UTC midnight, which displays as the **previous day** in Pacific timezone
+- So `2025-09-10` UTC midnight → Sep 9 evening Pacific → UI shows "Sep 9, 2025"
+- Vercel webhooks run in UTC, so without timezone handling, voice says "September 10" while UI shows "Sep 9"
+
+**The Solution:**
+All ElevenLabs webhooks use `formatDateForVoice()` with explicit Pacific timezone:
+
+```typescript
+function formatDateForVoice(dateStr: string): string {
+  if (!dateStr) return 'N/A';
+  const datePart = dateStr.split('T')[0];
+  const date = new Date(datePart + 'T00:00:00Z');
+  if (isNaN(date.getTime())) return dateStr;
+  return date.toLocaleDateString('en-US', {
+    timeZone: 'America/Los_Angeles',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric'
+  });
+}
+```
+
+**Files using this function:**
+- `app/api/elevenlabs/options/route.ts`
+- `app/api/elevenlabs/advanced-query/route.ts`
+- `app/api/elevenlabs/tools/route.ts`
+- `app/api/elevenlabs/trade-stats/route.ts`
+- `app/api/elevenlabs/time-trades/route.ts`
+- `app/api/elevenlabs/account-balance/route.ts`
+
+**Why Pacific?** The UI components (like `HighestStrikeCard.tsx`) use browser's local timezone for date formatting. Since the primary users are in Pacific timezone, we standardize on `America/Los_Angeles` to ensure voice and UI dates match.
+
 ### Account Balance & Fees Queries
 
 **Account Query Types** (`detectAccountBalanceQuery`):

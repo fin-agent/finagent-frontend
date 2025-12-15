@@ -4,15 +4,31 @@ import { parseTimeExpression } from '@/src/lib/date-parser';
 import { getDateOffset } from '@/src/lib/date-utils';
 import { calculateRealizedMatchesFIFO, filterProfitableTrades } from '@/src/lib/profitable-trades';
 
-// Format date WITHOUT offset - must match UI display
+// Format date WITHOUT timezone conversion - parse YYYY-MM-DD directly
+// This avoids the issue where new Date('2025-09-09') is interpreted as UTC
+// and then shifted when formatted, causing 1-day discrepancies
 function formatDateForVoice(dateStr: string): string {
-  const date = new Date(dateStr);
-  if (Number.isNaN(date.getTime())) return dateStr;
-  return date.toLocaleDateString('en-US', {
-    month: 'long',
-    day: 'numeric',
-    year: 'numeric'
-  });
+  if (!dateStr) return 'N/A';
+
+  // Extract YYYY-MM-DD part (ignore any time component)
+  const datePart = dateStr.split('T')[0];
+  const parts = datePart.split('-');
+
+  if (parts.length === 3) {
+    const year = parseInt(parts[0]);
+    const month = parseInt(parts[1]);
+    const day = parseInt(parts[2]);
+
+    const months = ['January', 'February', 'March', 'April', 'May', 'June',
+                    'July', 'August', 'September', 'October', 'November', 'December'];
+
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      return `${months[month - 1]} ${day}, ${year}`;
+    }
+  }
+
+  // Fallback: return original string if parsing fails
+  return dateStr;
 }
 
 // Initialize Supabase client

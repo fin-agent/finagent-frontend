@@ -79,6 +79,12 @@ function getDateRange(timePeriod: string): { fromDate: string; toDate: string } 
     return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today) };
   }
 
+  // "last year" = trailing 12 months (not calendar year) to match user expectations
+  if (lowerPeriod === 'last year' || lowerPeriod === 'past year') {
+    const fromDate = new Date(today.getFullYear(), today.getMonth() - 12, today.getDate());
+    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today) };
+  }
+
   // Check for month names
   const monthNames = ['january', 'february', 'march', 'april', 'may', 'june',
                       'july', 'august', 'september', 'october', 'november', 'december'];

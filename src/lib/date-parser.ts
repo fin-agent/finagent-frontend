@@ -262,18 +262,37 @@ export function parseTimeExpression(expression: string): ParsedDateQuery | null 
   };
 
   for (const [dayName, dayNum] of Object.entries(dayOfWeekMap)) {
-    // Match patterns like "monday", "last monday", "on monday"
-    const dayPattern = new RegExp(`^(?:last\\s+|on\\s+)?${dayName}(?:'s)?$`, 'i');
-    if (dayPattern.test(lowerExpr)) {
+    const currentDayNum = today.getDay();
+
+    // Match "last monday" - explicitly previous week
+    const lastDayPattern = new RegExp(`^last\\s+${dayName}(?:'s)?$`, 'i');
+    if (lastDayPattern.test(lowerExpr)) {
       const targetDate = new Date(today);
-      const currentDayNum = targetDate.getDay();
-      let daysBack = currentDayNum - dayNum;
+      // Get most recent occurrence first
+      let daysBack = currentDayNum >= dayNum ? currentDayNum - dayNum : 7 - (dayNum - currentDayNum);
+      // Then go back one more week for "last"
+      daysBack += 7;
+      targetDate.setDate(targetDate.getDate() - daysBack);
 
-      // If same day or future day of week, go back a full week
-      if (daysBack <= 0) {
-        daysBack += 7;
-      }
+      return {
+        type: 'specific',
+        dateRange: {
+          startDate: toDBDate(targetDate),
+          endDate: toDBDate(targetDate),
+          description: `last ${dayName.charAt(0).toUpperCase() + dayName.slice(1)}`,
+          tradingDays: 1
+        },
+        dayOfWeek: dayName
+      };
+    }
 
+    // Match bare day name "monday" or "on monday" - most recent occurrence INCLUDING today
+    const bareDayPattern = new RegExp(`^(?:on\\s+)?${dayName}(?:'s)?$`, 'i');
+    if (bareDayPattern.test(lowerExpr)) {
+      const targetDate = new Date(today);
+      // If today is the same day, daysBack = 0 (return today)
+      // Otherwise, find the most recent occurrence
+      const daysBack = currentDayNum >= dayNum ? currentDayNum - dayNum : 7 - (dayNum - currentDayNum);
       targetDate.setDate(targetDate.getDate() - daysBack);
 
       return {

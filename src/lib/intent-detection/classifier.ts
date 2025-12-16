@@ -91,7 +91,39 @@ function getDeveloperPrompt(): string {
   return cachedDeveloperPrompt;
 }
 
-export async function classifyIntent(userQuery: string): Promise<ClassificationResult | null> {
+// Options for the classifier
+export interface ClassifyOptions {
+  // Current date/time from the user's browser (ISO string or Date)
+  currentDate?: string | Date;
+  // User's timezone (e.g., "America/Los_Angeles")
+  timezone?: string;
+}
+
+// Helper to format date context for the LLM
+function formatDateContext(options?: ClassifyOptions): string {
+  let date: Date;
+
+  if (options?.currentDate) {
+    date = typeof options.currentDate === 'string'
+      ? new Date(options.currentDate)
+      : options.currentDate;
+  } else {
+    date = new Date();
+  }
+
+  const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+                      'July', 'August', 'September', 'October', 'November', 'December'];
+
+  const dayOfWeek = dayNames[date.getDay()];
+  const month = monthNames[date.getMonth()];
+  const dayOfMonth = date.getDate();
+  const year = date.getFullYear();
+
+  return `Today is ${dayOfWeek}, ${month} ${dayOfMonth}, ${year}.`;
+}
+
+export async function classifyIntent(userQuery: string, options?: ClassifyOptions): Promise<ClassificationResult | null> {
   try {
     const { rawEndpoint, baseURL, deploymentName } = getAzureConfig();
     const apiKey = getApiKey();
@@ -109,6 +141,10 @@ export async function classifyIntent(userQuery: string): Promise<ClassificationR
     const startTime = Date.now();
     const developerPrompt = getDeveloperPrompt();
 
+    // Build date context for the LLM
+    const dateContext = formatDateContext(options);
+    console.log('🤖 [LLM Classifier] Date context:', dateContext);
+
     // Use direct fetch to ensure exact URL format for Azure OpenAI
     const requestUrl = `${baseURL}/chat/completions?api-version=${apiVersion}`;
     console.log('🤖 [LLM Classifier] Request URL:', requestUrl);
@@ -122,7 +158,7 @@ export async function classifyIntent(userQuery: string): Promise<ClassificationR
       body: JSON.stringify({
         messages: [
           { role: 'developer', content: developerPrompt },
-          { role: 'user', content: userQuery },
+          { role: 'user', content: `${dateContext}\n\nUser query: ${userQuery}` },
         ],
         temperature: 0.1,
         max_completion_tokens: 200,

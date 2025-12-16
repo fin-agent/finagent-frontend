@@ -33,7 +33,7 @@ function getSafeErrorDetails(error: unknown): Record<string, unknown> | undefine
 
 export async function POST(request: NextRequest) {
   try {
-    const { query } = await request.json();
+    const { query, currentDate, timezone } = await request.json();
 
     if (!query || typeof query !== 'string') {
       return NextResponse.json(
@@ -42,7 +42,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const result = await classifyIntent(query);
+    // Pass date context to the classifier for smart day-of-week interpretation
+    const result = await classifyIntent(query, {
+      currentDate: currentDate || new Date().toISOString(),
+      timezone: timezone,
+    });
 
     // Return result (null if no confident match)
     return NextResponse.json({ result });

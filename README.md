@@ -534,32 +534,37 @@ const calendarDate = formatCalendarDate("2025-11-18");
 3. **Trading Days**: "Last 5 trading days" approximates to ~7 calendar days (5 × 7/5) since the DB doesn't track market holidays
 4. **Offset Recalculation**: The offset is recalculated on each call to handle date changes during long sessions
 
-### Voice/UI Date Synchronization (Pacific Timezone)
+### Voice/UI Date Synchronization
 
-**Critical**: ElevenLabs webhook dates must use Pacific timezone to match browser UI display.
+**Two date handling modes** depending on query type:
 
-**The Problem:**
-- Database stores dates as `YYYY-MM-DD` (e.g., `2025-09-10`)
-- Browser interprets this as UTC midnight, which displays as the **previous day** in Pacific timezone
-- So `2025-09-10` UTC midnight → Sep 9 evening Pacific → UI shows "Sep 9, 2025"
-- Vercel webhooks run in UTC, so without timezone handling, voice says "September 10" while UI shows "Sep 9"
-
-**The Solution:**
-All ElevenLabs webhooks use `formatDateForVoice()` with explicit Pacific timezone:
+#### 1. "This Year" Queries (No Offset)
+For queries like "highest price I sold Apple this year", the database already contains 2025 data, so **no date offset is needed**. Both voice and UI use raw database dates:
 
 ```typescript
-function formatDateForVoice(dateStr: string): string {
-  if (!dateStr) return 'N/A';
+// formatRawDate - shows database dates directly (no offset)
+function formatRawDate(dateStr: string): string {
+  if (!dateStr) return '';
   const datePart = dateStr.split('T')[0];
-  const date = new Date(datePart + 'T00:00:00Z');
+  const [year, month, day] = datePart.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
   if (isNaN(date.getTime())) return dateStr;
   return date.toLocaleDateString('en-US', {
-    timeZone: 'America/Los_Angeles',
-    month: 'long',
+    month: 'short',
     day: 'numeric',
     year: 'numeric'
   });
 }
+```
+
+#### 2. Relative Time Queries (With Offset)
+For queries like "last month", "yesterday", "last week", date offset IS applied to map real dates to demo database dates using `formatCalendarDate()`.
+
+#### Decision Logic
+```typescript
+// If timePeriod exists ("last month"), use offset-adjusted dates
+// If no timePeriod (full year query), use raw dates
+const formatDate = timePeriodDescription ? formatCalendarDate : formatRawDate;
 ```
 
 This ensures the voice agent says the exact same date that appears in the UI cards.

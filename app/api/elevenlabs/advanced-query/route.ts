@@ -64,7 +64,7 @@ function normalizeSymbol(input: string): string {
   return SYMBOL_MAP[lower] || input.toUpperCase();
 }
 
-// Parse relative dates like "tomorrow", "last month", "this year"
+// Parse relative dates like "tomorrow", "last month", "this year", and day-of-week references
 // Uses demo date system so "last month" = October 2025 when DEMO_TODAY is Nov 20, 2025
 function parseRelativeDate(input: string): { start?: string; end?: string } {
   // Use demo "today" instead of actual today for demo data alignment
@@ -80,6 +80,84 @@ function parseRelativeDate(input: string): { start?: string; end?: string } {
     const day = String(d.getDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
   };
+
+  // Day-of-week mapping (Sunday = 0, Monday = 1, etc.)
+  const dayMap: Record<string, number> = {
+    'sunday': 0, 'sun': 0,
+    'monday': 1, 'mon': 1,
+    'tuesday': 2, 'tue': 2, 'tues': 2,
+    'wednesday': 3, 'wed': 3,
+    'thursday': 4, 'thu': 4, 'thur': 4, 'thurs': 4,
+    'friday': 5, 'fri': 5,
+    'saturday': 6, 'sat': 6,
+  };
+
+  // Helper to get the most recent occurrence of a day of week (including today if it matches)
+  const getMostRecentDay = (targetDay: number): Date => {
+    const todayDay = today.getDay();
+    const daysBack = todayDay >= targetDay ? todayDay - targetDay : 7 - (targetDay - todayDay);
+    const result = new Date(today);
+    result.setDate(today.getDate() - daysBack);
+    return result;
+  };
+
+  // Helper to get the previous week's occurrence of a day
+  const getLastWeekDay = (targetDay: number): Date => {
+    const mostRecent = getMostRecentDay(targetDay);
+    const result = new Date(mostRecent);
+    result.setDate(mostRecent.getDate() - 7);
+    return result;
+  };
+
+  // Helper to get this week's specific day (current calendar week, Sun-Sat)
+  const getThisWeekDay = (targetDay: number): Date => {
+    const startOfWeek = new Date(today);
+    startOfWeek.setDate(today.getDate() - today.getDay());
+    const result = new Date(startOfWeek);
+    result.setDate(startOfWeek.getDate() + targetDay);
+    return result;
+  };
+
+  // Helper to get next week's specific day
+  const getNextWeekDay = (targetDay: number): Date => {
+    const startOfNextWeek = new Date(today);
+    startOfNextWeek.setDate(today.getDate() - today.getDay() + 7);
+    const result = new Date(startOfNextWeek);
+    result.setDate(startOfNextWeek.getDate() + targetDay);
+    return result;
+  };
+
+  // Check for "last <day>" pattern (e.g., "last monday", "last friday")
+  const lastDayMatch = lower.match(/^last\s+(sunday|sun|monday|mon|tuesday|tue|tues|wednesday|wed|thursday|thu|thur|thurs|friday|fri|saturday|sat)$/);
+  if (lastDayMatch) {
+    const targetDay = dayMap[lastDayMatch[1]];
+    const date = getLastWeekDay(targetDay);
+    return { start: formatDate(date), end: formatDate(date) };
+  }
+
+  // Check for "this <day>" pattern (e.g., "this monday", "this friday")
+  const thisDayMatch = lower.match(/^this\s+(sunday|sun|monday|mon|tuesday|tue|tues|wednesday|wed|thursday|thu|thur|thurs|friday|fri|saturday|sat)$/);
+  if (thisDayMatch) {
+    const targetDay = dayMap[thisDayMatch[1]];
+    const date = getThisWeekDay(targetDay);
+    return { start: formatDate(date), end: formatDate(date) };
+  }
+
+  // Check for "next <day>" pattern (e.g., "next monday", "next friday")
+  const nextDayMatch = lower.match(/^next\s+(sunday|sun|monday|mon|tuesday|tue|tues|wednesday|wed|thursday|thu|thur|thurs|friday|fri|saturday|sat)$/);
+  if (nextDayMatch) {
+    const targetDay = dayMap[nextDayMatch[1]];
+    const date = getNextWeekDay(targetDay);
+    return { start: formatDate(date), end: formatDate(date) };
+  }
+
+  // Check for bare day name (e.g., "monday", "friday") - means the most recent occurrence
+  const bareDayMatch = lower.match(/^(sunday|sun|monday|mon|tuesday|tue|tues|wednesday|wed|thursday|thu|thur|thurs|friday|fri|saturday|sat)$/);
+  if (bareDayMatch) {
+    const targetDay = dayMap[bareDayMatch[1]];
+    const date = getMostRecentDay(targetDay);
+    return { start: formatDate(date), end: formatDate(date) };
+  }
 
   if (lower === 'tomorrow') {
     const tomorrow = new Date(today);
@@ -127,10 +205,11 @@ function parseRelativeDate(input: string): { start?: string; end?: string } {
     return { start: formatDate(startOfYear), end: formatDate(today) };
   }
 
+  // "last year" = trailing 12 months (not calendar year) to match user expectations
+  // and to work with demo data that only goes back to Jan 2025
   if (lower === 'last year') {
-    const startOfLastYear = new Date(today.getFullYear() - 1, 0, 1);
-    const endOfLastYear = new Date(today.getFullYear() - 1, 11, 31);
-    return { start: formatDate(startOfLastYear), end: formatDate(endOfLastYear) };
+    const startDate = new Date(today.getFullYear(), today.getMonth() - 12, today.getDate());
+    return { start: formatDate(startDate), end: formatDate(today) };
   }
 
   // Match "last N months" pattern

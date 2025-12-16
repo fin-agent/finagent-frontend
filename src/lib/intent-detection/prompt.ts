@@ -23,7 +23,17 @@ ${intents.map(i => `### ${i.id}
   - "Apple" -> "AAPL", "Tesla" -> "TSLA", "Google" -> "GOOGL", "Amazon" -> "AMZN"
   - "Microsoft" -> "MSFT", "Nvidia" -> "NVDA", "Meta" -> "META", "Netflix" -> "NFLX"
   - "GameStop" -> "GME", "AMD" -> "AMD", "Intel" -> "INTC", "Qualcomm" -> "QCOM"
-- **timePeriod**: Time references like "today", "yesterday", "last week", "this month", "last 30 days", "this year", "last 12 months"
+- **timePeriod**: Time references including:
+  - Relative: "today", "yesterday", "tomorrow"
+  - Week-based: "this week", "last week"
+  - Month-based: "this month", "last month", "last 30 days", "last N months"
+  - Year-based: "this year", "last year", "last 12 months"
+  - Day-of-week: When the user mentions a day name, interpret it relative to TODAY's date (provided in the context):
+    - If today IS that day (e.g., user says "Monday" and today is Monday), return "today"
+    - If the day was earlier this week, return that day name (e.g., "monday")
+    - "last monday", "last tuesday", etc. → explicitly means the previous week's occurrence
+    - "this monday", "this tuesday", etc. → current calendar week's occurrence
+    - "next monday", "next tuesday", etc. → next week's occurrence
 - **tradeType**: "buy"/"bought"/"purchased"/"long" -> "buy", "sell"/"sold"/"short"/"written" -> "sell"
 - **callPut**: "call"/"calls" -> "call", "put"/"puts" -> "put"
 - **expiration**: "tomorrow", "this week", "this month", or specific date
@@ -111,5 +121,14 @@ Query: "Highest strike call option I sold on AAPL this year"
 Response: {"intent": "options.highest_strike", "confidence": 0.97, "entities": {"symbol": "AAPL", "callPut": "call", "tradeType": "sell", "timePeriod": "this year"}}
 
 Query: "What did I trade last month?"
-Response: {"intent": "trades.time_based", "confidence": 0.92, "entities": {"timePeriod": "last month"}}`;
+Response: {"intent": "trades.time_based", "confidence": 0.92, "entities": {"timePeriod": "last month"}}
+
+Query: "Show me my trades for Monday" (context: Today is Monday, December 15, 2025)
+Response: {"intent": "trades.time_based", "confidence": 0.94, "entities": {"timePeriod": "today"}}
+
+Query: "Show me my trades for Monday" (context: Today is Wednesday, December 17, 2025)
+Response: {"intent": "trades.time_based", "confidence": 0.94, "entities": {"timePeriod": "monday"}}
+
+Query: "What did I buy last Tuesday?"
+Response: {"intent": "trades.time_based", "confidence": 0.93, "entities": {"timePeriod": "last tuesday", "tradeType": "buy"}}`;
 }

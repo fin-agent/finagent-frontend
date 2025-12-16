@@ -1,16 +1,15 @@
 'use client';
 
-import React from 'react';
-import { TrendingUp, TrendingDown, Calendar, Activity } from 'lucide-react';
+import React, { useState } from 'react';
+import { TrendingUp, TrendingDown, BarChart3, Layers, ChevronDown, ChevronUp, Calculator } from 'lucide-react';
 
 interface AveragePriceProps {
   symbol: string;
   averagePrice: number;
-  timePeriod: string; // "last month", "last week", "this year", etc.
+  timePeriod: string;
   tradeType: 'buy' | 'sell' | 'all';
   totalTrades: number;
   totalShares?: number;
-  // Optional high/low context
   highestPrice?: number;
   lowestPrice?: number;
   breakdown?: {
@@ -24,28 +23,42 @@ interface AveragePriceProps {
   };
 }
 
+// Terminal Luxe color palette
+const palette = {
+  void: '#000000',
+  surface: '#050505',
+  elevated: '#0a0a0a',
+  card: '#0f0f0f',
+  border: '#1a1a1a',
+  textPrimary: '#ffffff',
+  textSecondary: '#a0a0a0',
+  textMuted: '#606060',
+  textDim: '#404040',
+  profit: '#00ff88',
+  profitDim: 'rgba(0, 255, 136, 0.08)',
+  profitGlow: 'rgba(0, 255, 136, 0.4)',
+  loss: '#ff4466',
+  lossDim: 'rgba(255, 68, 102, 0.08)',
+  purple: '#a855f7',
+  purpleDim: 'rgba(168, 85, 247, 0.12)',
+  purpleGlow: 'rgba(168, 85, 247, 0.4)',
+};
+
 const formatCurrency = (value: number) => {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',
     minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   }).format(value);
 };
 
-// Colors matching the app theme
-const colors = {
-  bgCard: '#1a1a1a',
-  bgHeader: '#222222',
-  bgAccent: '#0d1f0d',
-  border: '#2a2a2a',
-  borderAccent: '#1a3a1a',
-  textPrimary: '#ffffff',
-  textSecondary: '#a0a0a0',
-  textMuted: '#666666',
-  accent: '#00c806',
-  accentGlow: 'rgba(0, 200, 6, 0.15)',
-  buy: '#00c806',
-  sell: '#ff5252',
+const formatDate = (dateStr: string) => {
+  const date = new Date(dateStr);
+  return date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+  });
 };
 
 export function AveragePrice({
@@ -59,371 +72,349 @@ export function AveragePrice({
   lowestPrice,
   breakdown,
 }: AveragePriceProps) {
-  const [showBreakdown, setShowBreakdown] = React.useState(false);
+  const [showBreakdown, setShowBreakdown] = useState(false);
   const actionLabel = tradeType === 'sell' ? 'Sold' : tradeType === 'buy' ? 'Bought' : 'Traded';
-  const typeColor = tradeType === 'sell' ? colors.sell : colors.buy;
+  const typeLabel = tradeType === 'sell' ? 'Sell' : tradeType === 'buy' ? 'Buy' : 'All';
+  const accentColor = tradeType === 'sell' ? palette.loss : palette.profit;
+  const accentDim = tradeType === 'sell' ? palette.lossDim : palette.profitDim;
+  const accentGlow = tradeType === 'sell' ? undefined : palette.profitGlow;
 
-  // Format time period for display (capitalize)
   const formatTimePeriod = (period: string) => {
     return period.split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
   };
 
-  const styles = {
-    container: {
-      backgroundColor: colors.bgCard,
-      borderRadius: '16px',
-      border: `1px solid ${colors.border}`,
-      overflow: 'hidden',
-      marginTop: '12px',
-      marginBottom: '8px',
-    },
-    header: {
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      padding: '14px 18px',
-      backgroundColor: colors.bgHeader,
-      borderBottom: `1px solid ${colors.border}`,
-    },
-    headerLeft: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '10px',
-    },
-    symbolBadge: {
-      fontSize: '15px',
-      fontWeight: 700,
-      color: colors.textPrimary,
-      letterSpacing: '0.5px',
-    },
-    timeBadge: {
-      fontSize: '11px',
-      fontWeight: 600,
-      padding: '4px 10px',
-      borderRadius: '12px',
-      backgroundColor: 'rgba(255, 255, 255, 0.08)',
-      color: colors.textSecondary,
-      display: 'flex',
-      alignItems: 'center',
-      gap: '4px',
-    },
-    typeBadge: {
-      fontSize: '11px',
-      fontWeight: 600,
-      padding: '4px 10px',
-      borderRadius: '12px',
-      backgroundColor: tradeType === 'sell' ? 'rgba(255, 82, 82, 0.12)' : 'rgba(0, 200, 6, 0.12)',
-      color: typeColor,
-      textTransform: 'uppercase' as const,
-      letterSpacing: '0.5px',
-    },
-    mainContent: {
-      padding: '24px 20px',
-      background: `linear-gradient(135deg, ${colors.bgAccent} 0%, ${colors.bgCard} 100%)`,
-      position: 'relative' as const,
-    },
-    glowOrb: {
-      position: 'absolute' as const,
-      top: '-20px',
-      right: '-20px',
-      width: '100px',
-      height: '100px',
-      borderRadius: '50%',
-      background: `radial-gradient(circle, ${colors.accentGlow} 0%, transparent 70%)`,
-      pointerEvents: 'none' as const,
-    },
-    priceLabel: {
-      fontSize: '12px',
-      fontWeight: 600,
-      color: colors.textMuted,
-      textTransform: 'uppercase' as const,
-      letterSpacing: '1px',
-      marginBottom: '8px',
-    },
-    priceRow: {
-      display: 'flex',
-      alignItems: 'baseline',
-      gap: '8px',
-    },
-    priceValue: {
-      fontSize: '36px',
-      fontWeight: 700,
-      color: colors.accent,
-      letterSpacing: '-1px',
-      lineHeight: 1,
-    },
-    priceUnit: {
-      fontSize: '14px',
-      fontWeight: 500,
-      color: colors.textSecondary,
-    },
-    statsRow: {
-      display: 'flex',
-      gap: '16px',
-      marginTop: '20px',
-      paddingTop: '16px',
-      borderTop: `1px solid ${colors.border}`,
-    },
-    statItem: {
-      flex: 1,
-      display: 'flex',
-      alignItems: 'center',
-      gap: '8px',
-    },
-    statIcon: {
-      width: '32px',
-      height: '32px',
-      borderRadius: '8px',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    },
-    statContent: {
-      display: 'flex',
-      flexDirection: 'column' as const,
-    },
-    statValue: {
-      fontSize: '16px',
-      fontWeight: 600,
-      color: colors.textPrimary,
-    },
-    statLabel: {
-      fontSize: '11px',
-      color: colors.textMuted,
-      marginTop: '2px',
-    },
-    footer: {
-      display: 'flex',
-      justifyContent: 'space-between',
-      padding: '12px 18px',
-      backgroundColor: colors.bgHeader,
-      borderTop: `1px solid ${colors.border}`,
-      gap: '12px',
-    },
-    footerItem: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '6px',
-    },
-    footerLabel: {
-      fontSize: '11px',
-      color: colors.textMuted,
-    },
-    footerValue: {
-      fontSize: '12px',
-      fontWeight: 600,
-      color: colors.textSecondary,
-    },
-    explainButton: {
-      fontSize: '11px',
-      fontWeight: 600,
-      padding: '6px 10px',
-      borderRadius: '10px',
-      border: `1px solid ${colors.border}`,
-      backgroundColor: 'rgba(255, 255, 255, 0.04)',
-      color: colors.textSecondary,
-      cursor: 'pointer',
-      whiteSpace: 'nowrap' as const,
-    },
-    breakdown: {
-      padding: '14px 18px',
-      borderTop: `1px solid ${colors.border}`,
-      backgroundColor: colors.bgCard,
-    },
-    breakdownTitle: {
-      fontSize: '12px',
-      fontWeight: 700,
-      color: colors.textPrimary,
-      marginBottom: '8px',
-      letterSpacing: '0.5px',
-      textTransform: 'uppercase' as const,
-    },
-    breakdownList: {
-      display: 'flex',
-      flexDirection: 'column' as const,
-      gap: '8px',
-      marginBottom: '10px',
-    },
-    breakdownRow: {
-      display: 'flex',
-      justifyContent: 'space-between',
-      gap: '10px',
-      fontSize: '12px',
-      color: colors.textSecondary,
-    },
-    breakdownLeft: {
-      display: 'flex',
-      flexDirection: 'column' as const,
-      gap: '2px',
-      minWidth: 0,
-    },
-    breakdownRight: {
-      textAlign: 'right' as const,
-      color: colors.textPrimary,
-      fontWeight: 600,
-      whiteSpace: 'nowrap' as const,
-    },
-    breakdownMuted: {
-      color: colors.textMuted,
-      fontSize: '11px',
-    },
-    rangeBar: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '8px',
-      marginTop: '16px',
-      padding: '12px',
-      borderRadius: '8px',
-      backgroundColor: 'rgba(255, 255, 255, 0.03)',
-    },
-    rangeTrack: {
-      flex: 1,
-      height: '4px',
-      borderRadius: '2px',
-      backgroundColor: 'rgba(255, 255, 255, 0.1)',
-      position: 'relative' as const,
-    },
-    rangeMarker: {
-      position: 'absolute' as const,
-      top: '-4px',
-      width: '12px',
-      height: '12px',
-      borderRadius: '50%',
-      backgroundColor: colors.accent,
-      border: `2px solid ${colors.bgCard}`,
-      boxShadow: `0 0 8px ${colors.accentGlow}`,
-    },
-    rangeValue: {
-      fontSize: '11px',
-      fontWeight: 600,
-      minWidth: '60px',
-    },
-  };
+  const canShowBreakdown = !!breakdown?.trades?.length && (totalShares ?? 0) > 0;
 
-  // Calculate marker position if we have high/low
+  // Calculate marker position for range bar
   const getMarkerPosition = () => {
     if (!highestPrice || !lowestPrice || highestPrice === lowestPrice) return 50;
     const range = highestPrice - lowestPrice;
     const position = ((averagePrice - lowestPrice) / range) * 100;
-    return Math.max(5, Math.min(95, position)); // Clamp between 5-95%
+    return Math.max(5, Math.min(95, position));
   };
 
-  const canExplain = !!breakdown?.trades?.length && (totalShares ?? 0) > 0;
-
   return (
-    <div style={styles.container}>
-      {/* Header */}
-      <div style={styles.header}>
-        <div style={styles.headerLeft}>
-          <span style={styles.symbolBadge}>{symbol}</span>
-          <span style={styles.typeBadge}>{actionLabel}</span>
+    <div style={{
+      background: `linear-gradient(180deg, ${palette.card} 0%, ${palette.void} 100%)`,
+      borderRadius: '20px',
+      border: `1px solid ${palette.border}`,
+      overflow: 'hidden',
+      marginTop: '12px',
+      marginBottom: '12px',
+      boxShadow: `0 16px 32px -8px rgba(0, 0, 0, 0.6), 0 0 0 1px ${palette.border}`,
+      fontFamily: '"JetBrains Mono", "SF Mono", "Fira Code", monospace',
+    }}>
+      {/* Compact Header + Hero Combined */}
+      <div style={{
+        padding: '16px 20px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '16px',
+        background: `radial-gradient(ellipse at left, ${palette.purpleDim} 0%, transparent 50%)`,
+      }}>
+        {/* Icon */}
+        <div style={{
+          width: '44px',
+          height: '44px',
+          borderRadius: '12px',
+          background: `linear-gradient(135deg, ${palette.purple}20 0%, ${palette.purple}05 100%)`,
+          border: `1px solid ${palette.purple}30`,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
+        }}>
+          <Calculator size={20} color={palette.purple} strokeWidth={2} />
         </div>
-        <span style={styles.timeBadge}>
-          <Calendar size={12} />
-          {formatTimePeriod(timePeriod)}
-        </span>
+
+        {/* Main Info */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '2px' }}>
+            <span style={{
+              fontSize: '9px',
+              fontWeight: 700,
+              color: palette.purple,
+              textTransform: 'uppercase',
+              letterSpacing: '1.5px',
+            }}>
+              AVG PRICE
+            </span>
+            <span style={{
+              fontSize: '10px',
+              padding: '2px 6px',
+              borderRadius: '4px',
+              backgroundColor: accentDim,
+              color: accentColor,
+              fontWeight: 600,
+            }}>
+              {typeLabel}
+            </span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+            <span style={{
+              fontSize: '16px',
+              fontWeight: 700,
+              color: palette.textPrimary,
+            }}>
+              {symbol}
+            </span>
+            <span style={{
+              fontSize: '11px',
+              color: palette.textMuted,
+            }}>
+              {formatTimePeriod(timePeriod)}
+            </span>
+          </div>
+        </div>
+
+        {/* Average Price - Hero Number */}
+        <div style={{ textAlign: 'right', flexShrink: 0 }}>
+          <div style={{
+            fontSize: '9px',
+            color: palette.textMuted,
+            textTransform: 'uppercase',
+            letterSpacing: '1px',
+            marginBottom: '2px',
+          }}>
+            Avg {actionLabel}
+          </div>
+          <div style={{
+            fontSize: '24px',
+            fontWeight: 800,
+            color: accentColor,
+            lineHeight: 1,
+            textShadow: accentGlow ? `0 0 30px ${accentGlow}` : undefined,
+          }}>
+            {formatCurrency(averagePrice)}
+          </div>
+        </div>
       </div>
 
-      {/* Main Content */}
-      <div style={styles.mainContent}>
-        <div style={styles.glowOrb} />
+      {/* Range Bar (if high/low available) */}
+      {highestPrice && lowestPrice && highestPrice !== lowestPrice && (
+        <div style={{
+          padding: '12px 20px',
+          borderTop: `1px solid ${palette.border}`,
+          background: palette.surface,
+        }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+          }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              minWidth: '70px',
+            }}>
+              <TrendingDown size={12} color={palette.loss} />
+              <span style={{ fontSize: '11px', fontWeight: 600, color: palette.loss }}>
+                {formatCurrency(lowestPrice)}
+              </span>
+            </div>
 
-        <div style={styles.priceLabel}>Average {actionLabel} Price</div>
-        <div style={styles.priceRow}>
-          <span style={styles.priceValue}>{formatCurrency(averagePrice)}</span>
-          <span style={styles.priceUnit}>per share</span>
+            <div style={{
+              flex: 1,
+              height: '6px',
+              borderRadius: '3px',
+              background: `linear-gradient(90deg, ${palette.loss}40, ${palette.profit}40)`,
+              position: 'relative',
+            }}>
+              <div style={{
+                position: 'absolute',
+                top: '-5px',
+                left: `calc(${getMarkerPosition()}% - 8px)`,
+                width: '16px',
+                height: '16px',
+                borderRadius: '50%',
+                background: palette.purple,
+                border: `2px solid ${palette.card}`,
+                boxShadow: `0 0 10px ${palette.purpleGlow}`,
+              }} />
+            </div>
+
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              minWidth: '70px',
+              justifyContent: 'flex-end',
+            }}>
+              <TrendingUp size={12} color={palette.profit} />
+              <span style={{ fontSize: '11px', fontWeight: 600, color: palette.profit }}>
+                {formatCurrency(highestPrice)}
+              </span>
+            </div>
+          </div>
         </div>
+      )}
 
-        {/* Range Visualization (if high/low provided) */}
-        {highestPrice && lowestPrice && highestPrice !== lowestPrice && (
-          <div style={styles.rangeBar}>
-            <span style={{ ...styles.rangeValue, color: colors.sell, textAlign: 'right' as const }}>
-              <TrendingDown size={10} style={{ marginRight: '4px', display: 'inline' }} />
-              {formatCurrency(lowestPrice)}
+      {/* Compact Stats Row */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '10px 20px',
+        borderTop: `1px solid ${palette.border}`,
+        background: palette.void,
+        gap: '8px',
+        flexWrap: 'wrap',
+      }}>
+        {[
+          { icon: BarChart3, label: 'Trades', value: totalTrades.toString() },
+          ...(totalShares !== undefined ? [{ icon: Layers, label: 'Shares', value: totalShares.toLocaleString() }] : []),
+        ].map((stat) => (
+          <div key={stat.label} style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+          }}>
+            <stat.icon size={12} color={palette.textDim} />
+            <span style={{
+              fontSize: '13px',
+              fontWeight: 700,
+              color: palette.textPrimary,
+            }}>
+              {stat.value}
             </span>
-            <div style={styles.rangeTrack}>
-              <div style={{ ...styles.rangeMarker, left: `calc(${getMarkerPosition()}% - 6px)` }} />
-            </div>
-            <span style={{ ...styles.rangeValue, color: colors.buy }}>
-              <TrendingUp size={10} style={{ marginRight: '4px', display: 'inline' }} />
-              {formatCurrency(highestPrice)}
+            <span style={{
+              fontSize: '10px',
+              color: palette.textMuted,
+              textTransform: 'lowercase',
+            }}>
+              {stat.label}
             </span>
           </div>
-        )}
+        ))}
 
-        {/* Stats Row */}
-        <div style={styles.statsRow}>
-          <div style={styles.statItem}>
-            <div style={styles.statIcon}>
-              <Activity size={16} color={colors.textSecondary} />
+        {/* Per Share Label */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '4px',
+          padding: '4px 10px',
+          borderRadius: '100px',
+          background: palette.elevated,
+          border: `1px solid ${palette.border}`,
+        }}>
+          <span style={{ fontSize: '12px', fontWeight: 700, color: palette.purple }}>
+            {formatCurrency(averagePrice)}
+          </span>
+          <span style={{ fontSize: '10px', color: palette.textMuted }}>/share</span>
+        </div>
+      </div>
+
+      {/* Show Calculation Toggle */}
+      {canShowBreakdown && (
+        <button
+          onClick={() => setShowBreakdown(!showBreakdown)}
+          style={{
+            width: '100%',
+            padding: '10px 20px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '8px',
+            backgroundColor: palette.void,
+            border: 'none',
+            borderTop: `1px solid ${palette.border}`,
+            cursor: 'pointer',
+            color: palette.textSecondary,
+            fontSize: '11px',
+            fontFamily: 'inherit',
+            fontWeight: 500,
+            transition: 'all 0.15s ease',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.backgroundColor = palette.elevated;
+            e.currentTarget.style.color = palette.textPrimary;
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = palette.void;
+            e.currentTarget.style.color = palette.textSecondary;
+          }}
+        >
+          {showBreakdown ? 'Hide Calculation' : 'Show Calculation'}
+          {showBreakdown ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+        </button>
+      )}
+
+      {/* Calculation Breakdown */}
+      {showBreakdown && breakdown && (
+        <div style={{
+          borderTop: `1px solid ${palette.border}`,
+          maxHeight: '200px',
+          overflowY: 'auto',
+        }}>
+          {breakdown.trades.slice(0, 5).map((trade, index) => (
+            <div
+              key={index}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '8px 20px',
+                backgroundColor: index % 2 === 0 ? palette.surface : palette.void,
+                borderBottom: `1px solid ${palette.border}`,
+                gap: '12px',
+              }}
+            >
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                <span style={{ fontSize: '11px', color: palette.textSecondary }}>
+                  {formatDate(trade.date)}
+                </span>
+                <span style={{ fontSize: '10px', color: palette.textMuted }}>
+                  {Math.round(trade.shares).toLocaleString()} shares × {formatCurrency(trade.price)}
+                </span>
+              </div>
+              <span style={{
+                fontSize: '12px',
+                fontWeight: 700,
+                color: palette.textPrimary,
+              }}>
+                {formatCurrency(trade.notional)}
+              </span>
             </div>
-            <div style={styles.statContent}>
-              <span style={styles.statValue}>{totalTrades}</span>
-              <span style={styles.statLabel}>{totalTrades === 1 ? 'Trade' : 'Trades'}</span>
+          ))}
+
+          {/* Formula Summary */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '10px 20px',
+            backgroundColor: palette.elevated,
+            borderTop: `1px solid ${palette.border}`,
+          }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 700, color: palette.textPrimary }}>
+                Weighted Average
+              </span>
+              <span style={{ fontSize: '10px', color: palette.textMuted }}>
+                {formatCurrency(breakdown.totalNotional)} ÷ {totalShares?.toLocaleString()} shares
+              </span>
             </div>
+            <span style={{
+              fontSize: '14px',
+              fontWeight: 700,
+              color: palette.purple,
+            }}>
+              {formatCurrency(averagePrice)}
+            </span>
           </div>
-          {totalShares !== undefined && (
-            <div style={styles.statItem}>
-              <div style={styles.statIcon}>
-                <span style={{ fontSize: '14px', color: colors.textSecondary }}>#</span>
-              </div>
-              <div style={styles.statContent}>
-                <span style={styles.statValue}>{totalShares.toLocaleString()}</span>
-                <span style={styles.statLabel}>Shares</span>
-              </div>
+
+          {breakdown.trades.length > 5 && (
+            <div style={{
+              padding: '8px 20px',
+              fontSize: '10px',
+              color: palette.textDim,
+              textAlign: 'center',
+              backgroundColor: palette.void,
+            }}>
+              +{breakdown.trades.length - 5} more trades
             </div>
           )}
-        </div>
-      </div>
-
-      {/* Footer */}
-      <div style={styles.footer}>
-        <div style={styles.footerItem}>
-          <span style={styles.footerLabel}>Period:</span>
-          <span style={styles.footerValue}>{formatTimePeriod(timePeriod)}</span>
-        </div>
-        <div style={styles.footerItem}>
-          <span style={styles.footerLabel}>Type:</span>
-          <span style={{ ...styles.footerValue, color: typeColor }}>{actionLabel}</span>
-        </div>
-        {canExplain && (
-          <button
-            type="button"
-            style={styles.explainButton}
-            onClick={() => setShowBreakdown((v) => !v)}
-            aria-expanded={showBreakdown}
-          >
-            {showBreakdown ? 'Hide calc' : 'How calculated'}
-          </button>
-        )}
-      </div>
-
-      {canExplain && showBreakdown && breakdown && (
-        <div style={styles.breakdown}>
-          <div style={styles.breakdownTitle}>Calculation</div>
-          <div style={styles.breakdownList}>
-            {breakdown.trades.map((t, idx) => (
-              <div key={`${t.date}-${idx}`} style={styles.breakdownRow}>
-                <div style={styles.breakdownLeft}>
-                  <div>{t.date}</div>
-                  <div style={styles.breakdownMuted}>
-                    {Math.round(t.shares).toLocaleString()} shares × {formatCurrency(t.price)}
-                  </div>
-                </div>
-                <div style={styles.breakdownRight}>{formatCurrency(t.notional)}</div>
-              </div>
-            ))}
-          </div>
-          <div style={{ ...styles.breakdownRow, borderTop: `1px solid ${colors.border}`, paddingTop: '10px' }}>
-            <div style={styles.breakdownLeft}>
-              <div style={{ color: colors.textPrimary, fontWeight: 700 }}>Weighted average</div>
-              <div style={styles.breakdownMuted}>
-                {formatCurrency(breakdown.totalNotional)} ÷ {totalShares?.toLocaleString()} shares
-              </div>
-            </div>
-            <div style={styles.breakdownRight}>{formatCurrency(averagePrice)}</div>
-          </div>
         </div>
       )}
     </div>

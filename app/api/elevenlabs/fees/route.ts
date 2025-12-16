@@ -72,10 +72,10 @@ function getDateRange(timePeriod: string): { fromDate: Date; toDate: Date } {
     return { fromDate, toDate: today };
   }
 
+  // "last year" = trailing 12 months (not calendar year) to match user expectations
   if (lowerPeriod.includes('last year') || lowerPeriod.includes('past year')) {
-    const fromDate = new Date(today.getFullYear() - 1, 0, 1);
-    const toDate = new Date(today.getFullYear() - 1, 11, 31);
-    return { fromDate, toDate };
+    const fromDate = new Date(today.getFullYear(), today.getMonth() - 12, today.getDate());
+    return { fromDate, toDate: today };
   }
 
   // Check for month names like "November" or "in November"

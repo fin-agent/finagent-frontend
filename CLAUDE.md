@@ -190,43 +190,69 @@ The database contains demo data with fixed dates. Date utilities convert between
 
 **Usage in UI endpoints**: Import from `@/src/lib/date-utils` (note: `@` alias maps to project root, not `src/`)
 
-### Voice/UI Date Synchronization (Pacific Timezone)
+### Voice/UI Date Synchronization
 
-**Critical**: ElevenLabs webhook dates MUST use Pacific timezone to match browser UI display.
+**Two date handling modes** depending on query type:
 
-**The Problem:**
-- Database stores dates as `YYYY-MM-DD` (e.g., `2025-09-10`)
-- Browser interprets this as UTC midnight, which displays as the **previous day** in Pacific timezone
-- So `2025-09-10` UTC midnight → Sep 9 evening Pacific → UI shows "Sep 9, 2025"
-- Vercel webhooks run in UTC, so without timezone handling, voice says "September 10" while UI shows "Sep 9"
-
-**The Solution:**
-All ElevenLabs webhooks use `formatDateForVoice()` with explicit Pacific timezone:
+#### 1. "This Year" Queries (No Offset)
+For queries like "highest price I sold Apple this year", the database already contains 2025 data, so **no date offset is needed**. Both voice and UI use raw database dates:
 
 ```typescript
-function formatDateForVoice(dateStr: string): string {
-  if (!dateStr) return 'N/A';
+// formatRawDate - shows database dates directly (no offset)
+function formatRawDate(dateStr: string): string {
+  if (!dateStr) return '';
   const datePart = dateStr.split('T')[0];
-  const date = new Date(datePart + 'T00:00:00Z');
+  const [year, month, day] = datePart.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
   if (isNaN(date.getTime())) return dateStr;
   return date.toLocaleDateString('en-US', {
-    timeZone: 'America/Los_Angeles',
-    month: 'long',
+    month: 'short',
     day: 'numeric',
     year: 'numeric'
   });
 }
 ```
 
-**Files using this function:**
-- `app/api/elevenlabs/options/route.ts`
-- `app/api/elevenlabs/advanced-query/route.ts`
-- `app/api/elevenlabs/tools/route.ts`
-- `app/api/elevenlabs/trade-stats/route.ts`
-- `app/api/elevenlabs/time-trades/route.ts`
-- `app/api/elevenlabs/account-balance/route.ts`
+**Files using raw dates for "this year":**
+- `app/api/elevenlabs/trade-stats/route.ts` - Voice endpoint
+- `app/api/trade-stats/route.ts` - UI endpoint (stock stats)
+- `app/api/option-stats/route.ts` - UI endpoint (option stats)
 
-**Why Pacific?** The UI components (like `HighestStrikeCard.tsx`) use browser's local timezone for date formatting. Since the primary users are in Pacific timezone, we standardize on `America/Los_Angeles` to ensure voice and UI dates match.
+#### 2. Relative Time Queries (With Offset)
+For queries like "last month", "yesterday", "last week", date offset IS applied to map real dates to demo database dates:
+
+```typescript
+// formatCalendarDate - applies offset for relative time queries
+function formatCalendarDate(demoDateStr: string): string {
+  const realDate = demoDateToRealDate(demoDateStr);
+  return realDate.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric'
+  });
+}
+```
+
+#### Decision Logic in Endpoints
+```typescript
+// If timePeriod exists ("last month"), use offset-adjusted dates
+// If no timePeriod (full year query), use raw dates
+const formatDate = timePeriodDescription ? formatCalendarDate : formatRawDate;
+```
+
+### Stats Queries: Dual Card Display
+
+For `trades.stats` queries, the UI fetches BOTH stock stats and option stats in parallel:
+
+```typescript
+// UnifiedAssistant.tsx - parallel fetch for stats queries
+const [stockRes, optionRes] = await Promise.all([
+  fetch('/api/trade-stats', { ... }),   // PRICE STATS card
+  fetch('/api/option-stats', { ... }),  // OPTION STATS card
+]);
+```
+
+This displays two cards side-by-side: stock price statistics (PRICE STATS) and option premium statistics (OPTION STATS).
 
 ### Account Balance & Fees Queries
 

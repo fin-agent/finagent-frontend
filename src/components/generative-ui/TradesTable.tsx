@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useMemo } from 'react';
-import { Download, Maximize2, ArrowUpRight, ArrowDownRight, X, Filter, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Download, ChevronLeft, ChevronRight, BarChart3, Layers, DollarSign, TrendingUp, Shuffle } from 'lucide-react';
 import { downloadCsv, toCsv } from '@/src/lib/csv';
 import { getTradeCashFlowUSD, safeParseNumber } from '@/src/lib/trade-math';
 
@@ -62,13 +62,38 @@ interface TradesTableProps {
   pageSize?: number;
 }
 
-const ITEMS_PER_PAGE = 10;
+// Terminal Luxe color palette
+const palette = {
+  void: '#000000',
+  surface: '#050505',
+  elevated: '#0a0a0a',
+  card: '#0f0f0f',
+  border: '#1a1a1a',
+  textPrimary: '#ffffff',
+  textSecondary: '#a0a0a0',
+  textMuted: '#606060',
+  textDim: '#404040',
+  profit: '#00ff88',
+  profitDim: 'rgba(0, 255, 136, 0.08)',
+  loss: '#ff4466',
+  lossDim: 'rgba(255, 68, 102, 0.08)',
+  call: '#00d4ff',
+  callDim: 'rgba(0, 212, 255, 0.12)',
+  put: '#ff66b2',
+  putDim: 'rgba(255, 102, 178, 0.12)',
+  cyan: '#06b6d4',
+  cyanDim: 'rgba(6, 182, 212, 0.12)',
+  cyanGlow: 'rgba(6, 182, 212, 0.4)',
+};
+
+const ITEMS_PER_PAGE = 5;
 
 const formatCurrency = (value: number) => {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',
     minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
   }).format(value);
 };
 
@@ -77,45 +102,19 @@ const formatDate = (dateStr: string) => {
   return date.toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric',
-    year: 'numeric'
   });
 };
 
-// Colors matching the app theme
-const colors = {
-  bgCard: '#1a1a1a',
-  bgHeader: '#252525',
-  bgRow: '#1a1a1a',
-  bgRowAlt: '#222222',
-  border: '#333333',
-  textPrimary: '#ffffff',
-  textSecondary: '#999999',
-  textMuted: '#666666',
-  accent: '#00c806',
-  buy: '#00c806',
-  sell: '#ff5252',
+// Get display symbol - for options, extract the ticker (leading letters)
+const getDisplaySymbol = (symbol: string, isOption: boolean): string => {
+  if (!isOption) return symbol;
+  // Extract leading uppercase letters (handles any option symbol format)
+  const match = symbol.match(/^([A-Z]+)/);
+  return match ? match[1] : symbol;
 };
 
-// Helper to format filter labels
-const formatFilterLabel = (key: string, value: unknown): string => {
-  if (value === 'all' || value === undefined || value === null) return '';
-
-  switch (key) {
-    case 'symbol': return `${value}`;
-    case 'securityType': return value === 'S' ? 'Stocks' : 'Options';
-    case 'tradeType': return value === 'B' ? 'Buys' : 'Sells';
-    case 'callPut': return value === 'C' ? 'Calls' : 'Puts';
-    case 'fromDate': return `From: ${value}`;
-    case 'toDate': return `To: ${value}`;
-    case 'expiration': return `Exp: ${value}`;
-    case 'strike': return `$${value} Strike`;
-    default: return String(value);
-  }
-};
-
-export function TradesTable({ trades, summary, filters, aggregations, onClearFilter, pageSize = ITEMS_PER_PAGE }: TradesTableProps) {
-  const [stockPage, setStockPage] = useState(1);
-  const [optionPage, setOptionPage] = useState(1);
+export function TradesTable({ trades, summary, filters, aggregations, pageSize = ITEMS_PER_PAGE }: TradesTableProps) {
+  const [currentPage, setCurrentPage] = useState(1);
 
   const handleDownload = () => {
     const rows = trades.map((trade) => ({
@@ -141,568 +140,570 @@ export function TradesTable({ trades, summary, filters, aggregations, onClearFil
 
   const stockTrades = useMemo(() => trades.filter(t => t.SecurityType === 'S'), [trades]);
   const optionTrades = useMemo(() => trades.filter(t => t.SecurityType === 'O'), [trades]);
+  const allTrades = useMemo(() => [...trades].sort((a, b) => new Date(b.Date).getTime() - new Date(a.Date).getTime()), [trades]);
 
-  // Pagination calculations
-  const stockTotalPages = Math.ceil(stockTrades.length / pageSize);
-  const optionTotalPages = Math.ceil(optionTrades.length / pageSize);
+  // Pagination
+  const totalPages = Math.ceil(allTrades.length / pageSize);
+  const startIndex = (currentPage - 1) * pageSize;
+  const endIndex = startIndex + pageSize;
+  const currentTrades = allTrades.slice(startIndex, endIndex);
 
-  const paginatedStockTrades = useMemo(() => {
-    const start = (stockPage - 1) * pageSize;
-    return stockTrades.slice(start, start + pageSize);
-  }, [stockTrades, stockPage, pageSize]);
-
-  const paginatedOptionTrades = useMemo(() => {
-    const start = (optionPage - 1) * pageSize;
-    return optionTrades.slice(start, start + pageSize);
-  }, [optionTrades, optionPage, pageSize]);
-
-  // Handle null/undefined summary
-  const safeSummary = summary || {
-    symbol: filters?.symbol || stockTrades[0]?.Symbol || optionTrades[0]?.Symbol || 'Trades',
-    totalShares: 0,
-    totalCost: 0,
-    currentValue: 0,
+  // Calculate aggregations
+  const agg = aggregations || {
+    tradeCount: trades.length,
+    totalPremium: trades.reduce((sum, t) => sum + Math.abs(getTradeCashFlowUSD(t)), 0),
+    avgPremium: trades.length > 0 ? trades.reduce((sum, t) => sum + Math.abs(getTradeCashFlowUSD(t)), 0) / trades.length : 0,
+    totalQuantity: trades.reduce((sum, t) => {
+      return sum + (t.SecurityType === 'O' ? safeParseNumber(t.OptionContracts) : safeParseNumber(t.StockShareQty));
+    }, 0),
+    buyCount: trades.filter(t => t.TradeType === 'B').length,
+    sellCount: trades.filter(t => t.TradeType === 'S').length,
+    stockCount: stockTrades.length,
+    optionCount: optionTrades.length,
   };
 
-  const pnl = safeSummary.currentValue - safeSummary.totalCost;
-  const pnlPercent = safeSummary.totalCost > 0 ? (pnl / safeSummary.totalCost) * 100 : 0;
+  const displaySymbol = filters?.symbol || summary?.symbol || trades[0]?.Symbol || 'All';
 
-  // Get active filter chips
-  const activeFilterChips = filters
-    ? Object.entries(filters)
-        .filter(([, value]) => value && value !== 'all')
-        .map(([key, value]) => ({
-          key: key as keyof ActiveFilters,
-          label: formatFilterLabel(key, value),
-        }))
-    : [];
-
-  const styles = {
-    container: {
-      backgroundColor: colors.bgCard,
-      borderRadius: '12px',
-      border: `1px solid ${colors.border}`,
-      overflow: 'hidden',
-      marginTop: '8px',
-      marginBottom: '8px',
-      maxWidth: '100%',
-    },
-    header: {
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      padding: '12px 16px',
-      backgroundColor: colors.bgHeader,
-      borderBottom: `1px solid ${colors.border}`,
-    },
-    headerTitle: {
-      fontSize: '14px',
-      fontWeight: 600,
-      color: colors.textPrimary,
-    },
-    headerActions: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '12px',
-    },
-    iconButton: {
-      background: 'none',
-      border: 'none',
-      padding: '4px',
-      cursor: 'pointer',
-      color: colors.textSecondary,
-      display: 'flex',
-      alignItems: 'center',
-    },
-    summarySection: {
-      padding: '12px 16px',
-      backgroundColor: colors.bgCard,
-      borderBottom: `1px solid ${colors.border}`,
-    },
-    summaryText: {
-      fontSize: '13px',
-      color: colors.textSecondary,
-      lineHeight: 1.5,
-      margin: 0,
-    },
-    summaryValue: {
-      color: colors.textPrimary,
-      fontWeight: 600,
-    },
-    pnlBadge: {
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: '4px',
-      padding: '4px 8px',
-      borderRadius: '4px',
-      fontSize: '12px',
-      fontWeight: 600,
-      marginTop: '8px',
-    },
-    tableWrapper: {
-      overflowX: 'auto' as const,
-      WebkitOverflowScrolling: 'touch' as const,
-    },
-    sectionHeader: {
-      padding: '10px 16px',
-      backgroundColor: colors.bgHeader,
-      borderBottom: `1px solid ${colors.border}`,
-      borderTop: `1px solid ${colors.border}`,
-    },
-    sectionTitle: {
-      fontSize: '12px',
-      fontWeight: 600,
-      color: colors.textSecondary,
-      textTransform: 'uppercase' as const,
-      letterSpacing: '0.5px',
-      margin: 0,
-    },
-    table: {
-      width: '100%',
-      borderCollapse: 'collapse' as const,
-      fontSize: '13px',
-      minWidth: '500px',
-    },
-    th: {
-      padding: '10px 12px',
-      textAlign: 'left' as const,
-      fontSize: '11px',
-      fontWeight: 600,
-      color: colors.textMuted,
-      textTransform: 'uppercase' as const,
-      letterSpacing: '0.5px',
-      borderBottom: `1px solid ${colors.border}`,
-      backgroundColor: colors.bgHeader,
-      whiteSpace: 'nowrap' as const,
-    },
-    thRight: {
-      textAlign: 'right' as const,
-    },
-    thCenter: {
-      textAlign: 'center' as const,
-    },
-    td: {
-      padding: '10px 12px',
-      borderBottom: `1px solid ${colors.border}`,
-      color: colors.textPrimary,
-      whiteSpace: 'nowrap' as const,
-    },
-    tdRight: {
-      textAlign: 'right' as const,
-    },
-    tdCenter: {
-      textAlign: 'center' as const,
-    },
-    rowNum: {
-      color: colors.textMuted,
-      fontSize: '12px',
-      width: '40px',
-    },
-    buyBadge: {
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: '2px',
-      color: colors.buy,
-      fontSize: '12px',
-      fontWeight: 500,
-    },
-    sellBadge: {
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: '2px',
-      color: colors.sell,
-      fontSize: '12px',
-      fontWeight: 500,
-    },
-    positive: {
-      color: colors.buy,
-    },
-    negative: {
-      color: colors.sell,
-    },
-  };
-
-  // Additional styles for filters and aggregations
-  const filterStyles: Record<string, React.CSSProperties> = {
-    filterBar: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '8px',
-      padding: '10px 16px',
-      backgroundColor: '#141414',
-      borderBottom: `1px solid ${colors.border}`,
-      flexWrap: 'wrap',
-    },
-    filterIcon: {
-      color: '#00c806',
-      marginRight: '4px',
-    },
-    filterChip: {
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: '6px',
-      padding: '4px 10px',
-      backgroundColor: 'rgba(0, 200, 6, 0.1)',
-      border: '1px solid rgba(0, 200, 6, 0.3)',
-      borderRadius: '12px',
-      fontSize: '11px',
-      fontWeight: 500,
-      color: '#00c806',
-    },
-    filterChipClose: {
-      background: 'none',
-      border: 'none',
-      padding: '0',
-      cursor: 'pointer',
-      color: '#00c806',
-      display: 'flex',
-      alignItems: 'center',
-      opacity: 0.7,
-    },
-    aggregationBar: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '16px',
-      padding: '12px 16px',
-      backgroundColor: 'rgba(0, 200, 6, 0.05)',
-      borderBottom: `1px solid ${colors.border}`,
-      flexWrap: 'wrap',
-    },
-    aggregationItem: {
-      display: 'flex',
-      flexDirection: 'column' as const,
-      gap: '2px',
-    },
-    aggregationLabel: {
-      fontSize: '10px',
-      fontWeight: 600,
-      color: colors.textMuted,
-      textTransform: 'uppercase' as const,
-      letterSpacing: '0.5px',
-    },
-    aggregationValue: {
-      fontSize: '14px',
-      fontWeight: 600,
-      color: colors.textPrimary,
-      fontFamily: '"JetBrains Mono", monospace',
-    },
-  };
-
-  // Pagination styles
-  const paginationStyles: Record<string, React.CSSProperties> = {
-    container: {
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: '8px',
-      padding: '12px 16px',
-      backgroundColor: colors.bgHeader,
-      borderTop: `1px solid ${colors.border}`,
-    },
-    button: {
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      width: '32px',
-      height: '32px',
-      backgroundColor: 'transparent',
-      border: `1px solid ${colors.border}`,
-      borderRadius: '6px',
-      color: colors.textSecondary,
-      cursor: 'pointer',
-    },
-    buttonDisabled: {
-      opacity: 0.4,
-      cursor: 'not-allowed',
-    },
-    pageInfo: {
-      fontSize: '12px',
-      color: colors.textSecondary,
-      minWidth: '80px',
-      textAlign: 'center' as const,
-    },
-  };
-
-  // Pagination component
-  const PaginationControls = ({
-    currentPage,
-    totalPages,
-    onPageChange,
-    totalItems,
-    label,
-  }: {
-    currentPage: number;
-    totalPages: number;
-    onPageChange: (page: number) => void;
-    totalItems: number;
-    label: string;
-  }) => {
-    if (totalPages <= 1) return null;
-
+  if (trades.length === 0) {
     return (
-      <div style={paginationStyles.container}>
-        <button
-          style={{
-            ...paginationStyles.button,
-            ...(currentPage === 1 ? paginationStyles.buttonDisabled : {}),
-          }}
-          onClick={() => onPageChange(currentPage - 1)}
-          disabled={currentPage === 1}
-          title="Previous page"
-        >
-          <ChevronLeft size={16} />
-        </button>
-        <span style={paginationStyles.pageInfo}>
-          {label}: {currentPage} / {totalPages} ({totalItems})
-        </span>
-        <button
-          style={{
-            ...paginationStyles.button,
-            ...(currentPage === totalPages ? paginationStyles.buttonDisabled : {}),
-          }}
-          onClick={() => onPageChange(currentPage + 1)}
-          disabled={currentPage === totalPages}
-          title="Next page"
-        >
-          <ChevronRight size={16} />
-        </button>
+      <div style={{
+        background: `linear-gradient(180deg, ${palette.card} 0%, ${palette.void} 100%)`,
+        borderRadius: '20px',
+        border: `1px solid ${palette.border}`,
+        overflow: 'hidden',
+        marginTop: '12px',
+        marginBottom: '12px',
+        boxShadow: `0 16px 32px -8px rgba(0, 0, 0, 0.6), 0 0 0 1px ${palette.border}`,
+        fontFamily: '"JetBrains Mono", "SF Mono", "Fira Code", monospace',
+      }}>
+        <div style={{
+          padding: '16px 20px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '16px',
+          background: `radial-gradient(ellipse at left, ${palette.cyanDim} 0%, transparent 50%)`,
+        }}>
+          <div style={{
+            width: '44px',
+            height: '44px',
+            borderRadius: '12px',
+            background: `linear-gradient(135deg, ${palette.cyan}20 0%, ${palette.cyan}05 100%)`,
+            border: `1px solid ${palette.cyan}30`,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0,
+          }}>
+            <BarChart3 size={20} color={palette.cyan} strokeWidth={2} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{
+              fontSize: '9px',
+              fontWeight: 700,
+              color: palette.cyan,
+              textTransform: 'uppercase',
+              letterSpacing: '1.5px',
+              marginBottom: '2px',
+            }}>
+              TRADES
+            </div>
+            <div style={{ fontSize: '14px', color: palette.textMuted }}>
+              No trades found
+            </div>
+          </div>
+        </div>
       </div>
     );
-  };
+  }
 
   return (
-    <div style={styles.container}>
-      {/* Header */}
-      <div style={styles.header}>
-        <span style={styles.headerTitle}>{safeSummary.symbol} Trades</span>
-        <div style={styles.headerActions}>
-          <button type="button" style={styles.iconButton} title="Download CSV" onClick={handleDownload}>
-            <Download size={16} />
-          </button>
-          <button style={styles.iconButton} title="Expand">
-            <Maximize2 size={16} />
-          </button>
-        </div>
-      </div>
-
-      {/* Active Filters */}
-      {activeFilterChips.length > 0 && (
-        <div style={filterStyles.filterBar}>
-          <Filter size={14} style={filterStyles.filterIcon} />
-          {activeFilterChips.map(chip => (
-            <span key={chip.key} style={filterStyles.filterChip}>
-              {chip.label}
-              {onClearFilter && (
-                <button
-                  onClick={() => onClearFilter(chip.key)}
-                  style={filterStyles.filterChipClose}
-                >
-                  <X size={12} />
-                </button>
-              )}
-            </span>
-          ))}
-        </div>
-      )}
-
-      {/* Aggregations Bar */}
-      {aggregations && (
-        <div style={filterStyles.aggregationBar}>
-          <div style={filterStyles.aggregationItem}>
-            <span style={filterStyles.aggregationLabel}>Trades</span>
-            <span style={filterStyles.aggregationValue}>{aggregations.tradeCount}</span>
-          </div>
-          <div style={filterStyles.aggregationItem}>
-            <span style={filterStyles.aggregationLabel}>Total Value</span>
-            <span style={filterStyles.aggregationValue}>{formatCurrency(aggregations.totalPremium)}</span>
-          </div>
-          <div style={filterStyles.aggregationItem}>
-            <span style={filterStyles.aggregationLabel}>Avg/Trade</span>
-            <span style={filterStyles.aggregationValue}>{formatCurrency(aggregations.avgPremium)}</span>
-          </div>
-          {aggregations.buyCount !== undefined && aggregations.sellCount !== undefined && (
-            <div style={filterStyles.aggregationItem}>
-              <span style={filterStyles.aggregationLabel}>Buy/Sell</span>
-              <span style={filterStyles.aggregationValue}>
-                <span style={{ color: colors.buy }}>{aggregations.buyCount}</span>
-                {' / '}
-                <span style={{ color: colors.sell }}>{aggregations.sellCount}</span>
-              </span>
-            </div>
-          )}
-          {aggregations.callCount !== undefined && aggregations.putCount !== undefined &&
-           (aggregations.callCount > 0 || aggregations.putCount > 0) && (
-            <div style={filterStyles.aggregationItem}>
-              <span style={filterStyles.aggregationLabel}>Call/Put</span>
-              <span style={filterStyles.aggregationValue}>
-                <span style={{ color: '#4da6ff' }}>{aggregations.callCount}</span>
-                {' / '}
-                <span style={{ color: '#ffa64d' }}>{aggregations.putCount}</span>
-              </span>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Summary */}
-      <div style={styles.summarySection}>
-        <p style={styles.summaryText}>
-          <span style={styles.summaryValue}>{safeSummary.totalShares.toLocaleString()}</span> shares purchased for{' '}
-          <span style={styles.summaryValue}>{formatCurrency(safeSummary.totalCost)}</span>
-          {' '}&bull;{' '}Current value:{' '}
-          <span style={styles.summaryValue}>{formatCurrency(safeSummary.currentValue)}</span>
-        </p>
+    <div style={{
+      background: `linear-gradient(180deg, ${palette.card} 0%, ${palette.void} 100%)`,
+      borderRadius: '20px',
+      border: `1px solid ${palette.border}`,
+      overflow: 'hidden',
+      marginTop: '12px',
+      marginBottom: '12px',
+      boxShadow: `0 16px 32px -8px rgba(0, 0, 0, 0.6), 0 0 0 1px ${palette.border}`,
+      fontFamily: '"JetBrains Mono", "SF Mono", "Fira Code", monospace',
+    }}>
+      {/* Compact Header + Hero Combined */}
+      <div style={{
+        padding: '16px 20px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '16px',
+        background: `radial-gradient(ellipse at left, ${palette.cyanDim} 0%, transparent 50%)`,
+      }}>
+        {/* Icon */}
         <div style={{
-          ...styles.pnlBadge,
-          backgroundColor: pnl >= 0 ? 'rgba(0, 200, 6, 0.15)' : 'rgba(255, 82, 82, 0.15)',
-          color: pnl >= 0 ? colors.buy : colors.sell,
+          width: '44px',
+          height: '44px',
+          borderRadius: '12px',
+          background: `linear-gradient(135deg, ${palette.cyan}20 0%, ${palette.cyan}05 100%)`,
+          border: `1px solid ${palette.cyan}30`,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
         }}>
-          {pnl >= 0 ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />}
-          {formatCurrency(Math.abs(pnl))} ({pnlPercent >= 0 ? '+' : ''}{pnlPercent.toFixed(2)}%)
+          <BarChart3 size={20} color={palette.cyan} strokeWidth={2} />
+        </div>
+
+        {/* Main Info */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '2px' }}>
+            <span style={{
+              fontSize: '9px',
+              fontWeight: 700,
+              color: palette.cyan,
+              textTransform: 'uppercase',
+              letterSpacing: '1.5px',
+            }}>
+              TRADES
+            </span>
+            {filters?.fromDate && (
+              <span style={{
+                fontSize: '10px',
+                padding: '2px 6px',
+                borderRadius: '4px',
+                backgroundColor: palette.cyanDim,
+                color: palette.cyan,
+                fontWeight: 600,
+              }}>
+                {filters.fromDate}
+              </span>
+            )}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+            <span style={{
+              fontSize: '16px',
+              fontWeight: 700,
+              color: palette.textPrimary,
+            }}>
+              {displaySymbol}
+            </span>
+            <span style={{
+              fontSize: '11px',
+              color: palette.textMuted,
+            }}>
+              {agg.tradeCount} trade{agg.tradeCount !== 1 ? 's' : ''}
+            </span>
+          </div>
+        </div>
+
+        {/* Total Value - Hero Number */}
+        <div style={{ textAlign: 'right', flexShrink: 0 }}>
+          <div style={{
+            fontSize: '9px',
+            color: palette.textMuted,
+            textTransform: 'uppercase',
+            letterSpacing: '1px',
+            marginBottom: '2px',
+          }}>
+            Total Value
+          </div>
+          <div style={{
+            fontSize: '22px',
+            fontWeight: 800,
+            color: palette.textPrimary,
+            lineHeight: 1,
+          }}>
+            {formatCurrency(agg.totalPremium)}
+          </div>
+        </div>
+
+        {/* Download Button */}
+        <button
+          onClick={handleDownload}
+          style={{
+            width: '36px',
+            height: '36px',
+            borderRadius: '8px',
+            border: `1px solid ${palette.border}`,
+            backgroundColor: palette.elevated,
+            color: palette.textSecondary,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0,
+          }}
+          title="Download CSV"
+        >
+          <Download size={14} />
+        </button>
+      </div>
+
+      {/* Compact Stats Row */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '12px 20px',
+        borderTop: `1px solid ${palette.border}`,
+        background: palette.surface,
+        gap: '8px',
+        flexWrap: 'wrap',
+      }}>
+        {/* Stock/Option breakdown - prominent badges */}
+        {(agg.stockCount !== undefined || agg.optionCount !== undefined) && (agg.stockCount! > 0 || agg.optionCount! > 0) && (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+          }}>
+            {agg.stockCount! > 0 && (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '4px 10px',
+                borderRadius: '6px',
+                backgroundColor: 'rgba(147, 51, 234, 0.12)',
+                border: '1px solid rgba(147, 51, 234, 0.25)',
+              }}>
+                <TrendingUp size={14} color="#a855f7" strokeWidth={2.5} />
+                <span style={{
+                  fontSize: '13px',
+                  fontWeight: 700,
+                  color: '#a855f7',
+                }}>
+                  {agg.stockCount}
+                </span>
+                <span style={{
+                  fontSize: '10px',
+                  color: '#c084fc',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px',
+                }}>
+                  Stock{agg.stockCount !== 1 ? 's' : ''}
+                </span>
+              </div>
+            )}
+            {agg.optionCount! > 0 && (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '4px 10px',
+                borderRadius: '6px',
+                backgroundColor: palette.cyanDim,
+                border: `1px solid ${palette.cyan}40`,
+              }}>
+                <Shuffle size={14} color={palette.cyan} strokeWidth={2.5} />
+                <span style={{
+                  fontSize: '13px',
+                  fontWeight: 700,
+                  color: palette.cyan,
+                }}>
+                  {agg.optionCount}
+                </span>
+                <span style={{
+                  fontSize: '10px',
+                  color: palette.cyan,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px',
+                  opacity: 0.8,
+                }}>
+                  Option{agg.optionCount !== 1 ? 's' : ''}
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Qty stat */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+        }}>
+          <Layers size={12} color={palette.textDim} />
+          <span style={{
+            fontSize: '13px',
+            fontWeight: 700,
+            color: palette.textPrimary,
+          }}>
+            {agg.totalQuantity.toLocaleString()}
+          </span>
+          <span style={{
+            fontSize: '10px',
+            color: palette.textMuted,
+            textTransform: 'lowercase',
+          }}>
+            qty
+          </span>
+        </div>
+
+        {/* Buy/Sell breakdown */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+        }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+          }}>
+            <div style={{ width: '6px', height: '6px', borderRadius: '2px', backgroundColor: palette.profit }} />
+            <span style={{ fontSize: '12px', fontWeight: 700, color: palette.profit }}>{agg.buyCount || 0}</span>
+            <span style={{ fontSize: '9px', color: palette.textMuted }}>buy</span>
+          </div>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+          }}>
+            <div style={{ width: '6px', height: '6px', borderRadius: '2px', backgroundColor: palette.loss }} />
+            <span style={{ fontSize: '12px', fontWeight: 700, color: palette.loss }}>{agg.sellCount || 0}</span>
+            <span style={{ fontSize: '9px', color: palette.textMuted }}>sell</span>
+          </div>
+        </div>
+
+        {/* Avg Value Pill */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '4px',
+          padding: '4px 10px',
+          borderRadius: '100px',
+          background: palette.elevated,
+          border: `1px solid ${palette.border}`,
+        }}>
+          <DollarSign size={10} color={palette.textMuted} />
+          <span style={{ fontSize: '12px', fontWeight: 700, color: palette.textPrimary }}>
+            {formatCurrency(agg.avgPremium)}
+          </span>
+          <span style={{ fontSize: '10px', color: palette.textMuted }}>/avg</span>
         </div>
       </div>
 
-      {/* Stock Trades */}
-      {stockTrades.length > 0 && (
-        <>
-          <div style={styles.sectionHeader}>
-            <p style={styles.sectionTitle}>Stock Trades ({stockTrades.length})</p>
-          </div>
-          <div style={styles.tableWrapper}>
-            <table style={styles.table}>
-              <thead>
-                <tr>
-                  <th style={{ ...styles.th, ...styles.thCenter, width: '40px' }}>#</th>
-                  <th style={styles.th}>Date</th>
-                  <th style={{ ...styles.th, ...styles.thCenter }}>Type</th>
-                  <th style={{ ...styles.th, ...styles.thRight }}>Shares</th>
-                  <th style={{ ...styles.th, ...styles.thRight }}>Price</th>
-                  <th style={{ ...styles.th, ...styles.thRight }}>Net Amount</th>
-                </tr>
-              </thead>
-              <tbody>
-                {paginatedStockTrades.map((trade, index) => {
-                  const netAmount = getTradeCashFlowUSD(trade);
-                  const globalIndex = (stockPage - 1) * pageSize + index;
-                  return (
-                    <tr key={trade.TradeID} style={{ backgroundColor: index % 2 === 0 ? colors.bgRow : colors.bgRowAlt }}>
-                      <td style={{ ...styles.td, ...styles.tdCenter, ...styles.rowNum }}>{globalIndex + 1}</td>
-                      <td style={styles.td}>{formatDate(trade.Date)}</td>
-                      <td style={{ ...styles.td, ...styles.tdCenter }}>
-                        {trade.TradeType === 'B' ? (
-                          <span style={styles.buyBadge}>
-                            <ArrowUpRight size={12} /> Buy
-                          </span>
-                        ) : (
-                          <span style={styles.sellBadge}>
-                            <ArrowDownRight size={12} /> Sell
-                          </span>
-                        )}
-                      </td>
-                      <td style={{ ...styles.td, ...styles.tdRight }}>
-                        {parseFloat(trade.StockShareQty || '0').toLocaleString()}
-                      </td>
-                      <td style={{ ...styles.td, ...styles.tdRight }}>
-                        {formatCurrency(parseFloat(trade.StockTradePrice || '0'))}
-                      </td>
-                      <td style={{
-                        ...styles.td,
-                        ...styles.tdRight,
-                        ...(netAmount >= 0 ? styles.positive : styles.negative),
-                        fontWeight: 500,
-                      }}>
-                        {formatCurrency(netAmount)}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          <PaginationControls
-            currentPage={stockPage}
-            totalPages={stockTotalPages}
-            onPageChange={setStockPage}
-            totalItems={stockTrades.length}
-            label="Stocks"
-          />
-        </>
-      )}
+      {/* Ultra-Compact Table */}
+      <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+          <thead>
+            <tr>
+              {['DATE', 'SYM', 'TYPE', 'QTY', 'PRICE', 'VALUE'].map((header, i) => (
+                <th key={i} style={{
+                  padding: '6px 8px',
+                  textAlign: i >= 3 ? 'right' : 'left',
+                  fontFamily: 'inherit',
+                  fontSize: '8px',
+                  fontWeight: 600,
+                  color: palette.textDim,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px',
+                  borderBottom: `1px solid ${palette.border}`,
+                  backgroundColor: palette.void,
+                  whiteSpace: 'nowrap',
+                }}>
+                  {header}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {currentTrades.map((trade, index) => {
+              const netAmount = getTradeCashFlowUSD(trade);
+              const isBuy = trade.TradeType === 'B';
+              const isOption = trade.SecurityType === 'O';
+              const qty = isOption ? safeParseNumber(trade.OptionContracts) : safeParseNumber(trade.StockShareQty);
+              const price = isOption ? safeParseNumber(trade.OptionTradePremium) : safeParseNumber(trade.StockTradePrice);
 
-      {/* Option Trades */}
-      {optionTrades.length > 0 && (
-        <>
-          <div style={styles.sectionHeader}>
-            <p style={styles.sectionTitle}>Option Trades ({optionTrades.length})</p>
-          </div>
-          <div style={styles.tableWrapper}>
-            <table style={styles.table}>
-              <thead>
-                <tr>
-                  <th style={{ ...styles.th, ...styles.thCenter, width: '40px' }}>#</th>
-                  <th style={styles.th}>Date</th>
-                  <th style={{ ...styles.th, ...styles.thCenter }}>Type</th>
-                  <th style={{ ...styles.th, ...styles.thCenter }}>C/P</th>
-                  <th style={{ ...styles.th, ...styles.thRight }}>Strike</th>
-                  <th style={styles.th}>Exp</th>
-                  <th style={{ ...styles.th, ...styles.thRight }}>Contracts</th>
-                  <th style={{ ...styles.th, ...styles.thRight }}>Net Amount</th>
-                </tr>
-              </thead>
-              <tbody>
-                {paginatedOptionTrades.map((trade, index) => {
-                  const netAmount = getTradeCashFlowUSD(trade);
-                  const globalIndex = (optionPage - 1) * pageSize + index;
-                  return (
-                    <tr key={trade.TradeID} style={{ backgroundColor: index % 2 === 0 ? colors.bgRow : colors.bgRowAlt }}>
-                      <td style={{ ...styles.td, ...styles.tdCenter, ...styles.rowNum }}>{globalIndex + 1}</td>
-                      <td style={styles.td}>{formatDate(trade.Date)}</td>
-                      <td style={{ ...styles.td, ...styles.tdCenter }}>
-                        {trade.TradeType === 'B' ? (
-                          <span style={styles.buyBadge}>Buy</span>
-                        ) : (
-                          <span style={styles.sellBadge}>Sell</span>
-                        )}
-                      </td>
-                      <td style={{ ...styles.td, ...styles.tdCenter }}>
-                        <span style={{
-                          color: trade['Call/Put'] === 'C' ? '#4da6ff' : '#ffa64d',
-                          fontWeight: 500,
-                        }}>
-                          {trade['Call/Put'] === 'C' ? 'Call' : 'Put'}
-                        </span>
-                      </td>
-                      <td style={{ ...styles.td, ...styles.tdRight }}>
-                        {formatCurrency(safeParseNumber(trade.Strike))}
-                      </td>
-                      <td style={styles.td}>
-                        {trade.Expiration ? formatDate(trade.Expiration) : '-'}
-                      </td>
-                      <td style={{ ...styles.td, ...styles.tdRight }}>
-                        {safeParseNumber(trade.OptionContracts).toLocaleString()}
-                      </td>
-                      <td style={{
-                        ...styles.td,
-                        ...styles.tdRight,
-                        ...(netAmount >= 0 ? styles.positive : styles.negative),
-                        fontWeight: 500,
+              return (
+                <tr
+                  key={trade.TradeID}
+                  style={{ backgroundColor: index % 2 === 0 ? palette.surface : palette.void }}
+                >
+                  {/* Date */}
+                  <td style={{
+                    padding: '5px 8px',
+                    borderBottom: `1px solid ${palette.border}`,
+                    color: palette.textSecondary,
+                    fontSize: '11px',
+                  }}>
+                    {formatDate(trade.Date)}
+                  </td>
+                  {/* Symbol */}
+                  <td style={{
+                    padding: '5px 8px',
+                    borderBottom: `1px solid ${palette.border}`,
+                    fontWeight: 700,
+                    fontSize: '11px',
+                    color: palette.textPrimary,
+                  }}>
+                    {getDisplaySymbol(trade.Symbol, isOption)}
+                    {isOption && (
+                      <span style={{
+                        marginLeft: '4px',
+                        fontSize: '9px',
+                        fontWeight: 700,
+                        padding: '1px 3px',
+                        borderRadius: '3px',
+                        backgroundColor: trade['Call/Put'] === 'C' ? palette.callDim : palette.putDim,
+                        color: trade['Call/Put'] === 'C' ? palette.call : palette.put,
                       }}>
-                        {formatCurrency(netAmount)}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                        {trade['Call/Put']}
+                      </span>
+                    )}
+                  </td>
+                  {/* Type badge */}
+                  <td style={{
+                    padding: '5px 8px',
+                    borderBottom: `1px solid ${palette.border}`,
+                  }}>
+                    <span style={{
+                      fontSize: '9px',
+                      fontWeight: 700,
+                      padding: '2px 4px',
+                      borderRadius: '3px',
+                      backgroundColor: isBuy ? palette.profitDim : palette.lossDim,
+                      color: isBuy ? palette.profit : palette.loss,
+                    }}>
+                      {isBuy ? 'B' : 'S'}
+                    </span>
+                  </td>
+                  {/* Qty */}
+                  <td style={{
+                    padding: '5px 8px',
+                    borderBottom: `1px solid ${palette.border}`,
+                    textAlign: 'right',
+                    color: palette.textSecondary,
+                    fontWeight: 600,
+                    fontSize: '11px',
+                  }}>
+                    {qty}{isOption ? '×' : ''}
+                  </td>
+                  {/* Price */}
+                  <td style={{
+                    padding: '5px 8px',
+                    borderBottom: `1px solid ${palette.border}`,
+                    textAlign: 'right',
+                    fontWeight: 600,
+                    fontSize: '11px',
+                    color: palette.textPrimary,
+                  }}>
+                    {formatCurrency(price)}
+                  </td>
+                  {/* Value */}
+                  <td style={{
+                    padding: '5px 8px',
+                    borderBottom: `1px solid ${palette.border}`,
+                    textAlign: 'right',
+                    fontWeight: 700,
+                    fontSize: '11px',
+                    color: netAmount >= 0 ? palette.profit : palette.loss,
+                  }}>
+                    {formatCurrency(netAmount)}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Compact Pagination */}
+      {totalPages > 1 && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '10px 20px',
+          borderTop: `1px solid ${palette.border}`,
+          backgroundColor: palette.void,
+        }}>
+          <div style={{
+            fontSize: '10px',
+            color: palette.textMuted,
+          }}>
+            <span style={{ color: palette.textSecondary }}>{startIndex + 1}-{Math.min(endIndex, allTrades.length)}</span>
+            <span> of </span>
+            <span style={{ color: palette.textSecondary }}>{allTrades.length}</span>
           </div>
-          <PaginationControls
-            currentPage={optionPage}
-            totalPages={optionTotalPages}
-            onPageChange={setOptionPage}
-            totalItems={optionTrades.length}
-            label="Options"
-          />
-        </>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <button
+              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: '28px',
+                height: '28px',
+                borderRadius: '6px',
+                border: `1px solid ${currentPage === 1 ? palette.border : palette.textDim}`,
+                backgroundColor: palette.elevated,
+                color: currentPage === 1 ? palette.textDim : palette.textPrimary,
+                cursor: currentPage === 1 ? 'not-allowed' : 'pointer',
+                opacity: currentPage === 1 ? 0.5 : 1,
+              }}
+            >
+              <ChevronLeft size={14} />
+            </button>
+
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '2px',
+              padding: '0 6px',
+            }}>
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => {
+                const showPage = page === 1 || page === totalPages || Math.abs(page - currentPage) <= 1;
+                const showEllipsis = (page === 2 && currentPage > 3) || (page === totalPages - 1 && currentPage < totalPages - 2);
+
+                if (!showPage && !showEllipsis) return null;
+
+                if (showEllipsis && !showPage) {
+                  return <span key={`e-${page}`} style={{ fontSize: '10px', color: palette.textDim }}>···</span>;
+                }
+
+                return (
+                  <button
+                    key={page}
+                    onClick={() => setCurrentPage(page)}
+                    style={{
+                      fontSize: '10px',
+                      fontWeight: page === currentPage ? 700 : 500,
+                      minWidth: '24px',
+                      height: '24px',
+                      borderRadius: '4px',
+                      border: page === currentPage ? `1px solid ${palette.cyan}` : '1px solid transparent',
+                      backgroundColor: page === currentPage ? `${palette.cyan}20` : 'transparent',
+                      color: page === currentPage ? palette.cyan : palette.textMuted,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {page}
+                  </button>
+                );
+              })}
+            </div>
+
+            <button
+              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+              disabled={currentPage === totalPages}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: '28px',
+                height: '28px',
+                borderRadius: '6px',
+                border: `1px solid ${currentPage === totalPages ? palette.border : palette.textDim}`,
+                backgroundColor: palette.elevated,
+                color: currentPage === totalPages ? palette.textDim : palette.textPrimary,
+                cursor: currentPage === totalPages ? 'not-allowed' : 'pointer',
+                opacity: currentPage === totalPages ? 0.5 : 1,
+              }}
+            >
+              <ChevronRight size={14} />
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

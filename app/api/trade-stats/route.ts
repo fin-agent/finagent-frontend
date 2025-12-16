@@ -113,23 +113,26 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ stats: null });
     }
 
-    const prices = data.map(t => parseFloat(t.StockTradePrice || '0')).filter(p => p > 0);
-    const totalShares = data.reduce((sum, t) => sum + parseFloat(t.StockShareQty || '0'), 0);
-    const totalValue = data.reduce((sum, t) => {
-      const price = parseFloat(t.StockTradePrice || '0');
-      const shares = parseFloat(t.StockShareQty || '0');
-      if (price > 0 && shares > 0) return sum + Math.abs(price * shares);
-      return sum;
-    }, 0);
+    // Filter to valid trades only (both price and shares must be positive)
+    // This matches the voice endpoint logic for consistency
+    const validTrades = data
+      .map(t => ({
+        price: parseFloat(t.StockTradePrice || '0'),
+        shares: parseFloat(t.StockShareQty || '0'),
+        trade: t,
+      }))
+      .filter(t => t.price > 0 && t.shares > 0);
 
-    const highestPrice = Math.max(...prices);
-    const lowestPrice = Math.min(...prices);
-    const avgPrice = totalShares > 0
-      ? totalValue / totalShares
-      : prices.reduce((a, b) => a + b, 0) / prices.length;
+    const prices = validTrades.map(t => t.price);
+    const totalShares = validTrades.reduce((sum, t) => sum + t.shares, 0);
+    const totalValue = validTrades.reduce((sum, t) => sum + t.price * t.shares, 0);
 
-    const highestTrade = data.find(t => parseFloat(t.StockTradePrice || '0') === highestPrice);
-    const lowestTrade = data.find(t => parseFloat(t.StockTradePrice || '0') === lowestPrice);
+    const highestPrice = prices.length > 0 ? Math.max(...prices) : 0;
+    const lowestPrice = prices.length > 0 ? Math.min(...prices) : 0;
+    const avgPrice = totalShares > 0 ? totalValue / totalShares : 0;
+
+    const highestTrade = validTrades.find(t => t.price === highestPrice)?.trade;
+    const lowestTrade = validTrades.find(t => t.price === lowestPrice)?.trade;
 
     const typeLabel = tradeType ? (tradeType.toLowerCase().startsWith('s') ? 'sell' : 'buy') : 'all';
 
@@ -150,7 +153,7 @@ export async function POST(req: NextRequest) {
         lowestPriceDate: lowestTrade?.Date ? formatDate(lowestTrade.Date) : null,
         lowestPriceShares: lowestTrade ? parseFloat(lowestTrade.StockShareQty || '0') : 0,
         averagePrice: avgPrice,
-        totalTrades: data.length,
+        totalTrades: validTrades.length,
         totalShares,
         totalValue,
       },

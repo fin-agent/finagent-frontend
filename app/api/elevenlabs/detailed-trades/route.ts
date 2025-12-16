@@ -32,6 +32,16 @@ function normalizeSymbol(input: string): string {
   return SYMBOL_MAP[lower] || input.toUpperCase();
 }
 
+// Format number for TTS (no commas)
+function formatNumber(num: number): string {
+  return Math.round(num).toString();
+}
+
+// Format currency for TTS
+function formatCurrency(amount: number): string {
+  return `$${Math.abs(amount).toFixed(2)}`;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -67,24 +77,39 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    // Separate stock and option trades
     const stockTrades = data.filter(t => t.SecurityType === 'S');
     const optionTrades = data.filter(t => t.SecurityType === 'O');
-    const buyTrades = stockTrades.filter(t => t.TradeType === 'B');
 
-    const totalSharesPurchased = buyTrades.reduce((sum, t) =>
+    // Count buys and sells across ALL trades
+    const buyCount = data.filter(t => t.TradeType === 'B').length;
+    const sellCount = data.filter(t => t.TradeType === 'S').length;
+
+    // Calculate total quantities for ALL trades
+    const totalShares = stockTrades.reduce((sum, t) =>
       sum + parseFloat(t.StockShareQty || '0'), 0);
-    const totalCost = buyTrades.reduce((sum, t) =>
+    const totalContracts = optionTrades.reduce((sum, t) =>
+      sum + parseFloat(t.OptionContracts || '0'), 0);
+    const totalQuantity = totalShares + totalContracts;
+
+    // Calculate total value (sum of absolute NetAmounts) for ALL trades
+    const totalValue = data.reduce((sum, t) =>
       sum + Math.abs(parseFloat(t.NetAmount || '0')), 0);
 
-    const lastPrice = stockTrades[0]?.StockTradePrice
-      ? parseFloat(stockTrades[0].StockTradePrice)
-      : 0;
-    const currentValue = totalSharesPurchased * lastPrice;
-    const profitLoss = currentValue - totalCost;
-    const profitLossPercent = totalCost > 0 ? ((currentValue - totalCost) / totalCost) * 100 : 0;
+    // Calculate average value per trade
+    const avgValue = data.length > 0 ? totalValue / data.length : 0;
 
-    const sharesText = Math.round(totalSharesPurchased).toString();
-    const response = `For ${normalizedSymbol}, you have ${stockTrades.length} stock trades and ${optionTrades.length} option trades. You bought ${sharesText} shares for a total cost of $${totalCost.toFixed(2)} with an estimated current value of $${currentValue.toFixed(2)}, for a profit or loss of $${profitLoss.toFixed(2)} or ${profitLossPercent.toFixed(2)} percent.`;
+    // Build response for TTS - matches UI display
+    let response = `For ${normalizedSymbol}, you have ${data.length} total trades: `;
+    response += `${stockTrades.length} stock trades and ${optionTrades.length} option trades. `;
+    response += `${buyCount} buys and ${sellCount} sells. `;
+    response += `Total quantity: ${formatNumber(totalQuantity)}`;
+
+    if (stockTrades.length > 0 && optionTrades.length > 0) {
+      response += ` (${formatNumber(totalShares)} shares and ${formatNumber(totalContracts)} contracts)`;
+    }
+
+    response += `. Total value: ${formatCurrency(totalValue)} with an average of ${formatCurrency(avgValue)} per trade.`;
 
     return NextResponse.json({ response });
   } catch (error) {

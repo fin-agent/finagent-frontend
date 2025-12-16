@@ -60,18 +60,27 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ trades: [], summary: null });
     }
 
+    // Separate stock and option trades
     const stockTrades = data.filter(t => t.SecurityType === 'S');
-    const buyTrades = stockTrades.filter(t => t.TradeType === 'B');
+    const optionTrades = data.filter(t => t.SecurityType === 'O');
 
-    const totalSharesPurchased = buyTrades.reduce((sum, t) =>
+    // Count buys and sells across ALL trades
+    const buyCount = data.filter(t => t.TradeType === 'B').length;
+    const sellCount = data.filter(t => t.TradeType === 'S').length;
+
+    // Calculate total quantities for ALL trades
+    const totalShares = stockTrades.reduce((sum, t) =>
       sum + parseFloat(t.StockShareQty || '0'), 0);
-    const totalCost = buyTrades.reduce((sum, t) =>
+    const totalContracts = optionTrades.reduce((sum, t) =>
+      sum + parseFloat(t.OptionContracts || '0'), 0);
+    const totalQuantity = totalShares + totalContracts;
+
+    // Calculate total value (sum of absolute NetAmounts) for ALL trades
+    const totalValue = data.reduce((sum, t) =>
       sum + Math.abs(parseFloat(t.NetAmount || '0')), 0);
 
-    const lastPrice = stockTrades[0]?.StockTradePrice
-      ? parseFloat(stockTrades[0].StockTradePrice)
-      : 0;
-    const currentValue = totalSharesPurchased * lastPrice;
+    // Calculate average value per trade
+    const avgValue = data.length > 0 ? totalValue / data.length : 0;
 
     // Format trades for the TradesTable component with offset-adjusted dates
     const trades = data.map(t => ({
@@ -91,11 +100,19 @@ export async function POST(req: NextRequest) {
       'Call/Put': t['Call/Put'],
     }));
 
+    // Summary matches voice endpoint and UI component calculations
     const summary = {
-      totalShares: totalSharesPurchased,
-      totalCost,
-      currentValue,
       symbol: normalizedSymbol,
+      tradeCount: data.length,
+      stockCount: stockTrades.length,
+      optionCount: optionTrades.length,
+      buyCount,
+      sellCount,
+      totalShares,
+      totalContracts,
+      totalQuantity,
+      totalValue,
+      avgValue,
     };
 
     return NextResponse.json({ trades, summary });

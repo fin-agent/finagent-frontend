@@ -106,9 +106,9 @@ function parseRelativeDate(input: string): { start?: string; end?: string } {
   }
 
   if (lower === 'last year') {
-    const startOfLastYear = new Date(today.getFullYear() - 1, 0, 1);
-    const endOfLastYear = new Date(today.getFullYear() - 1, 11, 31);
-    return { start: formatDate(startOfLastYear), end: formatDate(endOfLastYear) };
+    // Treat "last year" as trailing 12 months (user intent) not calendar year
+    const startDate = new Date(today.getFullYear(), today.getMonth() - 12, today.getDate());
+    return { start: formatDate(startDate), end: formatDate(today) };
   }
 
   const lastNMonthsMatch = lower.match(/last\s+(\d+)\s+months?/);

@@ -3,6 +3,21 @@ import { NextRequest, NextResponse } from 'next/server';
 import { formatCalendarDate, getDateOffset } from '@/src/lib/date-utils';
 import { parseTimeExpression } from '@/src/lib/date-parser';
 
+// Format raw database date without offset (for "this year" queries)
+// Database dates are already in the correct year, no conversion needed
+function formatRawDate(dateStr: string): string {
+  if (!dateStr) return '';
+  const datePart = dateStr.split('T')[0];
+  const [year, month, day] = datePart.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
+  if (isNaN(date.getTime())) return dateStr;
+  return date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric'
+  });
+}
+
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -118,6 +133,10 @@ export async function POST(req: NextRequest) {
 
     const typeLabel = tradeType ? (tradeType.toLowerCase().startsWith('s') ? 'sell' : 'buy') : 'all';
 
+    // For "this year" queries (no timePeriod), use raw dates - database dates are already correct
+    // For relative time queries ("last month", etc.), use offset-adjusted dates
+    const formatDate = timePeriodDescription ? formatCalendarDate : formatRawDate;
+
     return NextResponse.json({
       stats: {
         symbol: normalizedSymbol,
@@ -125,11 +144,10 @@ export async function POST(req: NextRequest) {
         tradeType: typeLabel,
         timePeriod: timePeriodDescription, // e.g., "last month", "last week", null for full year
         highestPrice,
-        // Format dates with offset applied for display
-        highestPriceDate: highestTrade?.Date ? formatCalendarDate(highestTrade.Date) : null,
+        highestPriceDate: highestTrade?.Date ? formatDate(highestTrade.Date) : null,
         highestPriceShares: highestTrade ? parseFloat(highestTrade.StockShareQty || '0') : 0,
         lowestPrice,
-        lowestPriceDate: lowestTrade?.Date ? formatCalendarDate(lowestTrade.Date) : null,
+        lowestPriceDate: lowestTrade?.Date ? formatDate(lowestTrade.Date) : null,
         lowestPriceShares: lowestTrade ? parseFloat(lowestTrade.StockShareQty || '0') : 0,
         averagePrice: avgPrice,
         totalTrades: data.length,

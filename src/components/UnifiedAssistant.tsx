@@ -180,6 +180,38 @@ function formatDateForHighestStrikeCard(dateStr: string): string {
   });
 }
 
+/**
+ * Generate dynamic variables for ElevenLabs conversation session.
+ * These variables are injected into the agent's system prompt using {{variable_name}} syntax.
+ * This allows the voice agent to know the current date/time for interpreting day-of-week queries.
+ */
+function getElevenLabsDynamicVariables(): Record<string, string> {
+  const now = new Date();
+  const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+                      'July', 'August', 'September', 'October', 'November', 'December'];
+
+  const dayOfWeek = dayNames[now.getDay()];
+  const month = monthNames[now.getMonth()];
+  const dayOfMonth = now.getDate();
+  const year = now.getFullYear();
+
+  // Get user's timezone
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+  // Format: "Monday, December 15, 2025"
+  const formattedDate = `${dayOfWeek}, ${month} ${dayOfMonth}, ${year}`;
+
+  return {
+    current_date: formattedDate,
+    current_day: dayOfWeek,
+    current_day_of_month: String(dayOfMonth),
+    current_month: month,
+    current_year: String(year),
+    timezone: timezone,
+  };
+}
+
 function buildAnswerOverride(intent: QueryIntent | null, tradeUI: TradeUIData | null): string | null {
   if (!intent || !tradeUI) return null;
 
@@ -659,10 +691,16 @@ function detectUserQueryIntent(query: string): QueryIntent | null {
  */
 async function classifyIntentViaAPI(query: string): Promise<QueryIntentWithConfidence | null> {
   try {
+    // Pass current date from browser for smart day-of-week interpretation
+    // e.g., "Monday" should mean today if today is Monday
     const response = await fetch('/api/classify-intent', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query }),
+      body: JSON.stringify({
+        query,
+        currentDate: new Date().toISOString(),
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      }),
     });
 
     if (!response.ok) {
@@ -1548,6 +1586,9 @@ const UnifiedAssistant: React.FC = () => {
   const lastAssistantTradeUIRef = useRef<TradeUIData | null>(null);
   // Used to avoid rendering a new UI card for purely explanatory follow-ups.
   const suppressNextTradeUICardRef = useRef(false);
+  // Track when an intent-based card was rendered to prevent fallback from overriding
+  // (ElevenLabs can send multiple message events for the same query)
+  const lastIntentCardRenderedAtRef = useRef<number>(0);
   // Voice transcripts can arrive very close to the assistant's response. We optimistically
   // set a "fast" intent immediately, then optionally refine with the LLM classifier.
   const pendingVoiceIntentTokenRef = useRef(0);
@@ -1842,13 +1883,22 @@ const UnifiedAssistant: React.FC = () => {
               );
               if (data) {
                 tradeUI = data;
+                // Mark timestamp to prevent fallback from overriding on subsequent message events
+                lastIntentCardRenderedAtRef.current = Date.now();
                 console.log('🎯 [Intent-Based] Successfully rendered card:', pendingIntent.cardType);
               }
             }
           }
 
           // FALLBACK: Regex-based detection on agent's response
-          if (!tradeUI) {
+          // Skip fallback if an intent-based card was recently rendered (within 5 seconds)
+          // This prevents subsequent message chunks from ElevenLabs from triggering wrong cards
+          const timeSinceIntentCard = Date.now() - lastIntentCardRenderedAtRef.current;
+          const skipFallback = timeSinceIntentCard < 5000;
+          if (skipFallback && !tradeUI) {
+            console.log('🔍 [Text Mode] Skipping fallback - intent card rendered', timeSinceIntentCard, 'ms ago');
+          }
+          if (!tradeUI && !skipFallback) {
             // Check for account balance queries FIRST (highest priority)
             const accountMatch = detectAccountBalanceQuery(message.message);
             console.log('🔍 [Text Mode] Account balance match:', accountMatch);
@@ -1859,7 +1909,7 @@ const UnifiedAssistant: React.FC = () => {
               if (data) tradeUI = data;
             }
           }
-          if (!tradeUI) {
+          if (!tradeUI && !skipFallback) {
             const feesMatch = detectFeesQuery(message.message);
             console.log('🔍 [Text Mode] Fees match:', feesMatch);
             if (feesMatch) {
@@ -1869,18 +1919,18 @@ const UnifiedAssistant: React.FC = () => {
               if (data) tradeUI = data;
             }
           }
-          if (!tradeUI) {
+          if (!tradeUI && !skipFallback) {
             const expiringMatch = detectExpiringOptionsQuery(message.message);
             if (expiringMatch) {
               const data = await fetchTradeData(symbol || '', 'expiring-options', expiringMatch.tradeType, undefined, { expiration: expiringMatch.expiration });
               if (data) tradeUI = data;
             }
           }
-          if (!tradeUI && detectAllTradesQuery(message.message) && symbol) {
+          if (!tradeUI && !skipFallback && detectAllTradesQuery(message.message) && symbol) {
             const data = await fetchTradeData(symbol, 'detailed');
             if (data) tradeUI = data;
           }
-          if (!tradeUI) {
+          if (!tradeUI && !skipFallback) {
             const bulkOptionsMatch = detectBulkOptionsQuery(message.message);
             if (bulkOptionsMatch) {
               const data = await fetchTradeData(symbol || '', 'advanced-options', bulkOptionsMatch.tradeType, bulkOptionsMatch.timePeriod, { callPut: bulkOptionsMatch.callPut });
@@ -1893,7 +1943,7 @@ const UnifiedAssistant: React.FC = () => {
               }
             }
           }
-          if (!tradeUI) {
+          if (!tradeUI && !skipFallback) {
             const parsedStrike = parseHighestStrikeFromText(message.message);
             if (parsedStrike && isCompleteHighestStrikeParse(parsedStrike)) {
               console.log('🎯 [Text Parse] Using parsed highest-strike data from agent text:', parsedStrike);
@@ -2340,13 +2390,21 @@ const UnifiedAssistant: React.FC = () => {
                 );
                 if (data) {
                   tradeUI = data;
+                  // Mark timestamp to prevent fallback from overriding on subsequent message events
+                  lastIntentCardRenderedAtRef.current = Date.now();
                   console.log('🎯 [Voice Intent-Based] Successfully rendered card:', pendingIntent.cardType);
                 }
               }
             }
 
             // FALLBACK: Regex-based detection on agent's response (for follow-up questions)
-            if (!tradeUI) {
+            // Skip fallback if an intent-based card was recently rendered (within 5 seconds)
+            const voiceTimeSinceIntentCard = Date.now() - lastIntentCardRenderedAtRef.current;
+            const voiceSkipFallback = voiceTimeSinceIntentCard < 5000;
+            if (voiceSkipFallback && !tradeUI) {
+              console.log('🔍 [Voice Mode] Skipping fallback - intent card rendered', voiceTimeSinceIntentCard, 'ms ago');
+            }
+            if (!tradeUI && !voiceSkipFallback) {
               const accountMatch = detectAccountBalanceQuery(message.message);
               if (accountMatch) {
                 console.log('🔍 Account balance query detected:', accountMatch.queryType);
@@ -2354,7 +2412,7 @@ const UnifiedAssistant: React.FC = () => {
                 if (data) tradeUI = data;
               }
             }
-            if (!tradeUI) {
+            if (!tradeUI && !voiceSkipFallback) {
               const feesMatch = detectFeesQuery(message.message);
               if (feesMatch) {
                 console.log('🔍 Fees query detected:', feesMatch.feeType);
@@ -2362,7 +2420,7 @@ const UnifiedAssistant: React.FC = () => {
                 if (data) tradeUI = data;
               }
             }
-            if (!tradeUI) {
+            if (!tradeUI && !voiceSkipFallback) {
               const expiringMatch = detectExpiringOptionsQuery(message.message);
               if (expiringMatch) {
                 console.log('🔍 Expiring options detected:', expiringMatch.expiration);
@@ -2370,12 +2428,12 @@ const UnifiedAssistant: React.FC = () => {
                 if (data) tradeUI = data;
               }
             }
-            if (!tradeUI && detectAllTradesQuery(message.message) && symbol) {
+            if (!tradeUI && !voiceSkipFallback && detectAllTradesQuery(message.message) && symbol) {
               console.log('🔍 All trades query detected (both stocks and options)');
               const data = await fetchTradeData(symbol, 'detailed');
               if (data) tradeUI = data;
             }
-            if (!tradeUI) {
+            if (!tradeUI && !voiceSkipFallback) {
               const bulkOptionsMatch = detectBulkOptionsQuery(message.message);
               if (bulkOptionsMatch) {
                 console.log('🔍 Bulk options query detected:', bulkOptionsMatch);
@@ -2390,7 +2448,7 @@ const UnifiedAssistant: React.FC = () => {
                 }
               }
             }
-            if (!tradeUI) {
+            if (!tradeUI && !voiceSkipFallback) {
               const parsedStrike = parseHighestStrikeFromText(message.message);
               if (parsedStrike && isCompleteHighestStrikeParse(parsedStrike)) {
                 console.log('🎯 [Voice Text Parse] Using parsed highest-strike data from agent text:', parsedStrike);
@@ -2718,7 +2776,7 @@ const UnifiedAssistant: React.FC = () => {
     try {
       await navigator.mediaDevices.getUserMedia({ audio: true });
       // @ts-expect-error - ElevenLabs SDK types
-      await elevenLabsConversation.startSession({ agentId });
+      await elevenLabsConversation.startSession({ agentId, dynamicVariables: getElevenLabsDynamicVariables() });
     } catch (error) {
       console.error('Failed to start voice session:', error);
     }
@@ -2744,7 +2802,7 @@ const UnifiedAssistant: React.FC = () => {
       try {
         await navigator.mediaDevices.getUserMedia({ audio: true });
         // @ts-expect-error - ElevenLabs SDK types
-        await elevenLabsConversation.startSession({ agentId });
+        await elevenLabsConversation.startSession({ agentId, dynamicVariables: getElevenLabsDynamicVariables() });
       } catch (error) {
         console.error('Failed to auto-start voice session:', error);
       }
@@ -2821,7 +2879,7 @@ const UnifiedAssistant: React.FC = () => {
       if (textOnlyConversation.status !== 'connected') {
         try {
           // @ts-expect-error - ElevenLabs SDK types
-          await textOnlyConversation.startSession({ agentId });
+          await textOnlyConversation.startSession({ agentId, dynamicVariables: getElevenLabsDynamicVariables() });
           await new Promise(resolve => setTimeout(resolve, 500));
         } catch (error) {
           console.error('Failed to start text-only session:', error);
@@ -2882,7 +2940,7 @@ const UnifiedAssistant: React.FC = () => {
       try {
         await navigator.mediaDevices.getUserMedia({ audio: true });
         // @ts-expect-error - ElevenLabs SDK types
-        await elevenLabsConversation.startSession({ agentId });
+        await elevenLabsConversation.startSession({ agentId, dynamicVariables: getElevenLabsDynamicVariables() });
         // Wait a moment for connection to establish
         await new Promise(resolve => setTimeout(resolve, 500));
       } catch (error) {
@@ -2955,7 +3013,7 @@ const UnifiedAssistant: React.FC = () => {
       if (textOnlyConversation.status !== 'connected' && textOnlyConversation.status !== 'connecting') {
         try {
           // @ts-expect-error - ElevenLabs SDK types
-          await textOnlyConversation.startSession({ agentId });
+          await textOnlyConversation.startSession({ agentId, dynamicVariables: getElevenLabsDynamicVariables() });
         } catch (error) {
           console.error('Failed to start text-only session:', error);
         }

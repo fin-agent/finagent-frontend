@@ -3,22 +3,20 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDateOffset } from '@/src/lib/date-utils';
 import { parseTimeExpression } from '@/src/lib/date-parser';
 
-// Format date in PACIFIC TIMEZONE to match UI display
-// The UI renders dates in the user's browser (typically Pacific time)
-// Database stores dates as YYYY-MM-DD which JS interprets as UTC midnight
-// UTC midnight = previous day evening in Pacific, so we need Pacific formatting
+// Format date for voice - shows raw database dates (no offset)
+// For "this year" queries, database dates are already 2025 dates
 function formatDateForVoice(dateStr: string): string {
   if (!dateStr) return 'N/A';
 
-  // Extract YYYY-MM-DD part and interpret as UTC midnight
+  // Extract YYYY-MM-DD part
   const datePart = dateStr.split('T')[0];
-  const date = new Date(datePart + 'T00:00:00Z');
+  const [year, month, day] = datePart.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
 
   if (isNaN(date.getTime())) return dateStr;
 
-  // Format in Pacific timezone to match browser display
+  // Format as "August 12, 2025" for TTS
   return date.toLocaleDateString('en-US', {
-    timeZone: 'America/Los_Angeles',
     month: 'long',
     day: 'numeric',
     year: 'numeric'

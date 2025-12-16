@@ -1,5 +1,20 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
+import { getDateOffset } from '@/src/lib/date-utils';
+
+// Format raw database date without offset (for "this year" queries)
+function formatRawDate(dateStr: string): string {
+  if (!dateStr) return '';
+  const datePart = dateStr.split('T')[0];
+  const [year, month, day] = datePart.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
+  if (isNaN(date.getTime())) return dateStr;
+  return date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric'
+  });
+}
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -43,9 +58,15 @@ export async function POST(req: NextRequest) {
     }
 
     const normalizedSymbol = normalizeSymbol(symbol);
-    const filterYear = year || new Date().getFullYear();
-    const yearStart = `${filterYear}-01-01`;
-    const yearEnd = `${filterYear}-12-31`;
+
+    // Get the date offset to map user's year to demo database year
+    const offset = getDateOffset();
+    const userYear = year || new Date().getFullYear();
+    const offsetYears = Math.round(offset / 365);
+    const dbYear = userYear + offsetYears;
+
+    const yearStart = `${dbYear}-01-01`;
+    const yearEnd = `${dbYear}-12-31`;
 
     let query = supabase
       .from('TradeData')
@@ -93,15 +114,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       optionStats: {
         symbol: normalizedSymbol,
-        year: filterYear,
+        year: userYear, // Return user's requested year, not DB year
         tradeType: typeLabel,
         highestPremium,
-        highestPremiumDate: highestTrade?.Date,
+        highestPremiumDate: highestTrade?.Date ? formatRawDate(highestTrade.Date) : null,
         highestPremiumContracts: highestTrade ? parseFloat(highestTrade.OptionContracts || '0') : 0,
         highestPremiumStrike: highestTrade ? parseFloat(highestTrade.Strike || '0') : 0,
         highestPremiumCallPut: highestTrade?.['Call/Put'] === 'C' ? 'Call' : 'Put',
         lowestPremium,
-        lowestPremiumDate: lowestTrade?.Date,
+        lowestPremiumDate: lowestTrade?.Date ? formatRawDate(lowestTrade.Date) : null,
         lowestPremiumContracts: lowestTrade ? parseFloat(lowestTrade.OptionContracts || '0') : 0,
         lowestPremiumStrike: lowestTrade ? parseFloat(lowestTrade.Strike || '0') : 0,
         lowestPremiumCallPut: lowestTrade?.['Call/Put'] === 'C' ? 'Call' : 'Put',

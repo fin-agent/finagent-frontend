@@ -294,6 +294,29 @@ All generative UI components use **inline React styles** (not Tailwind classes) 
 - Hero amount display with gradient text
 - Recent activity breakdown section
 
+### Voice/UI Trades Synchronization
+
+For `trades.detailed` queries (e.g., "Show my trades for Apple"), both voice and UI endpoints return **identical summary metrics**:
+
+| Metric | Description |
+|--------|-------------|
+| `tradeCount` | Total number of trades (stocks + options) |
+| `stockCount` | Number of stock trades |
+| `optionCount` | Number of option trades |
+| `buyCount` | Number of buy trades |
+| `sellCount` | Number of sell trades |
+| `totalShares` | Sum of stock share quantities |
+| `totalContracts` | Sum of option contracts |
+| `totalQuantity` | `totalShares + totalContracts` |
+| `totalValue` | Sum of absolute `NetAmount` values |
+| `avgValue` | `totalValue / tradeCount` |
+
+**Key files:**
+- `app/api/elevenlabs/detailed-trades/route.ts` - Voice endpoint (TTS response)
+- `app/api/trades-ui/route.ts` - UI endpoint (JSON for TradesTable card)
+
+Both use absolute values of `NetAmount` for `totalValue` because buy trades have negative amounts (money out) and sell trades have positive amounts (money in).
+
 ### Option Premium Calculations
 
 Advanced query UI uses **net amount** (after fees) for premium totals to match ElevenLabs voice responses:

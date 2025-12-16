@@ -149,7 +149,7 @@ The ElevenLabs agent has access to webhook tools that query trade data:
 | Tool Name | Endpoint | Description |
 |-----------|----------|-------------|
 | `get_trade_summary` | `/api/elevenlabs/tools` | Get count of stock and option trades for a symbol |
-| `get_detailed_trades` | `/api/elevenlabs/tools` | Get full trade history with details |
+| `get_detailed_trades` | `/api/elevenlabs/detailed-trades` | Get all trades summary (stocks + options, buys + sells) |
 | `get_trade_stats` | `/api/elevenlabs/trade-stats` | Get highest/lowest prices, averages for a symbol |
 | `get_profitable_trades` | `/api/elevenlabs/profitable-trades` | Calculate profitable trades using FIFO matching |
 | `get_time_based_trades` | `/api/elevenlabs/time-trades` | Get trades for a time period (last week, yesterday, Nov 18th) |
@@ -569,6 +569,24 @@ const formatDate = timePeriodDescription ? formatCalendarDate : formatRawDate;
 
 This ensures the voice agent says the exact same date that appears in the UI cards.
 
+### Voice/UI Trades Synchronization
+
+For "show trades" queries, both voice and UI return **identical summary metrics**:
+
+| Metric | Description |
+|--------|-------------|
+| `tradeCount` | Total trades (stocks + options) |
+| `stockCount` / `optionCount` | Breakdown by security type |
+| `buyCount` / `sellCount` | Breakdown by trade type |
+| `totalQuantity` | Shares + contracts combined |
+| `totalValue` | Sum of absolute NetAmounts |
+| `avgValue` | Average value per trade |
+
+**Voice Response Example:**
+> "For AAPL, you have 15 total trades: 10 stock trades and 5 option trades. 8 buys and 7 sells. Total quantity: 792 (525 shares and 267 contracts). Total value: $170,626.45 with an average of $11,375.10 per trade."
+
+**UI Card:** TradesTable displays the same summary values in the header.
+
 ---
 
 ## Database Schema
@@ -668,7 +686,7 @@ flowchart TD
 | `TradeStats` | "highest price", "lowest sold", "average" (full year) | High/low prices with dates, averages, totals for the year |
 | `TimePeriodStats` | "highest price last month", "average price last week" (with high/low) | High/low/average prices for specific time periods |
 | `AveragePrice` | "average price was $X", "paid an average of $X" (simple average only) | Focused average price display with range visualization |
-| `TradesTable` | "found X trades", "here are your trades" | Full trade history table |
+| `TradesTable` | "found X trades", "here are your trades" | Full trade history with summary (stocks/options, buys/sells, totals) |
 | `TradeSummary` | "X stock trades and Y option trades" | Quick trade count summary |
 | `TimeBasedTrades` | "trades last week", "executed X trades yesterday" | Time period summary, trade list with display dates |
 | `AdvancedOptionsTable` | "sold N call option contracts", "across N trades" (bulk options) | Options table with strike, expiration, premium, aggregations |

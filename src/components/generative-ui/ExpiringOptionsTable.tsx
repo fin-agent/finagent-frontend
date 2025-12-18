@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { Clock, Flame, ChevronLeft, ChevronRight, Layers, Target, BarChart3 } from 'lucide-react';
 import { safeParseNumber } from '@/src/lib/trade-math';
+import { parseOptionSymbol } from '@/src/lib/symbol-utils';
 
 interface ExpiringOption {
   TradeID: number;
@@ -37,15 +38,6 @@ const formatCurrency = (value: number) => {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(value);
-};
-
-
-const parseOptionSymbol = (symbol: string): string => {
-  const match = symbol.match(/^([A-Z]+)/);
-  if (match) {
-    return match[1];
-  }
-  return symbol;
 };
 
 const getDaysUntil = (expirationStr: string): number => {

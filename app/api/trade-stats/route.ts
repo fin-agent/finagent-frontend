@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import { formatCalendarDate, getDateOffset } from '@/src/lib/date-utils';
 import { parseTimeExpression } from '@/src/lib/date-parser';
+import { normalizeSymbol } from '@/src/lib/symbol-utils';
 
 // Format raw database date without offset (for "this year" queries)
 // Database dates are already in the correct year, no conversion needed
@@ -24,30 +25,6 @@ const supabase = createClient(
 );
 
 const ACCOUNT_CODE = 'C40421';
-
-const SYMBOL_MAP: Record<string, string> = {
-  'apple': 'AAPL',
-  'google': 'GOOGL',
-  'alphabet': 'GOOGL',
-  'amazon': 'AMZN',
-  'microsoft': 'MSFT',
-  'tesla': 'TSLA',
-  'nvidia': 'NVDA',
-  'meta': 'META',
-  'facebook': 'META',
-  'netflix': 'NFLX',
-  'amd': 'AMD',
-  'intel': 'INTC',
-  'bank of america': 'BAC',
-  'citigroup': 'C',
-  'gamestop': 'GME',
-  'lucid': 'LCID',
-};
-
-function normalizeSymbol(input: string): string {
-  const lower = input.toLowerCase().trim();
-  return SYMBOL_MAP[lower] || input.toUpperCase();
-}
 
 // Returns structured trade stats for UI rendering
 export async function POST(req: NextRequest) {

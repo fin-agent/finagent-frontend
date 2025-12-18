@@ -53,7 +53,8 @@ The full voice agent flow uses production webhooks. Test API logic locally with 
 ### Key Directories
 
 - `app/api/elevenlabs/` - Webhook endpoints called by ElevenLabs agent (tools, profitable-trades, trade-summary, detailed-trades, advanced-query, options, account-balance, fees)
-- `app/api/` - UI data endpoints (profitable-trades-ui, trade-stats, trades-ui, advanced-query-ui, account-balance-ui, fees-ui, conversations, messages)
+- `app/api/` - UI data endpoints (profitable-trades-ui, trade-stats, trades-ui, advanced-query-ui, account-balance-ui, fees-ui, conversations, messages, resolve-symbol)
+- `src/lib/symbol-utils.ts` - Centralized symbol parsing and normalization utilities
 - `src/components/generative-ui/` - Dynamic UI cards (ProfitableTrades, TradeStats, TradesTable, TradeSummary, AdvancedOptionsTable, TradeQueryCard, AccountSummary, FeesSummary, etc.)
 - `src/components/UnifiedAssistant.tsx` - Main chat/voice interface
 - `src/components/QueryBuilder.tsx` - Manual advanced query builder UI
@@ -77,17 +78,47 @@ The Data Explorer page provides a retro-futuristic database browser:
 **API Route**: `app/api/data-explorer/route.ts`
 **Component**: `src/components/DataExplorer.tsx`
 
-### Symbol Normalization (Dual-Layer)
+### Symbol Utilities (`src/lib/symbol-utils.ts`)
 
-Company names are converted to ticker symbols at two levels:
-1. **Agent-level** (system prompt): Agent converts "Apple" → "AAPL" before calling tools
-2. **Webhook-level** (code fallback): `normalizeSymbol()` function handles unconverted names
+Centralized symbol parsing and normalization for all API routes and components.
 
+**Key Functions:**
+
+| Function | Purpose |
+|----------|---------|
+| `normalizeSymbol(input)` | Convert company names or OCC symbols to tickers |
+| `parseOptionSymbol(symbol)` | Extract ticker from OCC option symbol |
+| `isOptionSymbol(symbol)` | Check if symbol is OCC format |
+| `parseOptionSymbolFull(symbol)` | Parse OCC into ticker, expiry, type, strike |
+| `resolveSymbol(input)` | Async version with LLM fallback |
+
+**`normalizeSymbol()` handles multiple input types:**
 ```typescript
-const SYMBOL_MAP: Record<string, string> = {
+normalizeSymbol("Apple")              // → "AAPL" (company name)
+normalizeSymbol("TSLA251129C00350000") // → "TSLA" (OCC option symbol)
+normalizeSymbol("TSLA251129")          // → "TSLA" (partial OCC)
+normalizeSymbol("AAPL")               // → "AAPL" (passthrough)
+```
+
+**Async `resolveSymbol()` with LLM fallback:**
+```typescript
+// For unknown company names, falls back to Azure OpenAI
+const ticker = await resolveSymbol("microstrategy"); // → "MSTR"
+const ticker = await resolveSymbol("the streaming company"); // → "NFLX"
+```
+
+**Symbol Resolution Flow:**
+1. **OCC Parsing**: Extract ticker from option symbols like `TSLA251129C00350000`
+2. **Company Map**: Check 50+ predefined company name → ticker mappings
+3. **LLM Fallback**: Use `/api/resolve-symbol` endpoint for unknowns
+
+**Company Map includes:**
+```typescript
+const SYMBOL_MAP = {
   'apple': 'AAPL', 'google': 'GOOGL', 'alphabet': 'GOOGL',
   'amazon': 'AMZN', 'microsoft': 'MSFT', 'tesla': 'TSLA',
-  'nvidia': 'NVDA', 'meta': 'META', 'netflix': 'NFLX', ...
+  'nvidia': 'NVDA', 'meta': 'META', 'netflix': 'NFLX',
+  'bank of america': 'BAC', 'jpmorgan': 'JPM', ...
 };
 ```
 

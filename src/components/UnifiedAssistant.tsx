@@ -19,7 +19,9 @@ import { LastOptionTradeCard } from './generative-ui/LastOptionTradeCard';
 import { AccountSummary, type AccountQueryType } from './generative-ui/AccountSummary';
 import { FeesSummary, type FeeType } from './generative-ui/FeesSummary';
 import type { ClassificationResult } from '@/src/lib/intent-detection';
+import { formatCalendarDate } from '@/src/lib/date-utils';
 import { getOptionPremiumUSD, safeParseNumber } from '@/src/lib/trade-math';
+import { parseOptionSymbol } from '@/src/lib/symbol-utils';
 
 type InputMode = 'voice' | 'text';
 type View = 'chat' | 'history';
@@ -118,6 +120,16 @@ function formatUSDNoCommas(value: unknown): string {
   const num = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(num)) return '$0.00';
   return `$${num.toFixed(2)}`;
+}
+
+function formatUSDCurrency(value: unknown): string {
+  const num = typeof value === 'number' ? value : Number(value);
+  const safe = Number.isFinite(num) ? num : 0;
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+  }).format(safe);
 }
 
 function pluralize(count: number, singular: string, plural?: string): string {
@@ -477,6 +489,131 @@ function buildAnswerOverride(intent: QueryIntent | null, tradeUI: TradeUIData | 
 	    return `The highest strike ${callPut} option you ${action} on ${symbol} ${period} was the $${Number.parseFloat(highestStrikeTrade.Strike)} strike. You ${action} ${contracts} ${pluralize(contracts, 'contract')} on ${displayDate} for a total premium ${premiumVerb} of ${formatUSDNoCommas(totalPremium)} (${formatUSDNoCommas(perContract)} per contract), expiring ${displayExpiration}.`;
 	  }
 
+  if (tradeUI.type === 'account-balance') {
+    const d = tradeUI.data as {
+      error?: string;
+      queryType?: AccountQueryType;
+      date?: string;
+      cashBalance?: number;
+      accountEquity?: number;
+      dayTradingBP?: number;
+      stockLMV?: number;
+      stockSMV?: number;
+      optionsLMV?: number;
+      optionsSMV?: number;
+      houseRequirement?: number;
+      houseExcessDeficit?: number;
+      balanceTrend?: {
+        average: number;
+        highest: number;
+        highestDate: string;
+        lowest: number;
+        lowestDate: string;
+        period: string;
+        periodMonth?: string;
+      };
+    };
+
+    if (!d || d.error || !d.date) return null;
+
+    const queryType = tradeUI.accountQueryType || d.queryType || intent.accountQueryType || 'account_summary';
+    const asOfDate = formatCalendarDate(d.date);
+
+    if (queryType === 'cash_balance') {
+      return `Your account cash balance as of ${asOfDate} is ${formatUSDCurrency(d.cashBalance)}`;
+    }
+
+    if (queryType === 'cash_and_equity') {
+      return `Your account cash balance as of ${asOfDate} is ${formatUSDCurrency(d.cashBalance)}, and your account equity is ${formatUSDCurrency(d.accountEquity)}`;
+    }
+
+    if (queryType === 'buying_power') {
+      return `Your day trading buying power as of ${asOfDate} is ${formatUSDCurrency(d.dayTradingBP)}`;
+    }
+
+    if (queryType === 'nlv') {
+      return `Your net liquidation value as of ${asOfDate} is ${formatUSDCurrency(d.accountEquity)}`;
+    }
+
+    if (queryType === 'overnight_margin') {
+      const houseRequirement = formatUSDCurrency(d.houseRequirement);
+      const excessDeficit = d.houseExcessDeficit ?? 0;
+      const label = excessDeficit >= 0 ? 'excess' : 'deficit';
+      const amount = formatUSDCurrency(Math.abs(excessDeficit));
+      return `Your house requirement as of ${asOfDate} is ${houseRequirement}, and your house ${label} is ${amount}`;
+    }
+
+    if (queryType === 'market_value') {
+      return `The market value of your long stock positions is ${formatUSDCurrency(d.stockLMV)}, your long options positions is ${formatUSDCurrency(d.optionsLMV)}, your short stock positions is ${formatUSDCurrency(d.stockSMV)}, and your short options positions is ${formatUSDCurrency(d.optionsSMV)}`;
+    }
+
+    if (queryType === 'debit_balances' || queryType === 'credit_balances') {
+      const trend = d.balanceTrend;
+      if (!trend) return null;
+
+      const monthLabel = trend.periodMonth || trend.period;
+      const average = formatUSDCurrency(trend.average);
+      const highestAmount = formatUSDCurrency(trend.highest);
+      const lowestAmount = formatUSDCurrency(trend.lowest);
+      const highestDate = formatCalendarDate(trend.highestDate);
+      const lowestDate = formatCalendarDate(trend.lowestDate);
+
+      const balanceType = queryType === 'debit_balances' ? 'debit' : 'credit';
+      return `Your average ${balanceType} balance for the month of ${monthLabel} is ${average}.\nThe highest ${balanceType} balance was on ${highestDate} at ${highestAmount}.\nThe lowest ${balanceType} balance was on ${lowestDate} at ${lowestAmount}.`;
+    }
+
+    // Default: full summary
+    return `Your account summary as of ${asOfDate}:\n\n* Cash Balance: ${formatUSDCurrency(d.cashBalance)}\n* Account Equity: ${formatUSDCurrency(d.accountEquity)}\n* Day Trading Buying Power: ${formatUSDCurrency(d.dayTradingBP)}\n* Stock Long Market Value: ${formatUSDCurrency(d.stockLMV)}\n* Stock Short Market Value: ${formatUSDCurrency(d.stockSMV)}\n* Options Long Market Value: ${formatUSDCurrency(d.optionsLMV)}\n* Options Short Market Value: ${formatUSDCurrency(d.optionsSMV)}`;
+  }
+
+  if (tradeUI.type === 'fees') {
+    const d = tradeUI.data as {
+      error?: string;
+      feeType?: FeeType;
+      totalAmount?: number;
+      transactionCount?: number;
+      timePeriod?: string;
+      periodMonth?: string;
+      symbol?: string;
+    };
+
+    if (!d || d.error || !d.feeType || d.totalAmount === undefined) return null;
+
+    const feeType = tradeUI.feeType || d.feeType || intent.feeType || 'commission';
+    const amount = formatUSDCurrency(d.totalAmount);
+    const timePeriod = d.timePeriod || tradeUI.timePeriod || intent.timePeriod || '';
+
+    const monthFromLabel = (() => {
+      if (d.periodMonth) return d.periodMonth;
+      const m = timePeriod.match(/\b(january|february|march|april|may|june|july|august|september|october|november|december)\b/i);
+      if (!m) return null;
+      return m[1][0].toUpperCase() + m[1].slice(1).toLowerCase();
+    })();
+
+    if (feeType === 'commission') {
+      if (monthFromLabel) return `The total commission you paid in the month of ${monthFromLabel} is ${amount}`;
+      return `The total commission you paid for ${timePeriod} is ${amount}`;
+    }
+
+    if (feeType === 'credit_interest') {
+      if (monthFromLabel) return `The total credit interest you received for the month of ${monthFromLabel} is ${amount}`;
+      return `The total credit interest you received for ${timePeriod} is ${amount}`;
+    }
+
+    if (feeType === 'locate_fee') {
+      const sym = (d.symbol || tradeUI.symbol || intent.symbol || '').toUpperCase();
+      const period = /\bthis year\b/i.test(timePeriod) ? 'this year' : timePeriod;
+      return `The total locate fees you paid for stock ${sym} ${period} is ${amount}`.trim();
+    }
+
+    // debit_interest
+    if (/\blast week\b/i.test(timePeriod)) {
+      return `The total debit interest you paid last week is ${amount}`;
+    }
+    if (monthFromLabel) return `The total debit interest you paid for the month of ${monthFromLabel} is ${amount}`;
+    return `The total debit interest you paid for ${timePeriod} is ${amount}`;
+  }
+
 		  return null;
 		}
 
@@ -562,7 +699,18 @@ function detectUserQueryIntent(query: string): QueryIntent | null {
     'i'
   );
   const timePeriodMatch = lowerQuery.match(timePeriodRegex);
-  const timePeriod = timePeriodMatch?.[1];
+  let timePeriod = timePeriodMatch?.[1];
+
+  // Month name support (e.g., "in October", "month of October")
+  if (!timePeriod) {
+    const monthMatch = lowerQuery.match(/\b(?:month\s+of\s+)?(january|february|march|april|may|june|july|august|september|october|november|december)\b/i);
+    if (monthMatch) timePeriod = monthMatch[1].toLowerCase();
+  }
+
+  // "for the month" defaults to current month if unspecified
+  if (!timePeriod && /\bfor\s+the\s+month\b/i.test(lowerQuery)) {
+    timePeriod = 'this month';
+  }
 
   // Extract trade type context
   const isSellQuery = /\b(sold|sell|selling|short|written)\b/i.test(lowerQuery);
@@ -575,22 +723,30 @@ function detectUserQueryIntent(query: string): QueryIntent | null {
   const callPut = isCallQuery && !isPutQuery ? 'call' : isPutQuery && !isCallQuery ? 'put' : undefined;
 
   // 1. Account balance queries
-  if (/\b(balance|buying\s*power|equity|margin|net\s*liquidation|nlv|market\s*value)\b/i.test(lowerQuery)) {
+  const isAccountQuery = /\b(account|balances?|buying\s*power|equity|margin|net\s*liquidation|nlv|market\s*value|withdraw|available\s+funds|available\s+cash|how\s+much\s+money)\b/i.test(lowerQuery);
+  if (isAccountQuery) {
     let accountQueryType: AccountQueryType = 'account_summary';
-    if (/cash\s*balance/i.test(lowerQuery)) accountQueryType = 'cash_balance';
+
+    // Most-specific patterns first
+    if (/\bdebit\s+balances?\b/i.test(lowerQuery)) accountQueryType = 'debit_balances';
+    else if (/\bcredit\s+balances?\b/i.test(lowerQuery)) accountQueryType = 'credit_balances';
+    else if (/\bhow\s+much\s+money\s+do\s+i\s+have\b/i.test(lowerQuery)) accountQueryType = 'cash_and_equity';
+    else if (/\b(withdraw|available\s+funds|available\s+cash|cash\s*balance)\b/i.test(lowerQuery)) accountQueryType = 'cash_balance';
     else if (/buying\s*power/i.test(lowerQuery)) accountQueryType = 'buying_power';
     else if (/nlv|net\s*liquidation/i.test(lowerQuery)) accountQueryType = 'nlv';
-    else if (/margin/i.test(lowerQuery)) accountQueryType = 'overnight_margin';
+    else if (/overnight\s+margin|margin/i.test(lowerQuery)) accountQueryType = 'overnight_margin';
     else if (/market\s*value/i.test(lowerQuery)) accountQueryType = 'market_value';
+    else if (/account\s+summary|show\s+me\s+my\s+account|show\s+my\s+account\b/i.test(lowerQuery)) accountQueryType = 'account_summary';
+
     return { cardType: 'account-balance', accountQueryType, timePeriod };
   }
 
   // 2. Fees queries
-  if (/\b(fees?|commissions?|interest|locate)\b/i.test(lowerQuery)) {
+  if (/\b(fees?|commissions?|interest|locate|borrow(?:ing)?)\b/i.test(lowerQuery)) {
     let feeType: FeeType = 'commission';
     if (/credit\s*interest/i.test(lowerQuery)) feeType = 'credit_interest';
     else if (/debit\s*interest|margin\s*interest/i.test(lowerQuery)) feeType = 'debit_interest';
-    else if (/locate/i.test(lowerQuery)) feeType = 'locate_fee';
+    else if (/locate|borrow(?:ing)?|stock\s+borrow/i.test(lowerQuery)) feeType = 'locate_fee';
     return { cardType: 'fees', feeType, timePeriod, symbol };
   }
 
@@ -690,6 +846,9 @@ function detectUserQueryIntent(query: string): QueryIntent | null {
  * Returns null if classification fails or confidence is too low
  */
 async function classifyIntentViaAPI(query: string): Promise<QueryIntentWithConfidence | null> {
+  if (process.env.NEXT_PUBLIC_DISABLE_LLM_CLASSIFIER === '1') {
+    return null;
+  }
   try {
     // Pass current date from browser for smart day-of-week interpretation
     // e.g., "Monday" should mean today if today is Monday
@@ -846,17 +1005,6 @@ function extractSymbolOrCompany(text: string): string | null {
   }
 
   return null;
-}
-
-// Parse OCC option symbol to extract underlying ticker
-// Format: AAPL251017C00220000 -> AAPL
-function parseOptionSymbol(symbol: string): string {
-  // OCC format: 1-6 char ticker + 6 digit date + C/P + 8 digit strike
-  const match = symbol.match(/^([A-Z]+)/);
-  if (match) {
-    return match[1];
-  }
-  return symbol;
 }
 
 // Detect if message contains trade summary data (brief count)
@@ -1463,6 +1611,11 @@ function detectAccountBalanceQuery(text: string): { queryType: AccountQueryType;
     return { queryType: 'account_summary', timePeriod };
   }
 
+  // Cash + equity patterns (but not a full account summary)
+  if (/cash\s+balance/i.test(text) && /account\s+equity/i.test(text)) {
+    return { queryType: 'cash_and_equity', timePeriod };
+  }
+
   // Margin patterns (check before market value since margin responses may mention stock values)
   if (/overnight\s+margin|house\s+requirement|margin\s+(?:status|requirement)|fed(?:eral)?\s+requirement/i.test(text)) {
     return { queryType: 'overnight_margin', timePeriod };
@@ -1722,20 +1875,30 @@ const UnifiedAssistant: React.FC = () => {
     };
 
     const get_account_balance = async (parameters: Record<string, unknown>) => {
+      console.log('💰 [Account Balance Tool] ================================');
+      console.log('💰 [Account Balance Tool] Parameters:', JSON.stringify(parameters, null, 2));
       const payload = await postJson('/api/elevenlabs/account-balance', {
         query_type: getString(parameters, 'query_type'),
         time_period: getString(parameters, 'time_period'),
       });
-      return unwrapResponse(payload);
+      const result = unwrapResponse(payload);
+      console.log('💰 [Account Balance Tool] Webhook Response:', result);
+      console.log('💰 [Account Balance Tool] ================================');
+      return result;
     };
 
     const get_fees = async (parameters: Record<string, unknown>) => {
+      console.log('💸 [Fees Tool] ================================');
+      console.log('💸 [Fees Tool] Parameters:', JSON.stringify(parameters, null, 2));
       const payload = await postJson('/api/elevenlabs/fees', {
         fee_type: getString(parameters, 'fee_type'),
         time_period: getString(parameters, 'time_period'),
         symbol: getToolSymbol(parameters),
       });
-      return unwrapResponse(payload);
+      const result = unwrapResponse(payload);
+      console.log('💸 [Fees Tool] Webhook Response:', result);
+      console.log('💸 [Fees Tool] ================================');
+      return result;
     };
 
     return {
@@ -1765,6 +1928,13 @@ const UnifiedAssistant: React.FC = () => {
     textOnly: true,
     clientTools,
     onMessage: async (message) => {
+      // DEBUG: Log raw ElevenLabs message for text mode
+      console.log('📝 [Text Mode RAW] ================================');
+      console.log('📝 [Text Mode RAW] Full message object:', JSON.stringify(message, null, 2));
+      console.log('📝 [Text Mode RAW] message.message:', message.message);
+      console.log('📝 [Text Mode RAW] message.source:', message.source);
+      console.log('📝 [Text Mode RAW] ================================');
+
       if (message.message && inputModeRef.current === 'text') {
         const role = message.source === 'user' ? 'user' : 'assistant';
 
@@ -2179,6 +2349,14 @@ const UnifiedAssistant: React.FC = () => {
       setIsSending(false);
     },
     onMessage: async (message) => {
+      // DEBUG: Log raw ElevenLabs message object to compare voice vs text
+      console.log('🎙️ [ElevenLabs RAW] ================================');
+      console.log('🎙️ [ElevenLabs RAW] Full message object:', JSON.stringify(message, null, 2));
+      console.log('🎙️ [ElevenLabs RAW] message.message:', message.message);
+      console.log('🎙️ [ElevenLabs RAW] message.source:', message.source);
+      console.log('🎙️ [ElevenLabs RAW] message type:', (message as Record<string, unknown>).type);
+      console.log('🎙️ [ElevenLabs RAW] ================================');
+
       if (message.message) {
         const role = message.source === 'user' ? 'user' : 'assistant';
 
@@ -2790,15 +2968,16 @@ const UnifiedAssistant: React.FC = () => {
 
   // Handlers
   const handleOpen = useCallback(async () => {
+    const disableElevenLabs = process.env.NEXT_PUBLIC_DISABLE_ELEVENLABS === '1' || !agentId;
     setIsOpen(true);
-    setInputMode('voice'); // Always open in voice mode first
+    setInputMode(disableElevenLabs ? 'text' : 'voice');
     setCurrentView('chat');
     if (!currentConversationId) {
       const newId = await createConversation();
       if (newId) setCurrentConversationId(newId);
     }
     // Auto-start voice session
-    if (elevenLabsConversation.status !== 'connected' && elevenLabsConversation.status !== 'connecting') {
+    if (!disableElevenLabs && elevenLabsConversation.status !== 'connected' && elevenLabsConversation.status !== 'connecting') {
       try {
         await navigator.mediaDevices.getUserMedia({ audio: true });
         // @ts-expect-error - ElevenLabs SDK types
@@ -2875,8 +3054,10 @@ const UnifiedAssistant: React.FC = () => {
 
     // TEXT MODE: Use ElevenLabs text-only (no voice)
     if (inputMode === 'text') {
+      const disableElevenLabs = process.env.NEXT_PUBLIC_DISABLE_ELEVENLABS === '1' || !agentId;
+
       // Ensure text-only session is connected
-      if (textOnlyConversation.status !== 'connected') {
+      if (!disableElevenLabs && textOnlyConversation.status !== 'connected') {
         try {
           // @ts-expect-error - ElevenLabs SDK types
           await textOnlyConversation.startSession({ agentId, dynamicVariables: getElevenLabsDynamicVariables() });
@@ -2904,6 +3085,37 @@ const UnifiedAssistant: React.FC = () => {
         if (currentConv?.title === 'New Chat') {
           updateConversationTitle(convId, message.slice(0, 50));
         }
+      }
+
+      if (disableElevenLabs) {
+        const tradeUI = intent
+          ? await fetchTradeData(
+              intent.symbol || '',
+              intent.cardType,
+              intent.tradeType,
+              intent.timePeriod,
+              {
+                callPut: intent.callPut,
+                expiration: intent.expiration,
+                accountQueryType: intent.accountQueryType,
+                feeType: intent.feeType,
+              }
+            )
+          : null;
+        const assistantText = buildAnswerOverride(intent, tradeUI) || 'I can help with that.';
+
+        const assistantMessage: TranscriptMessage = {
+          id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          role: 'assistant',
+          content: assistantText,
+          timestamp: new Date(),
+          tradeUI: tradeUI || undefined,
+        };
+
+        lastAssistantTradeUIRef.current = tradeUI;
+        setTranscript(prev => [...prev, assistantMessage]);
+        setIsSending(false);
+        return;
       }
 
 		      // Store intent and prefetch the trade UI, but render it only after the assistant replies.
@@ -3006,6 +3218,12 @@ const UnifiedAssistant: React.FC = () => {
   const toggleMode = useCallback(async () => {
     const newMode = inputMode === 'text' ? 'voice' : 'text';
     setInputMode(newMode);
+
+    const disableElevenLabs = process.env.NEXT_PUBLIC_DISABLE_ELEVENLABS === '1' || !agentId;
+    if (disableElevenLabs) {
+      // In local/test mode we don't start or stop external sessions.
+      return;
+    }
 
     if (newMode === 'text') {
       // Switching to chat mode - stop voice ElevenLabs, start text-only
@@ -3645,6 +3863,8 @@ const UnifiedAssistant: React.FC = () => {
           lowest: number;
           lowestDate: string;
           period: string;
+          periodMonth?: string;
+          entries?: Array<{ date: string; amount: number }>;
         };
       };
 
@@ -4070,13 +4290,13 @@ const UnifiedAssistant: React.FC = () => {
   // Closed state - floating widget
   if (!isOpen) {
     return (
-      <div style={styles.widgetButton} onClick={handleOpen}>
+      <div style={styles.widgetButton} onClick={handleOpen} data-testid="assistant-widget">
         <div style={styles.widgetOrb}>
           <div style={styles.widgetOrbHighlight} />
           <div style={styles.widgetOrbReflection} />
         </div>
         <span style={styles.widgetText}>Need help?</span>
-        <button style={styles.widgetCallBtn} onClick={(e) => { e.stopPropagation(); handleOpen(); }}>
+        <button style={styles.widgetCallBtn} onClick={(e) => { e.stopPropagation(); handleOpen(); }} data-testid="assistant-open">
           <Phone size={14} />
           Ask anything
         </button>
@@ -4120,7 +4340,7 @@ const UnifiedAssistant: React.FC = () => {
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           {currentView === 'chat' && (
             <>
-              <button onClick={toggleMode} style={styles.modeButton}>
+              <button onClick={toggleMode} style={styles.modeButton} data-testid="assistant-toggle-mode">
                 {inputMode === 'text' ? (
                   <>
                     <Mic size={14} />
@@ -4181,7 +4401,7 @@ const UnifiedAssistant: React.FC = () => {
       ) : inputMode === 'text' ? (
         <>
           {/* Text Chat Messages */}
-          <div ref={transcriptRef} style={styles.messagesContainer}>
+          <div ref={transcriptRef} style={styles.messagesContainer} data-testid="assistant-messages">
             {/* Welcome Message */}
             {transcript.length === 0 && (
               <div style={styles.messageRow}>
@@ -4196,7 +4416,7 @@ const UnifiedAssistant: React.FC = () => {
 
             {/* Messages */}
             {transcript.map((message) => (
-              <div key={message.id}>
+              <div key={message.id} data-testid="chat-message" data-role={message.role}>
                 <div
                   style={{
                     ...styles.messageRow,
@@ -4208,7 +4428,7 @@ const UnifiedAssistant: React.FC = () => {
                   )}
                   <div style={message.role === 'user' ? styles.userBubble : styles.assistantBubble}>
                     <p style={{ ...styles.messageText, color: message.role === 'user' ? colors.bgPrimary : colors.textPrimary }}>
-                      {message.content}
+                      <span data-testid="chat-message-text">{message.content}</span>
                     </p>
                   </div>
                 </div>
@@ -4239,9 +4459,10 @@ const UnifiedAssistant: React.FC = () => {
                 placeholder="Ask about your portfolio..."
                 style={styles.textInput}
                 disabled={isStreaming}
+                data-testid="assistant-input"
               />
               <div style={styles.inputActions}>
-                <button type="button" onClick={handleEndChat} style={styles.endChatButton}>
+                <button type="button" onClick={handleEndChat} style={styles.endChatButton} data-testid="assistant-end-chat">
                   <X size={14} />
                   End chat
                 </button>
@@ -4253,6 +4474,7 @@ const UnifiedAssistant: React.FC = () => {
                     opacity: isStreaming || !inputValue.trim() ? 0.5 : 1,
                     cursor: isStreaming || !inputValue.trim() ? 'not-allowed' : 'pointer',
                   }}
+                  data-testid="assistant-send"
                 >
                   <Send size={14} />
                   Send

@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
+import { normalizeSymbol } from '@/src/lib/symbol-utils';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -14,32 +15,6 @@ const DEMO_TODAY = '2025-11-20';
 function getDemoToday(): Date {
   const [year, month, day] = DEMO_TODAY.split('-').map(Number);
   return new Date(year, month - 1, day);
-}
-
-const SYMBOL_MAP: Record<string, string> = {
-  'apple': 'AAPL',
-  'google': 'GOOGL',
-  'alphabet': 'GOOGL',
-  'amazon': 'AMZN',
-  'microsoft': 'MSFT',
-  'tesla': 'TSLA',
-  'nvidia': 'NVDA',
-  'meta': 'META',
-  'facebook': 'META',
-  'netflix': 'NFLX',
-  'amd': 'AMD',
-  'intel': 'INTC',
-  'bank of america': 'BAC',
-  'citigroup': 'C',
-  'gamestop': 'GME',
-  'lucid': 'LCID',
-  'spy': 'SPY',
-  'qualcomm': 'QCOM',
-};
-
-function normalizeSymbol(input: string): string {
-  const lower = input.toLowerCase().trim();
-  return SYMBOL_MAP[lower] || input.toUpperCase();
 }
 
 // Parse relative dates like "tomorrow", "last month", "this year", and day-of-week references

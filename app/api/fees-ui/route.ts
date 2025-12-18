@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import { realDateToDemoDate, formatDateForDB } from '@/src/lib/date-utils';
+import { normalizeSymbol, parseOptionSymbol } from '@/src/lib/symbol-utils';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -8,23 +9,6 @@ const supabase = createClient(
 );
 
 const ACCOUNT_CODE = 'C40421';
-
-const SYMBOL_MAP: Record<string, string> = {
-  'apple': 'AAPL',
-  'google': 'GOOGL',
-  'alphabet': 'GOOGL',
-  'amazon': 'AMZN',
-  'microsoft': 'MSFT',
-  'tesla': 'TSLA',
-  'nvidia': 'NVDA',
-  'meta': 'META',
-  'netflix': 'NFLX',
-};
-
-function normalizeSymbol(input: string): string {
-  const lower = input.toLowerCase().trim();
-  return SYMBOL_MAP[lower] || input.toUpperCase();
-}
 
 export interface FeesUIData {
   feeType: string;
@@ -142,7 +126,7 @@ export async function POST(req: NextRequest) {
         breakdown: data.slice(0, 10).map(t => ({
           date: t.Date,
           amount: Math.abs(t.Commission || 0),
-          symbol: t.Symbol,
+          symbol: parseOptionSymbol(t.Symbol),
         })),
       });
     }
@@ -187,7 +171,7 @@ export async function POST(req: NextRequest) {
       breakdown: data.slice(0, 10).map(f => ({
         date: f.Date,
         amount: Math.abs(f.Amount || 0),
-        symbol: f.Symbol,
+        symbol: parseOptionSymbol(f.Symbol),
       })),
     });
   } catch (error) {

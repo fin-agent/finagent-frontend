@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import { getDateOffset } from '@/src/lib/date-utils';
 import { parseTimeExpression } from '@/src/lib/date-parser';
+import { normalizeSymbol } from '@/src/lib/symbol-utils';
 
 // Format date for voice - shows raw database dates (no offset)
 // For "this year" queries, database dates are already 2025 dates
@@ -38,31 +39,6 @@ function formatPrice(price: number): string {
 // Format number without commas (TTS requires no commas - commas break speech synthesis)
 function formatNumber(num: number): string {
   return Math.round(num).toString();
-}
-
-// Symbol mapping for common company names (fallback if agent doesn't convert)
-const SYMBOL_MAP: Record<string, string> = {
-  'apple': 'AAPL',
-  'google': 'GOOGL',
-  'alphabet': 'GOOGL',
-  'amazon': 'AMZN',
-  'microsoft': 'MSFT',
-  'tesla': 'TSLA',
-  'nvidia': 'NVDA',
-  'meta': 'META',
-  'facebook': 'META',
-  'netflix': 'NFLX',
-  'amd': 'AMD',
-  'intel': 'INTC',
-  'bank of america': 'BAC',
-  'citigroup': 'C',
-  'gamestop': 'GME',
-  'lucid': 'LCID',
-};
-
-function normalizeSymbol(input: string): string {
-  const lower = input.toLowerCase().trim();
-  return SYMBOL_MAP[lower] || input.toUpperCase();
 }
 
 export async function POST(req: NextRequest) {

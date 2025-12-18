@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import { realDateToDemoDate, formatDateForDB } from '@/src/lib/date-utils';
+import { normalizeSymbol } from '@/src/lib/symbol-utils';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -10,26 +11,6 @@ const supabase = createClient(
 const ACCOUNT_CODE = 'C40421';
 
 type FeeType = 'commission' | 'credit_interest' | 'debit_interest' | 'locate_fee';
-
-const SYMBOL_MAP: Record<string, string> = {
-  'apple': 'AAPL',
-  'google': 'GOOGL',
-  'alphabet': 'GOOGL',
-  'amazon': 'AMZN',
-  'microsoft': 'MSFT',
-  'tesla': 'TSLA',
-  'nvidia': 'NVDA',
-  'meta': 'META',
-  'facebook': 'META',
-  'netflix': 'NFLX',
-  'amd': 'AMD',
-  'intel': 'INTC',
-};
-
-function normalizeSymbol(input: string): string {
-  const lower = input.toLowerCase().trim();
-  return SYMBOL_MAP[lower] || input.toUpperCase();
-}
 
 function formatCurrency(value: number): string {
   return new Intl.NumberFormat('en-US', {

@@ -1,26 +1,18 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
+import { formatCalendarDate, realDateToDemoDate, formatDateForDB } from '@/src/lib/date-utils';
 
-// Format date in PACIFIC TIMEZONE to match UI display
-// The UI renders dates in the user's browser (typically Pacific time)
-// Database stores dates as YYYY-MM-DD which JS interprets as UTC midnight
-// UTC midnight = previous day evening in Pacific, so we need Pacific formatting
+// Use formatCalendarDate from date-utils to apply demo date offset
+// This ensures voice and UI show the same dates
 function formatDateForVoice(dateStr: string): string {
   if (!dateStr) return 'N/A';
+  return formatCalendarDate(dateStr);
+}
 
-  // Extract YYYY-MM-DD part and interpret as UTC midnight
-  const datePart = dateStr.split('T')[0];
-  const date = new Date(datePart + 'T00:00:00Z');
-
-  if (isNaN(date.getTime())) return dateStr;
-
-  // Format in Pacific timezone to match browser display
-  return date.toLocaleDateString('en-US', {
-    timeZone: 'America/Los_Angeles',
-    month: 'long',
-    day: 'numeric',
-    year: 'numeric'
-  });
+// Convert real dates to demo dates for DB queries
+function toDBDateStr(date: Date): string {
+  const demoDate = realDateToDemoDate(date);
+  return formatDateForDB(demoDate);
 }
 
 const supabase = createClient(
@@ -48,7 +40,7 @@ interface AccountBalanceRow {
 }
 
 type QueryType = 'cash_balance' | 'buying_power' | 'account_summary' | 'nlv' |
-                 'overnight_margin' | 'market_value' | 'debit_balances' | 'credit_balances';
+                 'cash_and_equity' | 'overnight_margin' | 'market_value' | 'debit_balances' | 'credit_balances';
 
 function formatCurrency(value: number): string {
   return new Intl.NumberFormat('en-US', {
@@ -61,8 +53,9 @@ function formatCurrency(value: number): string {
 // Use formatDateForVoice for consistent date display WITHOUT offset
 const formatDate = formatDateForVoice;
 
-function getDateRange(timePeriod?: string): { fromDate?: Date; toDate?: Date } {
+function getDateRange(timePeriod?: string): { fromDate?: string; toDate?: string; periodLabel?: string } {
   const today = new Date();
+  today.setHours(0, 0, 0, 0);
 
   if (!timePeriod || timePeriod === 'latest') {
     return {}; // No filter, get latest
@@ -73,23 +66,38 @@ function getDateRange(timePeriod?: string): { fromDate?: Date; toDate?: Date } {
   if (lowerPeriod.includes('last month') || lowerPeriod.includes('past month')) {
     const fromDate = new Date(today.getFullYear(), today.getMonth() - 1, 1);
     const toDate = new Date(today.getFullYear(), today.getMonth(), 0);
-    return { fromDate, toDate };
+    const monthName = fromDate.toLocaleDateString('en-US', { month: 'long' });
+    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(toDate), periodLabel: monthName };
   }
 
   if (lowerPeriod.includes('this month')) {
     const fromDate = new Date(today.getFullYear(), today.getMonth(), 1);
-    return { fromDate, toDate: today };
+    const monthName = fromDate.toLocaleDateString('en-US', { month: 'long' });
+    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today), periodLabel: monthName };
   }
 
   if (lowerPeriod.includes('last week') || lowerPeriod.includes('past week')) {
     const fromDate = new Date(today);
     fromDate.setDate(today.getDate() - 7);
-    return { fromDate, toDate: today };
+    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today), periodLabel: 'last week' };
   }
 
   if (lowerPeriod.includes('this year')) {
     const fromDate = new Date(today.getFullYear(), 0, 1);
-    return { fromDate, toDate: today };
+    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today), periodLabel: 'this year' };
+  }
+
+  // Check for explicit month names
+  const monthNames = ['january', 'february', 'march', 'april', 'may', 'june',
+                      'july', 'august', 'september', 'october', 'november', 'december'];
+  for (let i = 0; i < monthNames.length; i++) {
+    if (lowerPeriod.includes(monthNames[i])) {
+      const year = today.getFullYear();
+      const fromDate = new Date(year, i, 1);
+      const toDate = new Date(year, i + 1, 0);
+      const monthName = fromDate.toLocaleDateString('en-US', { month: 'long' });
+      return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(toDate), periodLabel: monthName };
+    }
   }
 
   return {};
@@ -107,7 +115,7 @@ export async function POST(req: NextRequest) {
     const timePeriod = body.time_period || body.parameters?.time_period ||
                        body.body?.time_period || body.body?.parameters?.time_period;
 
-    const { fromDate, toDate } = getDateRange(timePeriod);
+    const { fromDate, toDate, periodLabel } = getDateRange(timePeriod);
 
     // For balance trends (debit/credit balances), get multiple records
     if (queryType === 'debit_balances' || queryType === 'credit_balances') {
@@ -118,10 +126,10 @@ export async function POST(req: NextRequest) {
         .order('Date', { ascending: false });
 
       if (fromDate) {
-        query = query.gte('Date', fromDate.toISOString().split('T')[0]);
+        query = query.gte('Date', fromDate);
       }
       if (toDate) {
-        query = query.lte('Date', toDate.toISOString().split('T')[0]);
+        query = query.lte('Date', toDate);
       }
 
       const { data, error } = await query;
@@ -147,10 +155,12 @@ export async function POST(req: NextRequest) {
       const minDate = data.find(d => d[balanceField] === min)?.Date;
 
       const balanceType = queryType === 'debit_balances' ? 'debit' : 'credit';
-      const periodDesc = timePeriod || 'available period';
+      const monthLabel = periodLabel || 'the period';
+      const highestDate = formatDate(maxDate || '');
+      const lowestDate = formatDate(minDate || '');
 
       return NextResponse.json({
-        response: `Your ${balanceType} balance for the ${periodDesc}: Average: ${formatCurrency(avg)}, Highest: ${formatCurrency(max)} on ${formatDate(maxDate || '')}, Lowest: ${formatCurrency(min)} on ${formatDate(minDate || '')}.`,
+        response: `Your average ${balanceType} balance for ${monthLabel} is ${formatCurrency(avg)}.\nThe highest ${balanceType} balance was on ${highestDate} at ${formatCurrency(max)}.\nThe lowest ${balanceType} balance was on ${lowestDate} at ${formatCurrency(min)}.`,
       });
     }
 
@@ -181,23 +191,33 @@ export async function POST(req: NextRequest) {
     switch (queryType) {
       case 'cash_balance':
         return NextResponse.json({
-          response: `Your account cash balance as of ${balanceDate} is ${formatCurrency(balance.CashBalance)}. Your total account equity is ${formatCurrency(balance['Account Equity'])}.`,
+          response: `Your account cash balance as of ${balanceDate} is ${formatCurrency(balance.CashBalance)}`,
+        });
+
+      case 'cash_and_equity':
+        return NextResponse.json({
+          response: `Your account cash balance as of ${balanceDate} is ${formatCurrency(balance.CashBalance)}, and your account equity is ${formatCurrency(balance['Account Equity'])}`,
         });
 
       case 'buying_power':
         return NextResponse.json({
-          response: `Your day trading buying power as of ${balanceDate} is ${formatCurrency(balance.DayTradingBP)}.`,
+          response: `Your day trading buying power as of ${balanceDate} is ${formatCurrency(balance.DayTradingBP)}`,
         });
 
       case 'nlv':
         return NextResponse.json({
-          response: `Your net liquidation value (account equity) as of ${balanceDate} is ${formatCurrency(balance['Account Equity'])}.`,
+          response: `Your net liquidation value as of ${balanceDate} is ${formatCurrency(balance['Account Equity'])}`,
         });
 
       case 'overnight_margin':
-        return NextResponse.json({
-          response: `Your overnight margin status as of ${balanceDate}: House Requirement: ${formatCurrency(balance.HouseRequirment)}, House Excess/Deficit: ${formatCurrency(balance.HouseExcessDeficit)}, Federal Requirement: ${formatCurrency(balance.FedRequirement)}, Federal Excess/Deficit: ${formatCurrency(balance.FedExcessDeficit)}.`,
-        });
+        {
+          const excessDeficit = balance.HouseExcessDeficit || 0;
+          const label = excessDeficit >= 0 ? 'excess' : 'deficit';
+          const amount = formatCurrency(Math.abs(excessDeficit));
+          return NextResponse.json({
+            response: `Your house requirement as of ${balanceDate} is ${formatCurrency(balance.HouseRequirment)}, and your house ${label} is ${amount}`,
+          });
+        }
 
       case 'market_value': {
         const stockLong = balance['Stock LMV'] || 0;
@@ -205,14 +225,14 @@ export async function POST(req: NextRequest) {
         const optionsLong = balance['Options LMV'] || 0;
         const optionsShort = balance['Optons SMV'] || 0; // DB typo
         return NextResponse.json({
-          response: `Market value of your positions as of ${balanceDate}: Stock Long: ${formatCurrency(stockLong)}, Stock Short: ${formatCurrency(stockShort)}, Options Long: ${formatCurrency(optionsLong)}, Options Short: ${formatCurrency(optionsShort)}.`,
+          response: `The market value of your long stock positions is ${formatCurrency(stockLong)}, your long options positions is ${formatCurrency(optionsLong)}, your short stock positions is ${formatCurrency(stockShort)}, and your short options positions is ${formatCurrency(optionsShort)}`,
         });
       }
 
       case 'account_summary':
       default:
         return NextResponse.json({
-          response: `Your account summary as of ${balanceDate}: Cash Balance: ${formatCurrency(balance.CashBalance)}, Account Equity: ${formatCurrency(balance['Account Equity'])}, Day Trading BP: ${formatCurrency(balance.DayTradingBP)}, Stock Long Market Value: ${formatCurrency(balance['Stock LMV'] || 0)}, Stock Short Market Value: ${formatCurrency(balance['Stock SMV'] || 0)}, Options Long Market Value: ${formatCurrency(balance['Options LMV'] || 0)}, Options Short Market Value: ${formatCurrency(balance['Optons SMV'] || 0)}.`,
+          response: `Your account summary as of ${balanceDate}:\n\n* Cash Balance: ${formatCurrency(balance.CashBalance)}\n* Account Equity: ${formatCurrency(balance['Account Equity'])}\n* Day Trading Buying Power: ${formatCurrency(balance.DayTradingBP)}\n* Stock Long Market Value: ${formatCurrency(balance['Stock LMV'] || 0)}\n* Stock Short Market Value: ${formatCurrency(balance['Stock SMV'] || 0)}\n* Options Long Market Value: ${formatCurrency(balance['Options LMV'] || 0)}\n* Options Short Market Value: ${formatCurrency(balance['Optons SMV'] || 0)}`,
         });
     }
   } catch (error) {

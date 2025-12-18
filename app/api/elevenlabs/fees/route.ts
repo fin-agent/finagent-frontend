@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
+import { realDateToDemoDate, formatDateForDB } from '@/src/lib/date-utils';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -38,44 +39,53 @@ function formatCurrency(value: number): string {
   }).format(value);
 }
 
-function getDateRange(timePeriod: string): { fromDate: Date; toDate: Date } {
+// Convert real dates to demo dates for DB queries
+function toDBDateStr(date: Date): string {
+  const demoDate = realDateToDemoDate(date);
+  return formatDateForDB(demoDate);
+}
+
+function getDateRange(timePeriod: string): { fromDate: string; toDate: string; periodLabel: string; periodMonth?: string } {
   const today = new Date();
+  today.setHours(0, 0, 0, 0);
 
   const lowerPeriod = timePeriod.toLowerCase();
 
   if (lowerPeriod.includes('last month') || lowerPeriod.includes('past month')) {
     const fromDate = new Date(today.getFullYear(), today.getMonth() - 1, 1);
     const toDate = new Date(today.getFullYear(), today.getMonth(), 0);
-    return { fromDate, toDate };
+    const monthName = fromDate.toLocaleDateString('en-US', { month: 'long' });
+    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(toDate), periodLabel: `month of ${monthName}`, periodMonth: monthName };
   }
 
   if (lowerPeriod.includes('this month')) {
     const fromDate = new Date(today.getFullYear(), today.getMonth(), 1);
-    return { fromDate, toDate: today };
+    const monthName = fromDate.toLocaleDateString('en-US', { month: 'long' });
+    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today), periodLabel: `month of ${monthName}`, periodMonth: monthName };
   }
 
   if (lowerPeriod.includes('last week') || lowerPeriod.includes('past week')) {
     const fromDate = new Date(today);
     fromDate.setDate(today.getDate() - 7);
-    return { fromDate, toDate: today };
+    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today), periodLabel: 'last week' };
   }
 
   if (lowerPeriod.includes('this week')) {
     const dayOfWeek = today.getDay();
     const fromDate = new Date(today);
     fromDate.setDate(today.getDate() - dayOfWeek);
-    return { fromDate, toDate: today };
+    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today), periodLabel: 'this week' };
   }
 
   if (lowerPeriod.includes('this year') || lowerPeriod.includes('since the beginning of the year')) {
     const fromDate = new Date(today.getFullYear(), 0, 1);
-    return { fromDate, toDate: today };
+    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today), periodLabel: 'this year' };
   }
 
   // "last year" = trailing 12 months (not calendar year) to match user expectations
   if (lowerPeriod.includes('last year') || lowerPeriod.includes('past year')) {
     const fromDate = new Date(today.getFullYear(), today.getMonth() - 12, today.getDate());
-    return { fromDate, toDate: today };
+    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today), periodLabel: 'last year' };
   }
 
   // Check for month names like "November" or "in November"
@@ -86,18 +96,15 @@ function getDateRange(timePeriod: string): { fromDate: Date; toDate: Date } {
       const year = lowerPeriod.includes('last year') ? today.getFullYear() - 1 : today.getFullYear();
       const fromDate = new Date(year, i, 1);
       const toDate = new Date(year, i + 1, 0);
-      return { fromDate, toDate };
+      const monthName = fromDate.toLocaleDateString('en-US', { month: 'long' });
+      return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(toDate), periodLabel: `month of ${monthName}`, periodMonth: monthName };
     }
   }
 
   // Default to last 30 days
   const fromDate = new Date(today);
   fromDate.setDate(today.getDate() - 30);
-  return { fromDate, toDate: today };
-}
-
-function getMonthName(date: Date): string {
-  return date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today), periodLabel: timePeriod };
 }
 
 export async function POST(req: NextRequest) {
@@ -119,8 +126,8 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const { fromDate, toDate } = getDateRange(timePeriod);
-    const periodDescription = timePeriod || getMonthName(fromDate);
+    const { fromDate, toDate, periodLabel, periodMonth } = getDateRange(timePeriod);
+    const monthLabel = periodMonth || periodLabel;
 
     // Handle commissions from TradeData table
     if (feeType === 'commission') {
@@ -128,8 +135,8 @@ export async function POST(req: NextRequest) {
         .from('TradeData')
         .select('Commission, Date')
         .eq('AccountCode', ACCOUNT_CODE)
-        .gte('Date', fromDate.toISOString().split('T')[0])
-        .lte('Date', toDate.toISOString().split('T')[0]);
+        .gte('Date', fromDate)
+        .lte('Date', toDate);
 
       const { data, error } = await query;
 
@@ -141,15 +148,19 @@ export async function POST(req: NextRequest) {
 
       if (!data || data.length === 0) {
         return NextResponse.json({
-          response: `No commission data found for ${periodDescription}.`,
+          response: `No commission data found for ${periodLabel}.`,
         });
       }
 
       const totalCommission = data.reduce((sum, trade) => sum + (trade.Commission || 0), 0);
-      const tradeCount = data.length;
-
+      const amount = formatCurrency(Math.abs(totalCommission));
+      if (periodLabel.startsWith('month of')) {
+        return NextResponse.json({
+          response: `The total commission you paid in the month of ${monthLabel} is ${amount}`,
+        });
+      }
       return NextResponse.json({
-        response: `The total commission you paid for ${periodDescription} is ${formatCurrency(Math.abs(totalCommission))} across ${tradeCount} trades.`,
+        response: `The total commission you paid for ${periodLabel} is ${amount}`,
       });
     }
 
@@ -166,8 +177,8 @@ export async function POST(req: NextRequest) {
       .from('FeesAndInterest')
       .select('*')
       .eq('Type', dbFeeType)
-      .gte('Date', fromDate.toISOString().split('T')[0])
-      .lte('Date', toDate.toISOString().split('T')[0]);
+      .gte('Date', fromDate)
+      .lte('Date', toDate);
 
     // For locate fees, filter by symbol if provided
     if (feeType === 'locate_fee' && symbol) {
@@ -186,25 +197,38 @@ export async function POST(req: NextRequest) {
     if (!data || data.length === 0) {
       const symbolText = symbol ? ` for ${normalizeSymbol(symbol)}` : '';
       return NextResponse.json({
-        response: `No ${feeType.replace('_', ' ')} data found${symbolText} for ${periodDescription}.`,
+        response: `No ${feeType.replace('_', ' ')} data found${symbolText} for ${periodLabel}.`,
       });
     }
 
     const totalAmount = data.reduce((sum, fee) => sum + (fee.Amount || 0), 0);
-    const transactionCount = data.length;
 
     // Build response based on fee type
     let response = '';
     switch (feeType) {
       case 'credit_interest':
-        response = `The total credit interest you earned for ${periodDescription} is ${formatCurrency(Math.abs(totalAmount))} across ${transactionCount} transactions.`;
+        if (periodLabel.startsWith('month of')) {
+          response = `The total credit interest you received for the month of ${monthLabel} is ${formatCurrency(Math.abs(totalAmount))}`;
+        } else {
+          response = `The total credit interest you received for ${periodLabel} is ${formatCurrency(Math.abs(totalAmount))}`;
+        }
         break;
       case 'debit_interest':
-        response = `The total debit interest you paid for ${periodDescription} is ${formatCurrency(Math.abs(totalAmount))} across ${transactionCount} transactions.`;
+        if (periodLabel === 'last week') {
+          response = `The total debit interest you paid last week is ${formatCurrency(Math.abs(totalAmount))}`;
+        } else if (periodLabel.startsWith('month of')) {
+          response = `The total debit interest you paid for the month of ${monthLabel} is ${formatCurrency(Math.abs(totalAmount))}`;
+        } else {
+          response = `The total debit interest you paid for ${periodLabel} is ${formatCurrency(Math.abs(totalAmount))}`;
+        }
         break;
       case 'locate_fee': {
         const symbolText = symbol ? ` for stock ${normalizeSymbol(symbol)}` : '';
-        response = `The total locate fees you paid${symbolText} for ${periodDescription} is ${formatCurrency(Math.abs(totalAmount))} across ${transactionCount} transactions.`;
+        if (periodLabel === 'this year') {
+          response = `The total locate fees you paid${symbolText} this year is ${formatCurrency(Math.abs(totalAmount))}`;
+        } else {
+          response = `The total locate fees you paid${symbolText} for ${periodLabel} is ${formatCurrency(Math.abs(totalAmount))}`;
+        }
         break;
       }
     }

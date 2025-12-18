@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
-import { formatCalendarDate, realDateToDemoDate, formatDateForDB } from '@/src/lib/date-utils';
+import { realDateToDemoDate, formatDateForDB } from '@/src/lib/date-utils';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -31,6 +31,7 @@ export interface FeesUIData {
   totalAmount: number;
   transactionCount: number;
   timePeriod: string;
+  periodMonth?: string;
   symbol?: string;
   breakdown?: Array<{
     date: string;
@@ -39,7 +40,7 @@ export interface FeesUIData {
   }>;
 }
 
-function getDateRange(timePeriod: string): { fromDate: string; toDate: string } {
+function getDateRange(timePeriod: string): { fromDate: string; toDate: string; periodLabel: string; periodMonth?: string } {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const lowerPeriod = timePeriod.toLowerCase();
@@ -53,36 +54,38 @@ function getDateRange(timePeriod: string): { fromDate: string; toDate: string } 
   if (lowerPeriod.includes('last month') || lowerPeriod.includes('past month')) {
     const fromDate = new Date(today.getFullYear(), today.getMonth() - 1, 1);
     const toDate = new Date(today.getFullYear(), today.getMonth(), 0);
-    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(toDate) };
+    const monthName = fromDate.toLocaleDateString('en-US', { month: 'long' });
+    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(toDate), periodLabel: `month of ${monthName}`, periodMonth: monthName };
   }
 
   if (lowerPeriod.includes('this month')) {
     const fromDate = new Date(today.getFullYear(), today.getMonth(), 1);
-    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today) };
+    const monthName = fromDate.toLocaleDateString('en-US', { month: 'long' });
+    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today), periodLabel: `month of ${monthName}`, periodMonth: monthName };
   }
 
   if (lowerPeriod.includes('last week') || lowerPeriod.includes('past week')) {
     const fromDate = new Date(today);
     fromDate.setDate(today.getDate() - 7);
-    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today) };
+    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today), periodLabel: 'last week' };
   }
 
   if (lowerPeriod.includes('this week')) {
     const dayOfWeek = today.getDay();
     const fromDate = new Date(today);
     fromDate.setDate(today.getDate() - dayOfWeek);
-    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today) };
+    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today), periodLabel: 'this week' };
   }
 
   if (lowerPeriod.includes('this year') || lowerPeriod.includes('since the beginning of the year')) {
     const fromDate = new Date(today.getFullYear(), 0, 1);
-    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today) };
+    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today), periodLabel: 'this year' };
   }
 
   // "last year" = trailing 12 months (not calendar year) to match user expectations
   if (lowerPeriod === 'last year' || lowerPeriod === 'past year') {
     const fromDate = new Date(today.getFullYear(), today.getMonth() - 12, today.getDate());
-    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today) };
+    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today), periodLabel: 'last year' };
   }
 
   // Check for month names
@@ -93,14 +96,15 @@ function getDateRange(timePeriod: string): { fromDate: string; toDate: string } 
       const year = lowerPeriod.includes('last year') ? today.getFullYear() - 1 : today.getFullYear();
       const fromDate = new Date(year, i, 1);
       const toDate = new Date(year, i + 1, 0);
-      return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(toDate) };
+      const monthName = fromDate.toLocaleDateString('en-US', { month: 'long' });
+      return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(toDate), periodLabel: `month of ${monthName}`, periodMonth: monthName };
     }
   }
 
   // Default to last 30 days
   const fromDate = new Date(today);
   fromDate.setDate(today.getDate() - 30);
-  return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today) };
+  return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today), periodLabel: timePeriod };
 }
 
 export async function POST(req: NextRequest) {
@@ -110,7 +114,8 @@ export async function POST(req: NextRequest) {
     const timePeriod = body.timePeriod || 'this month';
     const symbol = body.symbol;
 
-    const { fromDate, toDate } = getDateRange(timePeriod);
+    const { fromDate, toDate, periodLabel, periodMonth } = getDateRange(timePeriod);
+    const displayPeriod = periodLabel || timePeriod;
 
     // Handle commissions from TradeData table
     if (feeType === 'commission') {
@@ -132,9 +137,10 @@ export async function POST(req: NextRequest) {
         feeType,
         totalAmount,
         transactionCount: data.length,
-        timePeriod,
+        timePeriod: displayPeriod,
+        periodMonth,
         breakdown: data.slice(0, 10).map(t => ({
-          date: formatCalendarDate(t.Date),
+          date: t.Date,
           amount: Math.abs(t.Commission || 0),
           symbol: t.Symbol,
         })),
@@ -175,10 +181,11 @@ export async function POST(req: NextRequest) {
       feeType,
       totalAmount,
       transactionCount: data.length,
-      timePeriod,
+      timePeriod: displayPeriod,
+      periodMonth,
       symbol: symbol ? normalizeSymbol(symbol) : undefined,
       breakdown: data.slice(0, 10).map(f => ({
-        date: formatCalendarDate(f.Date),
+        date: f.Date,
         amount: Math.abs(f.Amount || 0),
         symbol: f.Symbol,
       })),

@@ -214,7 +214,7 @@ export function FeesSummary({ feeType, totalAmount, transactionCount, timePeriod
   const displayTitle = feeType === 'locate_fee' && symbol ? `Locate Fees — ${symbol}` : config.title;
 
   return (
-    <div style={cardStyle}>
+    <div style={cardStyle} data-testid="fees-summary-card" data-fee-type={feeType}>
       <BackgroundPattern accentColor={config.accentColor} />
 
       {/* Header */}
@@ -226,7 +226,7 @@ export function FeesSummary({ feeType, totalAmount, transactionCount, timePeriod
             <p style={{ fontSize: '12px', color: colors.textMuted, margin: '4px 0 0 0' }}>{config.description}</p>
           </div>
         </div>
-        <span style={periodBadgeStyle}>{timePeriod}</span>
+        <span style={periodBadgeStyle} data-testid="fees-card-period">{timePeriod}</span>
       </div>
 
       {/* Main content */}

@@ -33,10 +33,11 @@ export interface AccountBalanceUIData {
     lowest: number;
     lowestDate: string;
     period: string;
+    periodMonth?: string;
   };
 }
 
-function getDateRange(timePeriod?: string): { fromDate?: string; toDate?: string } {
+function getDateRange(timePeriod?: string): { fromDate?: string; toDate?: string; periodLabel?: string; periodMonth?: string } {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
@@ -55,23 +56,38 @@ function getDateRange(timePeriod?: string): { fromDate?: string; toDate?: string
   if (lowerPeriod.includes('last month') || lowerPeriod.includes('past month')) {
     const fromDate = new Date(today.getFullYear(), today.getMonth() - 1, 1);
     const toDate = new Date(today.getFullYear(), today.getMonth(), 0);
-    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(toDate) };
+    const monthName = fromDate.toLocaleDateString('en-US', { month: 'long' });
+    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(toDate), periodLabel: `month of ${monthName}`, periodMonth: monthName };
   }
 
   if (lowerPeriod.includes('this month')) {
     const fromDate = new Date(today.getFullYear(), today.getMonth(), 1);
-    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today) };
+    const monthName = fromDate.toLocaleDateString('en-US', { month: 'long' });
+    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today), periodLabel: `month of ${monthName}`, periodMonth: monthName };
   }
 
   if (lowerPeriod.includes('last week') || lowerPeriod.includes('past week')) {
     const fromDate = new Date(today);
     fromDate.setDate(today.getDate() - 7);
-    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today) };
+    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today), periodLabel: 'last week' };
   }
 
   if (lowerPeriod.includes('this year')) {
     const fromDate = new Date(today.getFullYear(), 0, 1);
-    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today) };
+    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today), periodLabel: 'this year' };
+  }
+
+  // Check for explicit month names (e.g., "October", "month of October")
+  const monthNames = ['january', 'february', 'march', 'april', 'may', 'june',
+                      'july', 'august', 'september', 'october', 'november', 'december'];
+  for (let i = 0; i < monthNames.length; i++) {
+    if (lowerPeriod.includes(monthNames[i])) {
+      const year = today.getFullYear();
+      const fromDate = new Date(year, i, 1);
+      const toDate = new Date(year, i + 1, 0);
+      const monthName = fromDate.toLocaleDateString('en-US', { month: 'long' });
+      return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(toDate), periodLabel: `month of ${monthName}`, periodMonth: monthName };
+    }
   }
 
   return {};
@@ -83,10 +99,11 @@ export async function POST(req: NextRequest) {
     const queryType = body.queryType || 'account_summary';
     const timePeriod = body.timePeriod;
 
-    const { fromDate, toDate } = getDateRange(timePeriod);
+    const { fromDate, toDate, periodLabel, periodMonth } = getDateRange(timePeriod);
 
     // For balance trends
     if (queryType === 'debit_balances' || queryType === 'credit_balances') {
+      const resolvedPeriodLabel = periodLabel || timePeriod || 'available period';
       let query = supabase
         .from('AccountBalance')
         .select('Date, DebitBalance, CreditBalance')
@@ -113,6 +130,10 @@ export async function POST(req: NextRequest) {
       const min = Math.min(...values);
       const maxDate = data.find(d => d[balanceField] === max)?.Date || '';
       const minDate = data.find(d => d[balanceField] === min)?.Date || '';
+      const entries = data
+        .slice()
+        .reverse()
+        .map((row) => ({ date: row.Date, amount: row[balanceField] || 0 }));
 
       return NextResponse.json({
         queryType,
@@ -123,7 +144,9 @@ export async function POST(req: NextRequest) {
           highestDate: maxDate, // Return raw date
           lowest: min,
           lowestDate: minDate, // Return raw date
-          period: timePeriod || 'available period',
+          period: resolvedPeriodLabel,
+          periodMonth,
+          entries,
         },
       });
     }

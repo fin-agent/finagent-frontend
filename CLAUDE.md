@@ -22,6 +22,11 @@ npm run lint         # Run ESLint
 - ElevenLabs webhook tools point to production Vercel URLs
 - Vercel auto-deploys on push to main branch
 
+### ElevenLabs Agent Configuration
+- **Agent ID**: `agent_3101kbjqgdc0fkgvt8f1zw2hbvxv`
+- **System Prompt**: `prompts/finagent-neo.md` - Copy this to ElevenLabs dashboard when updating
+- **Dashboard**: Configure agent settings, tools, and system prompt in ElevenLabs Conversational AI dashboard
+
 ### Local Development Workflow
 ElevenLabs webhooks are configured with production URLs. For local API testing:
 
@@ -376,3 +381,7 @@ When testing voice agent features:
 6. End call when done testing
 
 **IMPORTANT:** Dev server MUST always run on port 3000. Kill any process using port 3000 before starting (`lsof -ti:3000 | xargs kill -9`). ngrok is configured to forward port 3000 for ElevenLabs webhooks - webhooks will fail if using a different port.
+
+## Testing Guidelines
+
+**IMPORTANT**: When testing LiveKit voice agent with Playwright, ALWAYS end the call/disconnect after testing to avoid running up credits. Use the 'End Call' or 'Disconnect' button after each test.

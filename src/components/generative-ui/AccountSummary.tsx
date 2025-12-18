@@ -4,7 +4,7 @@ import React from 'react';
 import { formatCalendarDate } from '@/src/lib/date-utils';
 
 export type AccountQueryType = 'cash_balance' | 'buying_power' | 'account_summary' | 'nlv' |
-                               'overnight_margin' | 'market_value' | 'debit_balances' | 'credit_balances';
+                               'cash_and_equity' | 'overnight_margin' | 'market_value' | 'debit_balances' | 'credit_balances';
 
 export interface AccountSummaryProps {
   queryType: AccountQueryType;
@@ -29,6 +29,7 @@ export interface AccountSummaryProps {
     lowest: number;
     lowestDate: string;
     period: string;
+    entries?: Array<{ date: string; amount: number }>;
   };
 }
 
@@ -215,13 +216,13 @@ export function AccountSummary(props: AccountSummaryProps) {
     const accentColor = isDebit ? colors.red : colors.green;
 
     return (
-      <div style={cardStyle}>
+      <div style={cardStyle} data-testid="account-summary-card" data-query-type={queryType}>
         <AccentLine color={accentColor} />
         <div style={headerStyle}>
           <h3 style={titleStyle}>
             {isDebit ? 'Debit Balance Trend' : 'Credit Balance Trend'}
           </h3>
-          <span style={dateStyle}>{balanceTrend.period}</span>
+          <span style={dateStyle} data-testid="account-card-header-right">{balanceTrend.period}</span>
         </div>
 
         <DataRow
@@ -238,6 +239,22 @@ export function AccountSummary(props: AccountSummaryProps) {
           label={`Lowest (${formatCalendarDate(balanceTrend.lowestDate)})`}
           value={formatCurrency(balanceTrend.lowest)}
         />
+
+        {balanceTrend.entries && balanceTrend.entries.length > 0 && (
+          <>
+            <SectionHeader title="Daily Balances" color={accentColor} />
+            <div style={{ maxHeight: '180px', overflowY: 'auto' }}>
+              {balanceTrend.entries.map((entry, idx) => (
+                <DataRow
+                  key={`${entry.date}-${idx}`}
+                  label={formatCalendarDate(entry.date)}
+                  value={formatCurrency(entry.amount)}
+                  isAlt={idx % 2 === 1}
+                />
+              ))}
+            </div>
+          </>
+        )}
       </div>
     );
   }
@@ -245,15 +262,35 @@ export function AccountSummary(props: AccountSummaryProps) {
   // Cash Balance View
   if (queryType === 'cash_balance') {
     return (
-      <div style={cardStyle}>
+      <div style={cardStyle} data-testid="account-summary-card" data-query-type={queryType}>
         <AccentLine color={colors.green} />
         <div style={headerStyle}>
           <h3 style={titleStyle}>Cash Balance</h3>
-          <span style={dateStyle}>{formatCalendarDate(date)}</span>
+          <span style={dateStyle} data-testid="account-card-header-right">{formatCalendarDate(date)}</span>
         </div>
 
         <div style={{ padding: '24px 18px', textAlign: 'center', borderBottom: `1px solid ${colors.border}` }}>
           <span style={{ fontSize: '10px', letterSpacing: '0.1em', color: colors.textMuted, textTransform: 'uppercase' }}>Available Cash</span>
+          <p style={{ ...heroValueStyle(colors.green), marginTop: '8px' }}>
+            {formatCurrency(props.cashBalance)}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Cash + Equity View
+  if (queryType === 'cash_and_equity') {
+    return (
+      <div style={cardStyle} data-testid="account-summary-card" data-query-type={queryType}>
+        <AccentLine color={colors.gold} />
+        <div style={headerStyle}>
+          <h3 style={titleStyle}>Cash & Equity</h3>
+          <span style={dateStyle} data-testid="account-card-header-right">{formatCalendarDate(date)}</span>
+        </div>
+
+        <div style={{ padding: '24px 18px', textAlign: 'center', borderBottom: `1px solid ${colors.border}` }}>
+          <span style={{ fontSize: '10px', letterSpacing: '0.1em', color: colors.textMuted, textTransform: 'uppercase' }}>Cash Balance</span>
           <p style={{ ...heroValueStyle(colors.green), marginTop: '8px' }}>
             {formatCurrency(props.cashBalance)}
           </p>
@@ -271,11 +308,11 @@ export function AccountSummary(props: AccountSummaryProps) {
   // Buying Power View
   if (queryType === 'buying_power') {
     return (
-      <div style={cardStyle}>
+      <div style={cardStyle} data-testid="account-summary-card" data-query-type={queryType}>
         <AccentLine color={colors.blue} />
         <div style={headerStyle}>
           <h3 style={titleStyle}>Day Trading Buying Power</h3>
-          <span style={dateStyle}>{formatCalendarDate(date)}</span>
+          <span style={dateStyle} data-testid="account-card-header-right">{formatCalendarDate(date)}</span>
         </div>
 
         <div style={{ padding: '24px 18px', textAlign: 'center' }}>
@@ -294,11 +331,11 @@ export function AccountSummary(props: AccountSummaryProps) {
   // NLV View
   if (queryType === 'nlv') {
     return (
-      <div style={cardStyle}>
+      <div style={cardStyle} data-testid="account-summary-card" data-query-type={queryType}>
         <AccentLine color={colors.gold} />
         <div style={headerStyle}>
           <h3 style={titleStyle}>Net Liquidation Value</h3>
-          <span style={dateStyle}>{formatCalendarDate(date)}</span>
+          <span style={dateStyle} data-testid="account-card-header-right">{formatCalendarDate(date)}</span>
         </div>
 
         <div style={{ padding: '24px 18px', textAlign: 'center' }}>
@@ -316,15 +353,17 @@ export function AccountSummary(props: AccountSummaryProps) {
 
   // Margin Status View
   if (queryType === 'overnight_margin') {
-    const houseExcess = props.houseExcessDeficit || 0;
-    const fedExcess = props.fedExcessDeficit || 0;
+    const houseExcessDeficit = props.houseExcessDeficit || 0;
+    const isExcess = houseExcessDeficit >= 0;
+    const label = isExcess ? 'House Excess' : 'House Deficit';
+    const displayValue = Math.abs(houseExcessDeficit);
 
     return (
-      <div style={cardStyle}>
+      <div style={cardStyle} data-testid="account-summary-card" data-query-type={queryType}>
         <AccentLine color={colors.purple} />
         <div style={headerStyle}>
-          <h3 style={titleStyle}>Margin Status</h3>
-          <span style={dateStyle}>{formatCalendarDate(date)}</span>
+          <h3 style={titleStyle}>Overnight Margin</h3>
+          <span style={dateStyle} data-testid="account-card-header-right">{formatCalendarDate(date)}</span>
         </div>
 
         <SectionHeader title="House Requirement" color={colors.blue} />
@@ -333,23 +372,10 @@ export function AccountSummary(props: AccountSummaryProps) {
           value={formatCurrency(props.houseRequirement)}
         />
         <DataRow
-          label="Excess / Deficit"
-          value={formatCurrency(houseExcess)}
-          valueColor={houseExcess >= 0 ? colors.green : colors.red}
-          indicator={houseExcess >= 0 ? 'positive' : 'negative'}
-          isAlt
-        />
-
-        <SectionHeader title="Federal Requirement" color={colors.purple} />
-        <DataRow
-          label="Requirement"
-          value={formatCurrency(props.fedRequirement)}
-        />
-        <DataRow
-          label="Excess / Deficit"
-          value={formatCurrency(fedExcess)}
-          valueColor={fedExcess >= 0 ? colors.green : colors.red}
-          indicator={fedExcess >= 0 ? 'positive' : 'negative'}
+          label={label}
+          value={formatCurrency(displayValue)}
+          valueColor={isExcess ? colors.green : colors.red}
+          indicator={isExcess ? 'positive' : 'negative'}
           isAlt
         />
       </div>
@@ -362,37 +388,31 @@ export function AccountSummary(props: AccountSummaryProps) {
     const stockShort = props.stockSMV || 0;
     const optionsLong = props.optionsLMV || 0;
     const optionsShort = props.optionsSMV || 0;
-    const netStocks = stockLong + stockShort;
-    const netOptions = optionsLong + optionsShort;
 
     return (
-      <div style={cardStyle}>
+      <div style={cardStyle} data-testid="account-summary-card" data-query-type={queryType}>
         <AccentLine color={colors.blue} />
         <div style={headerStyle}>
           <h3 style={titleStyle}>Position Market Values</h3>
-          <span style={dateStyle}>{formatCalendarDate(date)}</span>
+          <span style={dateStyle} data-testid="account-card-header-right">{formatCalendarDate(date)}</span>
         </div>
 
-        <SectionHeader title="Stocks" color={colors.blue} />
-        <DataRow label="Net Value" value={formatCurrency(netStocks)} valueColor={colors.white} />
-        <DataRow label="Long" value={formatCurrency(stockLong)} valueColor={colors.green} isAlt />
-        <DataRow label="Short" value={formatCurrency(stockShort)} valueColor={colors.red} />
-
-        <SectionHeader title="Options" color={colors.purple} />
-        <DataRow label="Net Value" value={formatCurrency(netOptions)} valueColor={colors.white} />
-        <DataRow label="Long" value={formatCurrency(optionsLong)} valueColor={colors.green} isAlt />
-        <DataRow label="Short" value={formatCurrency(optionsShort)} valueColor={colors.red} />
+        <SectionHeader title="Market Value of Positions" color={colors.blue} />
+        <DataRow label="Long Stock" value={formatCurrency(stockLong)} valueColor={colors.green} />
+        <DataRow label="Long Options" value={formatCurrency(optionsLong)} valueColor={colors.green} isAlt />
+        <DataRow label="Short Stock" value={formatCurrency(stockShort)} valueColor={colors.red} />
+        <DataRow label="Short Options" value={formatCurrency(optionsShort)} valueColor={colors.red} isAlt />
       </div>
     );
   }
 
   // Full Account Summary View (default) - Tabular Format
   return (
-    <div style={cardStyle}>
+    <div style={cardStyle} data-testid="account-summary-card" data-query-type={queryType}>
       <AccentLine color={colors.accent} />
       <div style={headerStyle}>
         <h3 style={titleStyle}>Account Summary</h3>
-        <span style={dateStyle}>{formatCalendarDate(date)}</span>
+        <span style={dateStyle} data-testid="account-card-header-right">{formatCalendarDate(date)}</span>
       </div>
 
       {/* Primary Metrics Section */}

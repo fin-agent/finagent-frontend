@@ -5,7 +5,8 @@
  * IMPORTANT: Uses US Pacific timezone for consistent date calculations
  */
 
-import { getDateOffset, formatDateForDB } from './date-utils';
+import { getDateOffset, formatDateForDB, realDateToDemoDate } from './date-utils';
+import type { DateFilter } from './intent-detection/types';
 
 /**
  * Get the current date in US Pacific timezone as a Date object
@@ -401,4 +402,261 @@ export function extractTimePeriodFromQuery(query: string): string | null {
 export function isTimeBasedQuery(query: string): boolean {
   const timePeriod = extractTimePeriodFromQuery(query);
   return timePeriod !== null;
+}
+
+// ============================================================================
+// LLM-First Date Resolution (with regex fallback)
+// ============================================================================
+
+/**
+ * Resolved dates ready for database queries
+ * Handles both range queries and discrete date queries
+ */
+export interface ResolvedDates {
+  type: 'range' | 'discrete';
+  startDate?: string;   // For range queries (YYYY-MM-DD)
+  endDate?: string;     // For range queries (YYYY-MM-DD)
+  dates?: string[];     // For discrete date queries (array of YYYY-MM-DD)
+  description: string;  // Human-readable description
+}
+
+/**
+ * Resolve DateFilter from LLM to database-ready dates
+ * Handles demo date offset conversion
+ *
+ * @param filter - DateFilter object from LLM classification
+ * @returns ResolvedDates with DB-adjusted dates
+ */
+export function resolveDateFilter(filter: DateFilter): ResolvedDates {
+  const offset = getDateOffset();
+
+  // Handle discrete dates (multiple specific dates)
+  if (filter.type === 'discrete' && filter.dates && filter.dates.length > 0) {
+    const adjustedDates = filter.dates.map(d => {
+      const date = new Date(d);
+      date.setDate(date.getDate() + offset);
+      return formatDateForDB(date);
+    });
+    return {
+      type: 'discrete',
+      dates: adjustedDates,
+      description: filter.description
+    };
+  }
+
+  // Handle explicit date ranges
+  if (filter.type === 'range' && filter.startDate && filter.endDate) {
+    const start = new Date(filter.startDate);
+    const end = new Date(filter.endDate);
+    start.setDate(start.getDate() + offset);
+    end.setDate(end.getDate() + offset);
+    return {
+      type: 'range',
+      startDate: formatDateForDB(start),
+      endDate: formatDateForDB(end),
+      description: filter.description
+    };
+  }
+
+  // Handle relative periods (fall back to existing parseTimeExpression)
+  if (filter.type === 'relative' && filter.period) {
+    const parsed = parseTimeExpression(filter.period);
+    if (parsed) {
+      return {
+        type: 'range',
+        startDate: parsed.dateRange.startDate,
+        endDate: parsed.dateRange.endDate,
+        description: parsed.dateRange.description
+      };
+    }
+  }
+
+  // Ultimate fallback: last 30 days
+  const today = getPacificToday();
+  const start = new Date(today);
+  start.setDate(start.getDate() - 30);
+  return {
+    type: 'range',
+    startDate: formatDateForDB(realDateToDemoDate(start)),
+    endDate: formatDateForDB(realDateToDemoDate(today)),
+    description: 'last 30 days'
+  };
+}
+
+/**
+ * Parse a time period string to ResolvedDates (regex fallback when LLM fails)
+ * Extends parseTimeExpression to handle date ranges and discrete dates
+ *
+ * @param timePeriod - Time period string from user query
+ * @returns ResolvedDates or null if not parseable
+ */
+export function parseTimePeriodToResolvedDates(timePeriod: string): ResolvedDates | null {
+  const lowerExpr = timePeriod.toLowerCase().trim();
+  const today = getPacificToday();
+  today.setHours(0, 0, 0, 0);
+
+  const offset = getDateOffset();
+
+  // Helper to format date with offset applied for DB query
+  const toDBDate = (date: Date): string => {
+    const adjusted = new Date(date);
+    adjusted.setDate(adjusted.getDate() + offset);
+    return formatDateForDB(adjusted);
+  };
+
+  const monthNames = 'january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sept|sep|october|oct|november|nov|december|dec';
+
+  // Pattern: Same-month date range - "June 1st to the 7th", "June 1 to 7"
+  const samemonthRangeMatch = lowerExpr.match(
+    new RegExp(`^(${monthNames})\\s+(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:to|through|-)\\s+(?:the\\s+)?(\\d{1,2})(?:st|nd|rd|th)?$`, 'i')
+  );
+  if (samemonthRangeMatch) {
+    const [, monthStr, startDayStr, endDayStr] = samemonthRangeMatch;
+    const month = monthNameToNumber[monthStr.toLowerCase()];
+    const startDay = parseInt(startDayStr);
+    const endDay = parseInt(endDayStr);
+
+    if (month !== undefined && startDay >= 1 && startDay <= 31 && endDay >= 1 && endDay <= 31) {
+      let year = today.getFullYear();
+      const testDate = new Date(year, month, endDay);
+      if (testDate > today) {
+        year -= 1;
+      }
+
+      const startDate = new Date(year, month, startDay);
+      const endDate = new Date(year, month, endDay);
+      const monthDisplay = startDate.toLocaleDateString('en-US', { month: 'long' });
+
+      return {
+        type: 'range',
+        startDate: toDBDate(startDate),
+        endDate: toDBDate(endDate),
+        description: `${monthDisplay} ${startDay} to ${endDay}`
+      };
+    }
+  }
+
+  // Pattern: Cross-month date range - "June 1 to June 7", "November 15 to December 5"
+  const crossMonthRangeMatch = lowerExpr.match(
+    new RegExp(`^(?:from\\s+)?(${monthNames})\\s+(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:to|through|-)\\s+(${monthNames})\\s+(\\d{1,2})(?:st|nd|rd|th)?$`, 'i')
+  );
+  if (crossMonthRangeMatch) {
+    const [, month1Str, day1Str, month2Str, day2Str] = crossMonthRangeMatch;
+    const month1 = monthNameToNumber[month1Str.toLowerCase()];
+    const month2 = monthNameToNumber[month2Str.toLowerCase()];
+    const day1 = parseInt(day1Str);
+    const day2 = parseInt(day2Str);
+
+    if (month1 !== undefined && month2 !== undefined) {
+      const year = today.getFullYear();
+      // Handle year boundary (e.g., Dec to Jan)
+      const endYear = month2 < month1 ? year + 1 : year;
+      let startDate = new Date(year, month1, day1);
+      let endDate = new Date(endYear, month2, day2);
+
+      // If range is in future, shift back one year
+      if (startDate > today) {
+        startDate = new Date(startDate.getFullYear() - 1, month1, day1);
+        endDate = new Date(endDate.getFullYear() - 1, month2, day2);
+      }
+
+      const month1Display = new Date(2025, month1, 1).toLocaleDateString('en-US', { month: 'long' });
+      const month2Display = new Date(2025, month2, 1).toLocaleDateString('en-US', { month: 'long' });
+
+      return {
+        type: 'range',
+        startDate: toDBDate(startDate),
+        endDate: toDBDate(endDate),
+        description: `${month1Display} ${day1} to ${month2Display} ${day2}`
+      };
+    }
+  }
+
+  // Pattern: Multi-month range - "August and September", "August through October"
+  const multiMonthMatch = lowerExpr.match(
+    new RegExp(`^(${monthNames})\\s+(?:and|through|to|-)\\s+(${monthNames})$`, 'i')
+  );
+  if (multiMonthMatch) {
+    const [, month1Str, month2Str] = multiMonthMatch;
+    const month1 = monthNameToNumber[month1Str.toLowerCase()];
+    const month2 = monthNameToNumber[month2Str.toLowerCase()];
+
+    if (month1 !== undefined && month2 !== undefined) {
+      const year = today.getFullYear();
+      // Handle year boundary
+      const endYear = month2 < month1 ? year + 1 : year;
+      let startDate = new Date(year, month1, 1);
+      let endDate = new Date(endYear, month2 + 1, 0); // Last day of month2
+
+      // If range is in future, shift back one year
+      if (startDate > today) {
+        startDate = new Date(startDate.getFullYear() - 1, month1, 1);
+        endDate = new Date(endDate.getFullYear() - 1, month2 + 1, 0);
+      }
+
+      const month1Display = new Date(2025, month1, 1).toLocaleDateString('en-US', { month: 'long' });
+      const month2Display = new Date(2025, month2, 1).toLocaleDateString('en-US', { month: 'long' });
+
+      return {
+        type: 'range',
+        startDate: toDBDate(startDate),
+        endDate: toDBDate(endDate),
+        description: `${month1Display} and ${month2Display}`
+      };
+    }
+  }
+
+  // Pattern: Discrete dates - "July 1st and August 1st", "January 5th, March 10th and June 20th"
+  const discreteDatesMatch = lowerExpr.match(
+    new RegExp(`(${monthNames})\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:\\s*,?\\s*(?:and\\s+)?(${monthNames})\\s+(\\d{1,2})(?:st|nd|rd|th)?)+`, 'i')
+  );
+  if (discreteDatesMatch && lowerExpr.includes(' and ') && !lowerExpr.includes(' to ') && !lowerExpr.includes(' through ')) {
+    // Parse all dates from the expression
+    const datePattern = new RegExp(`(${monthNames})\\s+(\\d{1,2})(?:st|nd|rd|th)?`, 'gi');
+    const matches = [...lowerExpr.matchAll(datePattern)];
+
+    if (matches.length >= 2) {
+      const year = today.getFullYear();
+      const dates: string[] = [];
+      const descriptions: string[] = [];
+
+      for (const match of matches) {
+        const monthStr = match[1].toLowerCase();
+        const day = parseInt(match[2]);
+        const month = monthNameToNumber[monthStr];
+
+        if (month !== undefined && day >= 1 && day <= 31) {
+          let date = new Date(year, month, day);
+          // If date is in future, use previous year
+          if (date > today) {
+            date = new Date(year - 1, month, day);
+          }
+          dates.push(toDBDate(date));
+          const monthDisplay = date.toLocaleDateString('en-US', { month: 'long' });
+          descriptions.push(`${monthDisplay} ${day}`);
+        }
+      }
+
+      if (dates.length >= 2) {
+        return {
+          type: 'discrete',
+          dates,
+          description: descriptions.join(' and ')
+        };
+      }
+    }
+  }
+
+  // Fall back to existing parseTimeExpression for relative periods
+  const parsed = parseTimeExpression(timePeriod);
+  if (parsed) {
+    return {
+      type: 'range',
+      startDate: parsed.dateRange.startDate,
+      endDate: parsed.dateRange.endDate,
+      description: parsed.dateRange.description
+    };
+  }
+
+  return null;
 }

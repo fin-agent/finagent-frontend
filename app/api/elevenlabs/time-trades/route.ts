@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
-import { parseTimeExpression } from '@/src/lib/date-parser';
+import { parseTimePeriodToResolvedDates } from '@/src/lib/date-parser';
 import { formatDisplayDate, formatDateRange } from '@/src/lib/date-utils';
 import { normalizeSymbol } from '@/src/lib/symbol-utils';
 
@@ -50,29 +50,34 @@ export async function POST(req: NextRequest) {
 
     if (!timePeriod) {
       return NextResponse.json({
-        response: 'Please specify a time period like "last week", "yesterday", "past 5 days", "November 18th", or a day name like "Monday".',
+        response: 'Please specify a time period like "last week", "yesterday", "past 5 days", "November 18th", "June 1st to the 7th", or a day name like "Monday".',
       });
     }
 
-    // Parse the time period
-    const parsedTime = parseTimeExpression(timePeriod);
-    if (!parsedTime) {
+    // Parse the time period using centralized parser
+    const resolved = parseTimePeriodToResolvedDates(timePeriod);
+    if (!resolved) {
       return NextResponse.json({
-        response: `I couldn't understand the time period "${timePeriod}". Try "last week", "yesterday", "past 5 days", "November 18th", "this month", or a day name like "Monday".`,
+        response: `I couldn't understand the time period "${timePeriod}". Try "last week", "yesterday", "past 5 days", "November 18th", "June 1st to the 7th", "August and September", or a day name like "Monday".`,
       });
     }
 
-    const { startDate, endDate, description, tradingDays } = parsedTime.dateRange;
-    console.log(`Parsed time period: ${description}, DB dates: ${startDate} to ${endDate}`);
+    const { startDate, endDate, dates, description } = resolved;
+    console.log(`Parsed time period: ${description}, type: ${resolved.type}, dates: ${dates || `${startDate} to ${endDate}`}`);
 
     // Build the query
     let query = supabase
       .from('TradeData')
       .select('*')
-      .eq('AccountCode', ACCOUNT_CODE)
-      .gte('Date', startDate)
-      .lte('Date', endDate)
-      .order('Date', { ascending: false });
+      .eq('AccountCode', ACCOUNT_CODE);
+
+    if (resolved.type === 'discrete' && dates && dates.length > 0) {
+      query = query.in('Date', dates);
+    } else if (startDate && endDate) {
+      query = query.gte('Date', startDate).lte('Date', endDate);
+    }
+
+    query = query.order('Date', { ascending: false });
 
     // Filter by symbol if provided
     const normalizedSymbol = symbol ? normalizeSymbol(symbol) : null;
@@ -143,15 +148,27 @@ export async function POST(req: NextRequest) {
       return sum + netAmount;
     }, 0);
 
-    // Format dates for display
-    const displayRange = formatDateRange(startDate, endDate);
+    // Format dates for display - handle both discrete and range
+    const displayRange = resolved.type === 'discrete' && dates
+      ? dates.map(d => formatDisplayDate(d)).join(', ')
+      : formatDateRange(startDate || '', endDate || '');
+
+    // Calculate trading days
+    let tradingDays = 1;
+    if (resolved.type === 'discrete' && dates) {
+      tradingDays = dates.length;
+    } else if (startDate && endDate) {
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      tradingDays = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+    }
 
     // Build response message with explicit counts
     // TTS requires no commas in numbers - commas break speech synthesis
     const totalValueStr = `$${totalValue.toFixed(2)}`;
 
     // Always state the exact counts clearly
-    const summaryLine = `You executed ${tradeCount} total trades${symbolText} ${description} from ${displayRange}: ${stockCount} stock trade${stockCount !== 1 ? 's' : ''} and ${optionCount} option trade${optionCount !== 1 ? 's' : ''} with a total value of ${totalValueStr}.`;
+    const summaryLine = `You executed ${tradeCount} total trades${symbolText} for ${description}: ${stockCount} stock trade${stockCount !== 1 ? 's' : ''} and ${optionCount} option trade${optionCount !== 1 ? 's' : ''} with a total value of ${totalValueStr}.`;
 
     const stockHighlights = stockTrades.slice(0, 2).map(t => {
       const action = t.TradeType === 'B' ? 'buying' : 'selling';
@@ -184,8 +201,8 @@ export async function POST(req: NextRequest) {
     const response = summaryLine + highlightsText + statsText;
 
     // Convert individual dates for display (applying date offset)
-    const displayStartDate = formatDisplayDate(startDate);
-    const displayEndDate = formatDisplayDate(endDate);
+    const displayStartDate = startDate ? formatDisplayDate(startDate) : '';
+    const displayEndDate = endDate ? formatDisplayDate(endDate) : '';
 
     return NextResponse.json({
       response,

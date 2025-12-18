@@ -1,7 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
-import { realDateToDemoDate, formatDateForDB } from '@/src/lib/date-utils';
+import { resolveDateFilter, parseTimePeriodToResolvedDates, type ResolvedDates } from '@/src/lib/date-parser';
 import { normalizeSymbol, parseOptionSymbol } from '@/src/lib/symbol-utils';
+import type { DateFilter } from '@/src/lib/intent-detection/types';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -24,92 +25,45 @@ export interface FeesUIData {
   }>;
 }
 
-function getDateRange(timePeriod: string): { fromDate: string; toDate: string; periodLabel: string; periodMonth?: string } {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const lowerPeriod = timePeriod.toLowerCase();
-
-  // Convert real dates to demo dates for DB queries
-  const toDBDateStr = (date: Date): string => {
-    const demoDate = realDateToDemoDate(date);
-    return formatDateForDB(demoDate);
-  };
-
-  if (lowerPeriod.includes('last month') || lowerPeriod.includes('past month')) {
-    const fromDate = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-    const toDate = new Date(today.getFullYear(), today.getMonth(), 0);
-    const monthName = fromDate.toLocaleDateString('en-US', { month: 'long' });
-    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(toDate), periodLabel: `month of ${monthName}`, periodMonth: monthName };
-  }
-
-  if (lowerPeriod.includes('this month')) {
-    const fromDate = new Date(today.getFullYear(), today.getMonth(), 1);
-    const monthName = fromDate.toLocaleDateString('en-US', { month: 'long' });
-    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today), periodLabel: `month of ${monthName}`, periodMonth: monthName };
-  }
-
-  if (lowerPeriod.includes('last week') || lowerPeriod.includes('past week')) {
-    const fromDate = new Date(today);
-    fromDate.setDate(today.getDate() - 7);
-    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today), periodLabel: 'last week' };
-  }
-
-  if (lowerPeriod.includes('this week')) {
-    const dayOfWeek = today.getDay();
-    const fromDate = new Date(today);
-    fromDate.setDate(today.getDate() - dayOfWeek);
-    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today), periodLabel: 'this week' };
-  }
-
-  if (lowerPeriod.includes('this year') || lowerPeriod.includes('since the beginning of the year')) {
-    const fromDate = new Date(today.getFullYear(), 0, 1);
-    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today), periodLabel: 'this year' };
-  }
-
-  // "last year" = trailing 12 months (not calendar year) to match user expectations
-  if (lowerPeriod === 'last year' || lowerPeriod === 'past year') {
-    const fromDate = new Date(today.getFullYear(), today.getMonth() - 12, today.getDate());
-    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today), periodLabel: 'last year' };
-  }
-
-  // Check for month names
-  const monthNames = ['january', 'february', 'march', 'april', 'may', 'june',
-                      'july', 'august', 'september', 'october', 'november', 'december'];
-  for (let i = 0; i < monthNames.length; i++) {
-    if (lowerPeriod.includes(monthNames[i])) {
-      const year = lowerPeriod.includes('last year') ? today.getFullYear() - 1 : today.getFullYear();
-      const fromDate = new Date(year, i, 1);
-      const toDate = new Date(year, i + 1, 0);
-      const monthName = fromDate.toLocaleDateString('en-US', { month: 'long' });
-      return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(toDate), periodLabel: `month of ${monthName}`, periodMonth: monthName };
-    }
-  }
-
-  // Default to last 30 days
-  const fromDate = new Date(today);
-  fromDate.setDate(today.getDate() - 30);
-  return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today), periodLabel: timePeriod };
-}
-
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const feeType = body.feeType || 'commission';
-    const timePeriod = body.timePeriod || 'this month';
-    const symbol = body.symbol;
+    const { timePeriod, dateFilter, symbol } = body;
 
-    const { fromDate, toDate, periodLabel, periodMonth } = getDateRange(timePeriod);
-    const displayPeriod = periodLabel || timePeriod;
+    if (!timePeriod && !dateFilter) {
+      return NextResponse.json({ error: 'Time period is required' }, { status: 400 });
+    }
+
+    // Resolve dates: prefer dateFilter from LLM, fallback to regex parsing
+    let resolved: ResolvedDates | null = null;
+
+    if (dateFilter) {
+      resolved = resolveDateFilter(dateFilter as DateFilter);
+    } else if (timePeriod) {
+      resolved = parseTimePeriodToResolvedDates(timePeriod);
+    }
+
+    if (!resolved) {
+      return NextResponse.json({ error: 'Invalid time period' }, { status: 400 });
+    }
+
+    const { startDate, endDate, dates, description } = resolved;
 
     // Handle commissions from TradeData table
     if (feeType === 'commission') {
-      const { data, error } = await supabase
+      let query = supabase
         .from('TradeData')
         .select('Commission, Date, Symbol')
-        .eq('AccountCode', ACCOUNT_CODE)
-        .gte('Date', fromDate)
-        .lte('Date', toDate)
-        .order('Date', { ascending: false });
+        .eq('AccountCode', ACCOUNT_CODE);
+
+      if (resolved.type === 'discrete' && dates && dates.length > 0) {
+        query = query.in('Date', dates);
+      } else if (startDate && endDate) {
+        query = query.gte('Date', startDate).lte('Date', endDate);
+      }
+
+      const { data, error } = await query.order('Date', { ascending: false });
 
       if (error || !data) {
         return NextResponse.json({ error: 'No data found' });
@@ -121,8 +75,7 @@ export async function POST(req: NextRequest) {
         feeType,
         totalAmount,
         transactionCount: data.length,
-        timePeriod: displayPeriod,
-        periodMonth,
+        timePeriod: description,
         breakdown: data.slice(0, 10).map(t => ({
           date: t.Date,
           amount: Math.abs(t.Commission || 0),
@@ -140,20 +93,23 @@ export async function POST(req: NextRequest) {
 
     const dbFeeType = feeTypeMap[feeType];
 
-    let query = supabase
+    let feesQuery = supabase
       .from('FeesAndInterest')
       .select('*')
-      .eq('Type', dbFeeType)
-      .gte('Date', fromDate)
-      .lte('Date', toDate)
-      .order('Date', { ascending: false });
+      .eq('Type', dbFeeType);
+
+    if (resolved.type === 'discrete' && dates && dates.length > 0) {
+      feesQuery = feesQuery.in('Date', dates);
+    } else if (startDate && endDate) {
+      feesQuery = feesQuery.gte('Date', startDate).lte('Date', endDate);
+    }
 
     if (feeType === 'locate_fee' && symbol) {
       const normalizedSymbol = normalizeSymbol(symbol);
-      query = query.eq('Symbol', normalizedSymbol);
+      feesQuery = feesQuery.eq('Symbol', normalizedSymbol);
     }
 
-    const { data, error } = await query;
+    const { data, error } = await feesQuery.order('Date', { ascending: false });
 
     if (error || !data) {
       return NextResponse.json({ error: 'No data found' });
@@ -165,8 +121,7 @@ export async function POST(req: NextRequest) {
       feeType,
       totalAmount,
       transactionCount: data.length,
-      timePeriod: displayPeriod,
-      periodMonth,
+      timePeriod: description,
       symbol: symbol ? normalizeSymbol(symbol) : undefined,
       breakdown: data.slice(0, 10).map(f => ({
         date: f.Date,

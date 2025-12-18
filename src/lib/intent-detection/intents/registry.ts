@@ -47,6 +47,13 @@ export const intentRegistry: IntentDefinition[] = [
       'Show my trades for the past four days',
       'What did I trade in the last 5 days?',
       'Trades from the past ten days',
+      // Date range examples
+      'Show my trades from June 1st to the 7th',
+      'Trades in August and September',
+      'What did I trade from November 15 to December 5?',
+      // Discrete date examples
+      'Show my trades for July 1st and August 1st',
+      'Trades on January 5th, March 10th and June 20th',
     ],
     requiredEntities: ['timePeriod'],
     optionalEntities: ['symbol'],
@@ -107,6 +114,10 @@ export const intentRegistry: IntentDefinition[] = [
       'Show all Short call options on TSLA last month',
       'Short puts I sold this year',
       'All my call options from last week',
+      // Date range examples
+      'Options I sold from June 1st to the 7th',
+      'Call options in August and September',
+      'Puts I bought from November 15 to December 5',
     ],
     requiredEntities: [],
     optionalEntities: ['symbol', 'callPut', 'tradeType', 'timePeriod'],
@@ -172,6 +183,9 @@ export const intentRegistry: IntentDefinition[] = [
       'Total premium I paid for buying SPY options last 12 months',
       'How much premium have I collected this year?',
       'What is my total premium from selling puts?',
+      // Date range examples
+      'Premium collected from June 1st to the 7th',
+      'Total premium in August and September',
     ],
     requiredEntities: [],
     optionalEntities: ['symbol', 'tradeType', 'timePeriod'],
@@ -211,6 +225,12 @@ export const intentRegistry: IntentDefinition[] = [
       'Interest charges this month',
       'Locate fees for GME',
       'Total fees last year',
+      // Date range examples
+      'Commissions from June 1st to the 7th',
+      'What were my commissions in August and September?',
+      'Interest charges from November 15 to December 5',
+      // Discrete date examples
+      'Commissions on July 1st and August 1st',
     ],
     requiredEntities: ['feeType'],
     optionalEntities: ['symbol', 'timePeriod'],

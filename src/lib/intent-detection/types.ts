@@ -35,10 +35,21 @@ export interface IntentDefinition {
   optionalEntities: string[];    // May be extracted
 }
 
+// Date filter for structured date extraction from LLM
+export interface DateFilter {
+  type: 'range' | 'discrete' | 'relative';
+  startDate?: string;   // ISO format: "2025-06-01" (for type: 'range')
+  endDate?: string;     // ISO format: "2025-06-07" (for type: 'range')
+  dates?: string[];     // ["2025-07-01", "2025-08-01"] (for type: 'discrete')
+  period?: string;      // "last month", "yesterday" (for type: 'relative')
+  description: string;  // Human-readable: "June 1st to 7th"
+}
+
 // Entities that can be extracted from user queries
 export interface ExtractedEntities {
   symbol?: string;
-  timePeriod?: string;
+  timePeriod?: string;           // Keep for backwards compatibility
+  dateFilter?: DateFilter;       // NEW: Structured date extraction from LLM
   tradeType?: 'buy' | 'sell';
   callPut?: 'call' | 'put';
   accountQueryType?: AccountQueryType;

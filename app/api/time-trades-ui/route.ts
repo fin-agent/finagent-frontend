@@ -1,9 +1,10 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
-import { parseTimeExpression } from '@/src/lib/date-parser';
+import { resolveDateFilter, parseTimePeriodToResolvedDates, type ResolvedDates } from '@/src/lib/date-parser';
 import { formatDisplayDate, formatDateRange } from '@/src/lib/date-utils';
 import { getTradeGrossUSD, safeParseNumber } from '@/src/lib/trade-math';
 import { normalizeSymbol } from '@/src/lib/symbol-utils';
+import type { DateFilter } from '@/src/lib/intent-detection/types';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -15,28 +16,44 @@ const ACCOUNT_CODE = 'C40421';
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { symbol, timePeriod } = body;
+    const { symbol, timePeriod, dateFilter } = body;
 
-    if (!timePeriod) {
+    if (!timePeriod && !dateFilter) {
       return NextResponse.json({ error: 'Time period is required' }, { status: 400 });
     }
 
-    // Parse the time period
-    const parsedTime = parseTimeExpression(timePeriod);
-    if (!parsedTime) {
+    // Resolve dates: prefer dateFilter from LLM, fallback to regex parsing
+    let resolved: ResolvedDates | null = null;
+
+    if (dateFilter) {
+      // Use LLM-provided structured date filter
+      resolved = resolveDateFilter(dateFilter as DateFilter);
+    } else if (timePeriod) {
+      // Fallback: parse time period string with regex
+      resolved = parseTimePeriodToResolvedDates(timePeriod);
+    }
+
+    if (!resolved) {
       return NextResponse.json({ error: 'Invalid time period' }, { status: 400 });
     }
 
-    const { startDate, endDate, description, tradingDays } = parsedTime.dateRange;
+    const { startDate, endDate, dates, description } = resolved;
 
-    // Build the query
+    // Build the query based on date type (range vs discrete)
     let query = supabase
       .from('TradeData')
       .select('*')
-      .eq('AccountCode', ACCOUNT_CODE)
-      .gte('Date', startDate)
-      .lte('Date', endDate)
-      .order('Date', { ascending: false });
+      .eq('AccountCode', ACCOUNT_CODE);
+
+    if (resolved.type === 'discrete' && dates && dates.length > 0) {
+      // Discrete dates: query specific dates
+      query = query.in('Date', dates);
+    } else if (startDate && endDate) {
+      // Range query
+      query = query.gte('Date', startDate).lte('Date', endDate);
+    }
+
+    query = query.order('Date', { ascending: false });
 
     // Filter by symbol if provided
     const normalizedSymbol = symbol ? normalizeSymbol(symbol) : null;
@@ -81,11 +98,23 @@ export async function POST(req: NextRequest) {
       displayDate: formatDisplayDate(t.Date),
     }));
 
+    // Calculate trading days for display
+    let tradingDaysCount = 1;
+    if (resolved.type === 'discrete' && dates && dates.length > 0) {
+      tradingDaysCount = dates.length;
+    } else if (startDate && endDate) {
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+      tradingDaysCount = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+    }
+
     return NextResponse.json({
       timePeriod: {
         description,
-        displayRange: formatDateRange(startDate, endDate),
-        tradingDays,
+        displayRange: resolved.type === 'discrete' && dates
+          ? dates.map(d => formatDisplayDate(d)).join(', ')
+          : formatDateRange(startDate || '', endDate || ''),
+        tradingDays: tradingDaysCount,
       },
       summary: {
         totalTrades: trades.length,

@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import { normalizeSymbol } from '@/src/lib/symbol-utils';
+import { parseTimePeriodToResolvedDates, type ResolvedDates } from '@/src/lib/date-parser';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -8,189 +9,6 @@ const supabase = createClient(
 );
 
 const ACCOUNT_CODE = 'C40421';
-
-// Demo date system - the latest trade date in demo database represents "today"
-const DEMO_TODAY = '2025-11-20';
-
-function getDemoToday(): Date {
-  const [year, month, day] = DEMO_TODAY.split('-').map(Number);
-  return new Date(year, month - 1, day);
-}
-
-// Parse relative dates like "tomorrow", "last month", "this year", and day-of-week references
-// Uses demo date system so "last month" = October 2025 when DEMO_TODAY is Nov 20, 2025
-function parseRelativeDate(input: string): { start?: string; end?: string } {
-  // Use demo "today" instead of actual today for demo data alignment
-  const demoToday = getDemoToday();
-  const today = new Date(demoToday.getFullYear(), demoToday.getMonth(), demoToday.getDate());
-
-  const lower = input.toLowerCase().trim();
-
-  // Helper to format date as YYYY-MM-DD
-  const formatDate = (d: Date): string => {
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  };
-
-  // Day-of-week mapping (Sunday = 0, Monday = 1, etc.)
-  const dayMap: Record<string, number> = {
-    'sunday': 0, 'sun': 0,
-    'monday': 1, 'mon': 1,
-    'tuesday': 2, 'tue': 2, 'tues': 2,
-    'wednesday': 3, 'wed': 3,
-    'thursday': 4, 'thu': 4, 'thur': 4, 'thurs': 4,
-    'friday': 5, 'fri': 5,
-    'saturday': 6, 'sat': 6,
-  };
-
-  // Helper to get the most recent occurrence of a day of week (including today if it matches)
-  const getMostRecentDay = (targetDay: number): Date => {
-    const todayDay = today.getDay();
-    const daysBack = todayDay >= targetDay ? todayDay - targetDay : 7 - (targetDay - todayDay);
-    const result = new Date(today);
-    result.setDate(today.getDate() - daysBack);
-    return result;
-  };
-
-  // Helper to get the previous week's occurrence of a day
-  const getLastWeekDay = (targetDay: number): Date => {
-    const mostRecent = getMostRecentDay(targetDay);
-    // If most recent is today, go back 7 days. Otherwise, go back one more week.
-    const result = new Date(mostRecent);
-    result.setDate(mostRecent.getDate() - 7);
-    return result;
-  };
-
-  // Helper to get this week's specific day (current calendar week, Sun-Sat)
-  const getThisWeekDay = (targetDay: number): Date => {
-    const startOfWeek = new Date(today);
-    startOfWeek.setDate(today.getDate() - today.getDay()); // Go to Sunday
-    const result = new Date(startOfWeek);
-    result.setDate(startOfWeek.getDate() + targetDay);
-    return result;
-  };
-
-  // Helper to get next week's specific day
-  const getNextWeekDay = (targetDay: number): Date => {
-    const startOfNextWeek = new Date(today);
-    startOfNextWeek.setDate(today.getDate() - today.getDay() + 7); // Next Sunday
-    const result = new Date(startOfNextWeek);
-    result.setDate(startOfNextWeek.getDate() + targetDay);
-    return result;
-  };
-
-  // Check for "last <day>" pattern (e.g., "last monday", "last friday")
-  const lastDayMatch = lower.match(/^last\s+(sunday|sun|monday|mon|tuesday|tue|tues|wednesday|wed|thursday|thu|thur|thurs|friday|fri|saturday|sat)$/);
-  if (lastDayMatch) {
-    const targetDay = dayMap[lastDayMatch[1]];
-    const date = getLastWeekDay(targetDay);
-    return { start: formatDate(date), end: formatDate(date) };
-  }
-
-  // Check for "this <day>" pattern (e.g., "this monday", "this friday")
-  const thisDayMatch = lower.match(/^this\s+(sunday|sun|monday|mon|tuesday|tue|tues|wednesday|wed|thursday|thu|thur|thurs|friday|fri|saturday|sat)$/);
-  if (thisDayMatch) {
-    const targetDay = dayMap[thisDayMatch[1]];
-    const date = getThisWeekDay(targetDay);
-    return { start: formatDate(date), end: formatDate(date) };
-  }
-
-  // Check for "next <day>" pattern (e.g., "next monday", "next friday")
-  const nextDayMatch = lower.match(/^next\s+(sunday|sun|monday|mon|tuesday|tue|tues|wednesday|wed|thursday|thu|thur|thurs|friday|fri|saturday|sat)$/);
-  if (nextDayMatch) {
-    const targetDay = dayMap[nextDayMatch[1]];
-    const date = getNextWeekDay(targetDay);
-    return { start: formatDate(date), end: formatDate(date) };
-  }
-
-  // Check for bare day name (e.g., "monday", "friday") - means the most recent occurrence
-  // If today is Monday and user says "monday", it means today
-  const bareDayMatch = lower.match(/^(sunday|sun|monday|mon|tuesday|tue|tues|wednesday|wed|thursday|thu|thur|thurs|friday|fri|saturday|sat)$/);
-  if (bareDayMatch) {
-    const targetDay = dayMap[bareDayMatch[1]];
-    const date = getMostRecentDay(targetDay);
-    return { start: formatDate(date), end: formatDate(date) };
-  }
-
-  if (lower === 'tomorrow') {
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    return { start: formatDate(tomorrow), end: formatDate(tomorrow) };
-  }
-
-  if (lower === 'today') {
-    return { start: formatDate(today), end: formatDate(today) };
-  }
-
-  if (lower === 'yesterday') {
-    const yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
-    return { start: formatDate(yesterday), end: formatDate(yesterday) };
-  }
-
-  if (lower === 'this week') {
-    const startOfWeek = new Date(today);
-    startOfWeek.setDate(today.getDate() - today.getDay());
-    return { start: formatDate(startOfWeek), end: formatDate(today) };
-  }
-
-  if (lower === 'last week') {
-    const startOfLastWeek = new Date(today);
-    startOfLastWeek.setDate(today.getDate() - today.getDay() - 7);
-    const endOfLastWeek = new Date(startOfLastWeek);
-    endOfLastWeek.setDate(startOfLastWeek.getDate() + 6);
-    return { start: formatDate(startOfLastWeek), end: formatDate(endOfLastWeek) };
-  }
-
-  if (lower === 'this month') {
-    const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-    return { start: formatDate(startOfMonth), end: formatDate(today) };
-  }
-
-  if (lower === 'last month') {
-    const startOfLastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-    const endOfLastMonth = new Date(today.getFullYear(), today.getMonth(), 0);
-    return { start: formatDate(startOfLastMonth), end: formatDate(endOfLastMonth) };
-  }
-
-  if (lower === 'this year' || lower === 'ytd') {
-    const startOfYear = new Date(today.getFullYear(), 0, 1);
-    return { start: formatDate(startOfYear), end: formatDate(today) };
-  }
-
-  // "last year" = trailing 12 months (not calendar year) to match voice API behavior
-  // and to work with demo data that only goes back to Jan 2025
-  if (lower === 'last year') {
-    const startDate = new Date(today.getFullYear(), today.getMonth() - 12, today.getDate());
-    return { start: formatDate(startDate), end: formatDate(today) };
-  }
-
-  const lastNMonthsMatch = lower.match(/last\s+(\d+)\s+months?/);
-  if (lastNMonthsMatch) {
-    const months = parseInt(lastNMonthsMatch[1]);
-    const startDate = new Date(today.getFullYear(), today.getMonth() - months, today.getDate());
-    return { start: formatDate(startDate), end: formatDate(today) };
-  }
-
-  const lastNDaysMatch = lower.match(/last\s+(\d+)\s+days?/);
-  if (lastNDaysMatch) {
-    const days = parseInt(lastNDaysMatch[1]);
-    const startDate = new Date(today);
-    startDate.setDate(today.getDate() - days);
-    return { start: formatDate(startDate), end: formatDate(today) };
-  }
-
-  if (/^\d{4}-\d{2}-\d{2}$/.test(input) || /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(input)) {
-    const date = new Date(input);
-    if (!isNaN(date.getTime())) {
-      return { start: formatDate(date), end: formatDate(date) };
-    }
-  }
-
-  return {};
-}
 
 export interface AdvancedQueryFilters {
   symbol?: string;
@@ -276,37 +94,46 @@ export async function POST(req: NextRequest) {
       query = query.filter('"Call/Put"', 'eq', filters.callPut);
     }
 
-    // Apply date range filters
-    // For time periods like "last month", fromDate parsing returns both start AND end
-    // We need to apply both constraints to get the correct date range
+    // Apply date range filters using centralized parser
+    // Supports discrete dates (e.g., "July 1st and August 1st") and ranges (e.g., "June 1st to the 7th")
+    let resolvedFromDate: ResolvedDates | null = null;
     if (filters.fromDate) {
-      const parsed = parseRelativeDate(filters.fromDate);
-      if (parsed.start) {
-        query = query.gte('Date', parsed.start);
-      }
-      // Also apply end date if the time period has one (e.g., "last month" = Oct 1-31)
-      // Only apply if toDate wasn't explicitly provided
-      if (parsed.end && !filters.toDate) {
-        query = query.lte('Date', parsed.end);
+      resolvedFromDate = parseTimePeriodToResolvedDates(filters.fromDate);
+      if (resolvedFromDate) {
+        if (resolvedFromDate.type === 'discrete' && resolvedFromDate.dates && resolvedFromDate.dates.length > 0) {
+          // For discrete dates, use IN query
+          query = query.in('Date', resolvedFromDate.dates);
+        } else if (resolvedFromDate.startDate) {
+          query = query.gte('Date', resolvedFromDate.startDate);
+          // Also apply end date if the time period has one (e.g., "last month" = Oct 1-31)
+          // Only apply if toDate wasn't explicitly provided
+          if (resolvedFromDate.endDate && !filters.toDate) {
+            query = query.lte('Date', resolvedFromDate.endDate);
+          }
+        }
       }
     }
 
     if (filters.toDate) {
-      const parsed = parseRelativeDate(filters.toDate);
-      if (parsed.end) {
-        query = query.lte('Date', parsed.end);
+      const resolvedToDate = parseTimePeriodToResolvedDates(filters.toDate);
+      if (resolvedToDate && resolvedToDate.endDate) {
+        query = query.lte('Date', resolvedToDate.endDate);
       }
     }
 
-    // Apply expiration filter
+    // Apply expiration filter using centralized parser
     if (filters.expiration) {
-      const parsed = parseRelativeDate(filters.expiration);
-      if (parsed.start && parsed.end && parsed.start === parsed.end) {
-        query = query.eq('Expiration', parsed.start);
-      } else if (parsed.start) {
-        query = query.gte('Expiration', parsed.start);
-        if (parsed.end) {
-          query = query.lte('Expiration', parsed.end);
+      const resolvedExp = parseTimePeriodToResolvedDates(filters.expiration);
+      if (resolvedExp) {
+        if (resolvedExp.type === 'discrete' && resolvedExp.dates && resolvedExp.dates.length > 0) {
+          query = query.in('Expiration', resolvedExp.dates);
+        } else if (resolvedExp.startDate === resolvedExp.endDate && resolvedExp.startDate) {
+          query = query.eq('Expiration', resolvedExp.startDate);
+        } else if (resolvedExp.startDate) {
+          query = query.gte('Expiration', resolvedExp.startDate);
+          if (resolvedExp.endDate) {
+            query = query.lte('Expiration', resolvedExp.endDate);
+          }
         }
       }
     }
@@ -385,9 +212,9 @@ export async function POST(req: NextRequest) {
       putCount: trades.filter(t => t['Call/Put'] === 'P').length,
     };
 
-    // Resolve date ranges for display
-    const fromDateParsed = filters.fromDate ? parseRelativeDate(filters.fromDate) : null;
-    const toDateParsed = filters.toDate ? parseRelativeDate(filters.toDate) : null;
+    // Resolve date ranges for display using centralized parser
+    // Note: resolvedFromDate was already parsed above for query building
+    const toDateParsed = filters.toDate ? parseTimePeriodToResolvedDates(filters.toDate) : null;
 
     const result: AdvancedQueryResult = {
       trades,
@@ -396,8 +223,14 @@ export async function POST(req: NextRequest) {
         ...filters,
         symbol: filters.symbol ? normalizeSymbol(filters.symbol) : undefined,
         // Return resolved dates for display
-        fromDate: fromDateParsed?.start || filters.fromDate,
-        toDate: toDateParsed?.end || fromDateParsed?.end || filters.toDate,
+        // For discrete dates, use first date; for ranges, use startDate
+        fromDate: resolvedFromDate?.type === 'discrete' && resolvedFromDate.dates?.length
+          ? resolvedFromDate.dates[0]
+          : resolvedFromDate?.startDate || filters.fromDate,
+        toDate: toDateParsed?.endDate || resolvedFromDate?.endDate ||
+          (resolvedFromDate?.type === 'discrete' && resolvedFromDate.dates?.length
+            ? resolvedFromDate.dates[resolvedFromDate.dates.length - 1]
+            : filters.toDate),
       },
     };
 

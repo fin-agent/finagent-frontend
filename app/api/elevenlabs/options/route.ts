@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import { normalizeSymbol } from '@/src/lib/symbol-utils';
+import { parseTimePeriodToResolvedDates, type ResolvedDates } from '@/src/lib/date-parser';
 
 // Format date in PACIFIC TIMEZONE to match UI display
 // The UI renders dates in the user's browser (typically Pacific time)
@@ -30,166 +31,6 @@ const supabase = createClient(
 );
 
 const ACCOUNT_CODE = 'C40421';
-
-// Demo date system - the latest trade date in demo database represents "today"
-const DEMO_TODAY = '2025-11-20';
-
-function getDemoToday(): Date {
-  const [year, month, day] = DEMO_TODAY.split('-').map(Number);
-  return new Date(year, month - 1, day);
-}
-
-// Parse relative dates and day-of-week references
-function parseRelativeDate(input: string): { start?: string; end?: string } {
-  const demoToday = getDemoToday();
-  const today = new Date(demoToday.getFullYear(), demoToday.getMonth(), demoToday.getDate());
-  const lower = input.toLowerCase().trim();
-
-  const formatDate = (d: Date): string => {
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  };
-
-  // Day-of-week mapping (Sunday = 0, Monday = 1, etc.)
-  const dayMap: Record<string, number> = {
-    'sunday': 0, 'sun': 0,
-    'monday': 1, 'mon': 1,
-    'tuesday': 2, 'tue': 2, 'tues': 2,
-    'wednesday': 3, 'wed': 3,
-    'thursday': 4, 'thu': 4, 'thur': 4, 'thurs': 4,
-    'friday': 5, 'fri': 5,
-    'saturday': 6, 'sat': 6,
-  };
-
-  // Helper to get the most recent occurrence of a day of week (including today if it matches)
-  const getMostRecentDay = (targetDay: number): Date => {
-    const todayDay = today.getDay();
-    const daysBack = todayDay >= targetDay ? todayDay - targetDay : 7 - (targetDay - todayDay);
-    const result = new Date(today);
-    result.setDate(today.getDate() - daysBack);
-    return result;
-  };
-
-  // Helper to get the previous week's occurrence of a day
-  const getLastWeekDay = (targetDay: number): Date => {
-    const mostRecent = getMostRecentDay(targetDay);
-    const result = new Date(mostRecent);
-    result.setDate(mostRecent.getDate() - 7);
-    return result;
-  };
-
-  // Helper to get this week's specific day (current calendar week, Sun-Sat)
-  const getThisWeekDay = (targetDay: number): Date => {
-    const startOfWeek = new Date(today);
-    startOfWeek.setDate(today.getDate() - today.getDay());
-    const result = new Date(startOfWeek);
-    result.setDate(startOfWeek.getDate() + targetDay);
-    return result;
-  };
-
-  // Helper to get next week's specific day
-  const getNextWeekDay = (targetDay: number): Date => {
-    const startOfNextWeek = new Date(today);
-    startOfNextWeek.setDate(today.getDate() - today.getDay() + 7);
-    const result = new Date(startOfNextWeek);
-    result.setDate(startOfNextWeek.getDate() + targetDay);
-    return result;
-  };
-
-  // Check for "last <day>" pattern (e.g., "last monday", "last friday")
-  const lastDayMatch = lower.match(/^last\s+(sunday|sun|monday|mon|tuesday|tue|tues|wednesday|wed|thursday|thu|thur|thurs|friday|fri|saturday|sat)$/);
-  if (lastDayMatch) {
-    const targetDay = dayMap[lastDayMatch[1]];
-    const date = getLastWeekDay(targetDay);
-    return { start: formatDate(date), end: formatDate(date) };
-  }
-
-  // Check for "this <day>" pattern (e.g., "this monday", "this friday")
-  const thisDayMatch = lower.match(/^this\s+(sunday|sun|monday|mon|tuesday|tue|tues|wednesday|wed|thursday|thu|thur|thurs|friday|fri|saturday|sat)$/);
-  if (thisDayMatch) {
-    const targetDay = dayMap[thisDayMatch[1]];
-    const date = getThisWeekDay(targetDay);
-    return { start: formatDate(date), end: formatDate(date) };
-  }
-
-  // Check for "next <day>" pattern (e.g., "next monday", "next friday")
-  const nextDayMatch = lower.match(/^next\s+(sunday|sun|monday|mon|tuesday|tue|tues|wednesday|wed|thursday|thu|thur|thurs|friday|fri|saturday|sat)$/);
-  if (nextDayMatch) {
-    const targetDay = dayMap[nextDayMatch[1]];
-    const date = getNextWeekDay(targetDay);
-    return { start: formatDate(date), end: formatDate(date) };
-  }
-
-  // Check for bare day name (e.g., "monday", "friday") - means the most recent occurrence
-  const bareDayMatch = lower.match(/^(sunday|sun|monday|mon|tuesday|tue|tues|wednesday|wed|thursday|thu|thur|thurs|friday|fri|saturday|sat)$/);
-  if (bareDayMatch) {
-    const targetDay = dayMap[bareDayMatch[1]];
-    const date = getMostRecentDay(targetDay);
-    return { start: formatDate(date), end: formatDate(date) };
-  }
-
-  if (lower === 'tomorrow') {
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    return { start: formatDate(tomorrow), end: formatDate(tomorrow) };
-  }
-  if (lower === 'today') {
-    return { start: formatDate(today), end: formatDate(today) };
-  }
-  if (lower === 'yesterday') {
-    const yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
-    return { start: formatDate(yesterday), end: formatDate(yesterday) };
-  }
-  if (lower === 'this week') {
-    const startOfWeek = new Date(today);
-    startOfWeek.setDate(today.getDate() - today.getDay());
-    const endOfWeek = new Date(startOfWeek);
-    endOfWeek.setDate(startOfWeek.getDate() + 6);
-    return { start: formatDate(startOfWeek), end: formatDate(endOfWeek) };
-  }
-  if (lower === 'last week') {
-    const startOfLastWeek = new Date(today);
-    startOfLastWeek.setDate(today.getDate() - today.getDay() - 7);
-    const endOfLastWeek = new Date(startOfLastWeek);
-    endOfLastWeek.setDate(startOfLastWeek.getDate() + 6);
-    return { start: formatDate(startOfLastWeek), end: formatDate(endOfLastWeek) };
-  }
-  if (lower === 'this month') {
-    const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-    return { start: formatDate(startOfMonth), end: formatDate(today) };
-  }
-  if (lower === 'last month') {
-    const startOfLastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-    const endOfLastMonth = new Date(today.getFullYear(), today.getMonth(), 0);
-    return { start: formatDate(startOfLastMonth), end: formatDate(endOfLastMonth) };
-  }
-  if (lower === 'this year' || lower === 'ytd') {
-    const startOfYear = new Date(today.getFullYear(), 0, 1);
-    return { start: formatDate(startOfYear), end: formatDate(today) };
-  }
-
-  // "last N months" pattern
-  const lastNMonthsMatch = lower.match(/last\s+(\d+)\s+months?/);
-  if (lastNMonthsMatch) {
-    const months = parseInt(lastNMonthsMatch[1]);
-    const startDate = new Date(today.getFullYear(), today.getMonth() - months, today.getDate());
-    return { start: formatDate(startDate), end: formatDate(today) };
-  }
-
-  // "last N days" pattern
-  const lastNDaysMatch = lower.match(/last\s+(\d+)\s+days?/);
-  if (lastNDaysMatch) {
-    const days = parseInt(lastNDaysMatch[1]);
-    const startDate = new Date(today);
-    startDate.setDate(today.getDate() - days);
-    return { start: formatDate(startDate), end: formatDate(today) };
-  }
-
-  return {};
-}
 
 // Extract parameter from various ElevenLabs body structures
 function extractParam(body: Record<string, unknown>, key: string): unknown {
@@ -253,21 +94,31 @@ export async function POST(req: NextRequest) {
       query = query.filter('"Call/Put"', 'eq', cp);
     }
 
-    // Apply date range for trade date
+    // Apply date range for trade date using centralized parser
+    let resolvedTime: ResolvedDates | null = null;
     if (timePeriod) {
-      const parsed = parseRelativeDate(timePeriod);
-      if (parsed.start) query = query.gte('Date', parsed.start);
-      if (parsed.end) query = query.lte('Date', parsed.end);
+      resolvedTime = parseTimePeriodToResolvedDates(timePeriod);
+      if (resolvedTime) {
+        if (resolvedTime.type === 'discrete' && resolvedTime.dates && resolvedTime.dates.length > 0) {
+          query = query.in('Date', resolvedTime.dates);
+        } else if (resolvedTime.startDate && resolvedTime.endDate) {
+          query = query.gte('Date', resolvedTime.startDate).lte('Date', resolvedTime.endDate);
+        }
+      }
     }
 
-    // Apply expiration filter
+    // Apply expiration filter using centralized parser
     if (expiration) {
-      const parsed = parseRelativeDate(expiration);
-      if (parsed.start === parsed.end && parsed.start) {
-        query = query.eq('Expiration', parsed.start);
-      } else if (parsed.start) {
-        query = query.gte('Expiration', parsed.start);
-        if (parsed.end) query = query.lte('Expiration', parsed.end);
+      const resolvedExp = parseTimePeriodToResolvedDates(expiration);
+      if (resolvedExp) {
+        if (resolvedExp.type === 'discrete' && resolvedExp.dates && resolvedExp.dates.length > 0) {
+          query = query.in('Expiration', resolvedExp.dates);
+        } else if (resolvedExp.startDate === resolvedExp.endDate && resolvedExp.startDate) {
+          query = query.eq('Expiration', resolvedExp.startDate);
+        } else if (resolvedExp.startDate) {
+          query = query.gte('Expiration', resolvedExp.startDate);
+          if (resolvedExp.endDate) query = query.lte('Expiration', resolvedExp.endDate);
+        }
       }
     }
 

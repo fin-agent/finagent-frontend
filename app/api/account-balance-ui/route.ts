@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
-import { realDateToDemoDate, formatDateForDB } from '@/src/lib/date-utils';
+import { resolveDateFilter, parseTimePeriodToResolvedDates, type ResolvedDates } from '@/src/lib/date-parser';
+import type { DateFilter } from '@/src/lib/intent-detection/types';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -37,84 +38,35 @@ export interface AccountBalanceUIData {
   };
 }
 
-function getDateRange(timePeriod?: string): { fromDate?: string; toDate?: string; periodLabel?: string; periodMonth?: string } {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  if (!timePeriod || timePeriod === 'latest') {
-    return {};
-  }
-
-  const lowerPeriod = timePeriod.toLowerCase();
-
-  // Convert real dates to demo dates for DB queries
-  const toDBDateStr = (date: Date): string => {
-    const demoDate = realDateToDemoDate(date);
-    return formatDateForDB(demoDate);
-  };
-
-  if (lowerPeriod.includes('last month') || lowerPeriod.includes('past month')) {
-    const fromDate = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-    const toDate = new Date(today.getFullYear(), today.getMonth(), 0);
-    const monthName = fromDate.toLocaleDateString('en-US', { month: 'long' });
-    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(toDate), periodLabel: `month of ${monthName}`, periodMonth: monthName };
-  }
-
-  if (lowerPeriod.includes('this month')) {
-    const fromDate = new Date(today.getFullYear(), today.getMonth(), 1);
-    const monthName = fromDate.toLocaleDateString('en-US', { month: 'long' });
-    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today), periodLabel: `month of ${monthName}`, periodMonth: monthName };
-  }
-
-  if (lowerPeriod.includes('last week') || lowerPeriod.includes('past week')) {
-    const fromDate = new Date(today);
-    fromDate.setDate(today.getDate() - 7);
-    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today), periodLabel: 'last week' };
-  }
-
-  if (lowerPeriod.includes('this year')) {
-    const fromDate = new Date(today.getFullYear(), 0, 1);
-    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today), periodLabel: 'this year' };
-  }
-
-  // Check for explicit month names (e.g., "October", "month of October")
-  const monthNames = ['january', 'february', 'march', 'april', 'may', 'june',
-                      'july', 'august', 'september', 'october', 'november', 'december'];
-  for (let i = 0; i < monthNames.length; i++) {
-    if (lowerPeriod.includes(monthNames[i])) {
-      const year = today.getFullYear();
-      const fromDate = new Date(year, i, 1);
-      const toDate = new Date(year, i + 1, 0);
-      const monthName = fromDate.toLocaleDateString('en-US', { month: 'long' });
-      return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(toDate), periodLabel: `month of ${monthName}`, periodMonth: monthName };
-    }
-  }
-
-  return {};
-}
-
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const queryType = body.queryType || 'account_summary';
-    const timePeriod = body.timePeriod;
+    const { timePeriod, dateFilter } = body;
 
-    const { fromDate, toDate, periodLabel, periodMonth } = getDateRange(timePeriod);
+    // Resolve dates for time-based queries
+    let resolved: ResolvedDates | null = null;
+    if (dateFilter) {
+      resolved = resolveDateFilter(dateFilter as DateFilter);
+    } else if (timePeriod) {
+      resolved = parseTimePeriodToResolvedDates(timePeriod);
+    }
 
     // For balance trends
     if (queryType === 'debit_balances' || queryType === 'credit_balances') {
-      const resolvedPeriodLabel = periodLabel || timePeriod || 'available period';
+      const resolvedPeriodLabel = resolved?.description || timePeriod || 'available period';
       let query = supabase
         .from('AccountBalance')
         .select('Date, DebitBalance, CreditBalance')
         .eq('AccountCode', ACCOUNT_CODE)
         .order('Date', { ascending: false });
 
-      if (fromDate) {
-        query = query.gte('Date', fromDate);
-      }
-      if (toDate) {
-        query = query.lte('Date', toDate);
+      if (resolved) {
+        if (resolved.type === 'discrete' && resolved.dates && resolved.dates.length > 0) {
+          query = query.in('Date', resolved.dates);
+        } else if (resolved.startDate && resolved.endDate) {
+          query = query.gte('Date', resolved.startDate).lte('Date', resolved.endDate);
+        }
       }
 
       const { data, error } = await query;
@@ -145,7 +97,6 @@ export async function POST(req: NextRequest) {
           lowest: min,
           lowestDate: minDate, // Return raw date
           period: resolvedPeriodLabel,
-          periodMonth,
           entries,
         },
       });

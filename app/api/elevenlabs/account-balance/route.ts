@@ -1,18 +1,13 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
-import { formatCalendarDate, realDateToDemoDate, formatDateForDB } from '@/src/lib/date-utils';
+import { formatCalendarDate } from '@/src/lib/date-utils';
+import { parseTimePeriodToResolvedDates } from '@/src/lib/date-parser';
 
 // Use formatCalendarDate from date-utils to apply demo date offset
 // This ensures voice and UI show the same dates
 function formatDateForVoice(dateStr: string): string {
   if (!dateStr) return 'N/A';
   return formatCalendarDate(dateStr);
-}
-
-// Convert real dates to demo dates for DB queries
-function toDBDateStr(date: Date): string {
-  const demoDate = realDateToDemoDate(date);
-  return formatDateForDB(demoDate);
 }
 
 const supabase = createClient(
@@ -53,56 +48,6 @@ function formatCurrency(value: number): string {
 // Use formatDateForVoice for consistent date display WITHOUT offset
 const formatDate = formatDateForVoice;
 
-function getDateRange(timePeriod?: string): { fromDate?: string; toDate?: string; periodLabel?: string } {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  if (!timePeriod || timePeriod === 'latest') {
-    return {}; // No filter, get latest
-  }
-
-  const lowerPeriod = timePeriod.toLowerCase();
-
-  if (lowerPeriod.includes('last month') || lowerPeriod.includes('past month')) {
-    const fromDate = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-    const toDate = new Date(today.getFullYear(), today.getMonth(), 0);
-    const monthName = fromDate.toLocaleDateString('en-US', { month: 'long' });
-    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(toDate), periodLabel: monthName };
-  }
-
-  if (lowerPeriod.includes('this month')) {
-    const fromDate = new Date(today.getFullYear(), today.getMonth(), 1);
-    const monthName = fromDate.toLocaleDateString('en-US', { month: 'long' });
-    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today), periodLabel: monthName };
-  }
-
-  if (lowerPeriod.includes('last week') || lowerPeriod.includes('past week')) {
-    const fromDate = new Date(today);
-    fromDate.setDate(today.getDate() - 7);
-    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today), periodLabel: 'last week' };
-  }
-
-  if (lowerPeriod.includes('this year')) {
-    const fromDate = new Date(today.getFullYear(), 0, 1);
-    return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(today), periodLabel: 'this year' };
-  }
-
-  // Check for explicit month names
-  const monthNames = ['january', 'february', 'march', 'april', 'may', 'june',
-                      'july', 'august', 'september', 'october', 'november', 'december'];
-  for (let i = 0; i < monthNames.length; i++) {
-    if (lowerPeriod.includes(monthNames[i])) {
-      const year = today.getFullYear();
-      const fromDate = new Date(year, i, 1);
-      const toDate = new Date(year, i + 1, 0);
-      const monthName = fromDate.toLocaleDateString('en-US', { month: 'long' });
-      return { fromDate: toDBDateStr(fromDate), toDate: toDBDateStr(toDate), periodLabel: monthName };
-    }
-  }
-
-  return {};
-}
-
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -115,7 +60,8 @@ export async function POST(req: NextRequest) {
     const timePeriod = body.time_period || body.parameters?.time_period ||
                        body.body?.time_period || body.body?.parameters?.time_period;
 
-    const { fromDate, toDate, periodLabel } = getDateRange(timePeriod);
+    // Resolve dates using centralized parser
+    const resolved = timePeriod ? parseTimePeriodToResolvedDates(timePeriod) : null;
 
     // For balance trends (debit/credit balances), get multiple records
     if (queryType === 'debit_balances' || queryType === 'credit_balances') {
@@ -125,11 +71,12 @@ export async function POST(req: NextRequest) {
         .eq('AccountCode', ACCOUNT_CODE)
         .order('Date', { ascending: false });
 
-      if (fromDate) {
-        query = query.gte('Date', fromDate);
-      }
-      if (toDate) {
-        query = query.lte('Date', toDate);
+      if (resolved) {
+        if (resolved.type === 'discrete' && resolved.dates && resolved.dates.length > 0) {
+          query = query.in('Date', resolved.dates);
+        } else if (resolved.startDate && resolved.endDate) {
+          query = query.gte('Date', resolved.startDate).lte('Date', resolved.endDate);
+        }
       }
 
       const { data, error } = await query;
@@ -155,12 +102,12 @@ export async function POST(req: NextRequest) {
       const minDate = data.find(d => d[balanceField] === min)?.Date;
 
       const balanceType = queryType === 'debit_balances' ? 'debit' : 'credit';
-      const monthLabel = periodLabel || 'the period';
+      const periodLabel = resolved?.description || timePeriod || 'the period';
       const highestDate = formatDate(maxDate || '');
       const lowestDate = formatDate(minDate || '');
 
       return NextResponse.json({
-        response: `Your average ${balanceType} balance for ${monthLabel} is ${formatCurrency(avg)}.\nThe highest ${balanceType} balance was on ${highestDate} at ${formatCurrency(max)}.\nThe lowest ${balanceType} balance was on ${lowestDate} at ${formatCurrency(min)}.`,
+        response: `Your average ${balanceType} balance for ${periodLabel} is ${formatCurrency(avg)}.\nThe highest ${balanceType} balance was on ${highestDate} at ${formatCurrency(max)}.\nThe lowest ${balanceType} balance was on ${lowestDate} at ${formatCurrency(min)}.`,
       });
     }
 

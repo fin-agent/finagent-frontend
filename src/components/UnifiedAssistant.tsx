@@ -3930,17 +3930,30 @@ const UnifiedAssistant: React.FC = () => {
 
   // WebSocket keepalive to prevent inactivity timeout (ElevenLabs has 20s default timeout)
   // Send user activity ping every 15 seconds while voice is connected
+  // Store conversation in ref to avoid dependency issues
+  const elevenLabsConversationRef = useRef(elevenLabsConversation);
+  elevenLabsConversationRef.current = elevenLabsConversation;
+
   useEffect(() => {
     const isConnected = elevenLabsConversation.status === 'connected';
 
     if (isConnected && inputMode === 'voice') {
+      // Clear any existing interval first
+      if (keepaliveIntervalRef.current) {
+        clearInterval(keepaliveIntervalRef.current);
+      }
+
       // Start keepalive interval
       keepaliveIntervalRef.current = setInterval(() => {
-        if (elevenLabsConversation.status === 'connected') {
+        const conv = elevenLabsConversationRef.current;
+        if (conv.status === 'connected') {
           // sendUserActivity signals the agent that user is still active
           // This prevents the WebSocket from timing out due to inactivity
-          elevenLabsConversation.sendUserActivity?.();
-          console.log('🔄 Sent keepalive ping to ElevenLabs');
+          // Note: This method may not exist in newer SDK versions
+          if (typeof conv.sendUserActivity === 'function') {
+            conv.sendUserActivity();
+            console.log('🔄 Sent keepalive ping to ElevenLabs');
+          }
         }
       }, 15000); // 15 seconds (under the 20s default timeout)
 
@@ -3954,7 +3967,7 @@ const UnifiedAssistant: React.FC = () => {
         console.log('🔴 Cleared keepalive interval');
       }
     };
-  }, [elevenLabsConversation.status, inputMode, elevenLabsConversation]);
+  }, [elevenLabsConversation.status, inputMode]);
 
   const isVoiceConnected = elevenLabsConversation.status === 'connected';
   const isVoiceConnecting = elevenLabsConversation.status === 'connecting';

@@ -2354,7 +2354,7 @@ const UnifiedAssistant: React.FC = () => {
       console.log('🎙️ [ElevenLabs RAW] Full message object:', JSON.stringify(message, null, 2));
       console.log('🎙️ [ElevenLabs RAW] message.message:', message.message);
       console.log('🎙️ [ElevenLabs RAW] message.source:', message.source);
-      console.log('🎙️ [ElevenLabs RAW] message type:', (message as Record<string, unknown>).type);
+      console.log('🎙️ [ElevenLabs RAW] message type:', (message as unknown as Record<string, unknown>).type);
       console.log('🎙️ [ElevenLabs RAW] ================================');
 
       if (message.message) {

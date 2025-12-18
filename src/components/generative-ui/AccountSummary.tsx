@@ -4,7 +4,8 @@ import React from 'react';
 import { formatCalendarDate } from '@/src/lib/date-utils';
 
 export type AccountQueryType = 'cash_balance' | 'buying_power' | 'account_summary' | 'nlv' |
-                               'overnight_margin' | 'market_value' | 'debit_balances' | 'credit_balances';
+                               'overnight_margin' | 'market_value' | 'debit_balances' | 'credit_balances' |
+                               'money_summary';
 
 export interface AccountSummaryProps {
   queryType: AccountQueryType;
@@ -208,35 +209,134 @@ const SectionHeader = ({ title, color }: { title: string; color: string }) => (
 export function AccountSummary(props: AccountSummaryProps) {
   const { queryType, date } = props;
 
-  // Balance Trend View (for debit/credit balances)
+  // Balance Trend View (for debit/credit balances) with visual range indicator
   if ((queryType === 'debit_balances' || queryType === 'credit_balances') && props.balanceTrend) {
     const { balanceTrend } = props;
     const isDebit = queryType === 'debit_balances';
     const accentColor = isDebit ? colors.red : colors.green;
+
+    // Calculate position of average on the range bar (0-100%)
+    const range = balanceTrend.highest - balanceTrend.lowest;
+    const avgPosition = range > 0 ? ((balanceTrend.average - balanceTrend.lowest) / range) * 100 : 50;
 
     return (
       <div style={cardStyle}>
         <AccentLine color={accentColor} />
         <div style={headerStyle}>
           <h3 style={titleStyle}>
-            {isDebit ? 'Debit Balance Trend' : 'Credit Balance Trend'}
+            {isDebit ? 'Debit Balance Analysis' : 'Credit Balance Analysis'}
           </h3>
           <span style={dateStyle}>{balanceTrend.period}</span>
         </div>
 
-        <DataRow
-          label="Average Balance"
-          value={formatCurrency(balanceTrend.average)}
-          valueColor={accentColor}
-        />
+        {/* Hero average with visual range indicator */}
+        <div style={{ padding: '24px 18px', textAlign: 'center', borderBottom: `1px solid ${colors.border}` }}>
+          <span style={{ fontSize: '10px', letterSpacing: '0.1em', color: colors.textMuted, textTransform: 'uppercase' }}>
+            Average Balance
+          </span>
+          <p style={{ ...heroValueStyle(accentColor), marginTop: '8px' }}>
+            {formatCurrency(balanceTrend.average)}
+          </p>
+
+          {/* Visual range bar */}
+          <div style={{
+            marginTop: '20px',
+            padding: '0 12px',
+          }}>
+            <div style={{
+              height: '8px',
+              background: colors.bgRowAlt,
+              borderRadius: '4px',
+              position: 'relative',
+              border: `1px solid ${colors.border}`,
+            }}>
+              {/* Average position marker */}
+              <div style={{
+                position: 'absolute',
+                left: `${avgPosition}%`,
+                top: '-6px',
+                width: '4px',
+                height: '20px',
+                background: accentColor,
+                borderRadius: '2px',
+                transform: 'translateX(-50%)',
+                boxShadow: `0 0 8px ${accentColor}60`,
+              }} />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px' }}>
+              <span style={{ fontSize: '10px', color: colors.textMuted, letterSpacing: '0.05em' }}>
+                Low: {formatCurrency(balanceTrend.lowest)}
+              </span>
+              <span style={{ fontSize: '10px', color: colors.textMuted, letterSpacing: '0.05em' }}>
+                High: {formatCurrency(balanceTrend.highest)}
+              </span>
+            </div>
+          </div>
+        </div>
+
         <DataRow
           label={`Highest (${formatCalendarDate(balanceTrend.highestDate)})`}
           value={formatCurrency(balanceTrend.highest)}
-          isAlt
+          valueColor={colors.white}
         />
         <DataRow
           label={`Lowest (${formatCalendarDate(balanceTrend.lowestDate)})`}
           value={formatCurrency(balanceTrend.lowest)}
+          valueColor={colors.textLabel}
+          isAlt
+        />
+      </div>
+    );
+  }
+
+  // Money Summary View (shows BOTH cash and equity for "How much money do I have?")
+  if (queryType === 'money_summary') {
+    return (
+      <div style={cardStyle}>
+        <AccentLine color={colors.gold} />
+        <div style={headerStyle}>
+          <h3 style={titleStyle}>Account Overview</h3>
+          <span style={dateStyle}>{formatCalendarDate(date)}</span>
+        </div>
+
+        {/* Dual hero metrics */}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: '1fr 1fr',
+          gap: '1px',
+          background: colors.border,
+          borderBottom: `1px solid ${colors.border}`,
+        }}>
+          <div style={{
+            padding: '24px 18px',
+            textAlign: 'center',
+            background: colors.bgCard,
+          }}>
+            <span style={{ fontSize: '10px', letterSpacing: '0.1em', color: colors.textMuted, textTransform: 'uppercase' }}>
+              Cash Balance
+            </span>
+            <p style={{ ...heroValueStyle(colors.green), marginTop: '8px', fontSize: '24px' }}>
+              {formatCurrency(props.cashBalance)}
+            </p>
+          </div>
+          <div style={{
+            padding: '24px 18px',
+            textAlign: 'center',
+            background: colors.bgCard,
+          }}>
+            <span style={{ fontSize: '10px', letterSpacing: '0.1em', color: colors.textMuted, textTransform: 'uppercase' }}>
+              Account Equity
+            </span>
+            <p style={{ ...heroValueStyle(colors.gold), marginTop: '8px', fontSize: '24px' }}>
+              {formatCurrency(props.accountEquity)}
+            </p>
+          </div>
+        </div>
+
+        <DataRow
+          label="Day Trading BP"
+          value={formatCurrency(props.dayTradingBP)}
+          valueColor={colors.blue}
         />
       </div>
     );

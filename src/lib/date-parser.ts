@@ -250,6 +250,60 @@ export function parseTimeExpression(expression: string): ParsedDateQuery | null 
     };
   }
 
+  // Pattern: "this year" / "ytd"
+  if (/^(this\s*year|ytd)$/.test(lowerExpr)) {
+    const startDate = new Date(today.getFullYear(), 0, 1);
+    const diffMs = today.getTime() - startDate.getTime();
+    const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24)) + 1;
+    return {
+      type: 'range',
+      dateRange: {
+        startDate: toDBDate(startDate),
+        endDate: toDBDate(today),
+        description: 'this year',
+        tradingDays: diffDays,
+      },
+    };
+  }
+
+  // Pattern: "last year" / "past year" (trailing 12 months)
+  if (/^(last|past)\s*year$/.test(lowerExpr)) {
+    const startDate = new Date(today);
+    startDate.setMonth(startDate.getMonth() - 12);
+    const diffMs = today.getTime() - startDate.getTime();
+    const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24)) + 1;
+    return {
+      type: 'range',
+      dateRange: {
+        startDate: toDBDate(startDate),
+        endDate: toDBDate(today),
+        description: 'last year',
+        tradingDays: diffDays,
+      },
+    };
+  }
+
+  // Pattern: "last N months" / "past N months" (trailing window)
+  const monthsMatch = lowerExpr.match(new RegExp(`^(?:last|past)\\s*(${numberWordsPattern})\\s*months?$`, 'i'));
+  if (monthsMatch) {
+    const numMonths = parseNumber(monthsMatch[1]);
+    if (numMonths !== null) {
+      const startDate = new Date(today);
+      startDate.setMonth(startDate.getMonth() - numMonths);
+      const diffMs = today.getTime() - startDate.getTime();
+      const diffDays = Math.round(diffMs / (1000 * 60 * 60 * 24)) + 1;
+      return {
+        type: 'range',
+        dateRange: {
+          startDate: toDBDate(startDate),
+          endDate: toDBDate(today),
+          description: `last ${numMonths} months`,
+          tradingDays: diffDays,
+        },
+      };
+    }
+  }
+
   // Pattern: Day of week - "Monday", "Tuesday", etc.
   const dayOfWeekMap: Record<string, number> = {
     'sunday': 0,
@@ -369,6 +423,7 @@ export function extractTimePeriodFromQuery(query: string): string | null {
   const directPatterns = [
     'today', 'yesterday', 'this week', 'last week', 'past week',
     'this month', 'last month', 'past month',
+    'this year', 'last year', 'ytd',
     'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'
   ];
 
@@ -383,6 +438,12 @@ export function extractTimePeriodFromQuery(query: string): string | null {
   const daysMatch = lowerQuery.match(new RegExp(`((?:last|past)\\s*(?:${numberWordsExtract})\\s*(?:trading\\s*)?days?)`, 'i'));
   if (daysMatch) {
     return daysMatch[1];
+  }
+
+  // "last N months" pattern (supports spelled-out numbers)
+  const monthsExtractMatch = lowerQuery.match(new RegExp(`((?:last|past)\\s*(?:${numberWordsExtract})\\s*months?)`, 'i'));
+  if (monthsExtractMatch) {
+    return monthsExtractMatch[1];
   }
 
   // Specific calendar date patterns - "November 18th", "Nov 18", "December 3rd"

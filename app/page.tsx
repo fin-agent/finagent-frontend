@@ -1,15 +1,17 @@
 'use client'
 
 import { useState } from 'react';
-import { Home, TrendingUp, Search, User, Menu, X } from 'lucide-react';
+import { Home, TrendingUp, Search, User, Menu, X, Zap } from 'lucide-react';
 import Portfolio from '../src/components/Portfolio';
 import StockList from '../src/components/StockList';
 import UnifiedAssistant from '../src/components/UnifiedAssistant';
+import { LiveKitVoiceAssistant } from '../src/components/LiveKitVoiceAssistant';
 import '../src/App.css';
 
 export default function HomePage() {
   const [activeTab, setActiveTab] = useState<'portfolio' | 'stocks'>('portfolio');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [useLiveKit, setUseLiveKit] = useState(false); // Default to ElevenLabs (LiveKit available at /livekit)
   const accountName = 'Aida Guru';
   const accountCode = 'C40421';
   const accountType = 'Margin';
@@ -53,6 +55,28 @@ export default function HomePage() {
           </nav>
 
           <div className="header-right">
+            <button
+              className="icon-btn"
+              onClick={() => setUseLiveKit(!useLiveKit)}
+              title={useLiveKit ? 'Using LiveKit (click for ElevenLabs)' : 'Using ElevenLabs (click for LiveKit)'}
+              style={{
+                color: useLiveKit ? '#00ff88' : '#ffd700',
+                position: 'relative',
+              }}
+            >
+              <Zap size={20} />
+              {useLiveKit && (
+                <span style={{
+                  position: 'absolute',
+                  top: '2px',
+                  right: '2px',
+                  width: '8px',
+                  height: '8px',
+                  borderRadius: '50%',
+                  backgroundColor: '#00ff88',
+                }} />
+              )}
+            </button>
             <button className="icon-btn">
               <Search size={20} />
             </button>
@@ -81,8 +105,21 @@ export default function HomePage() {
         </div>
       </main>
 
-      {/* Unified Assistant (Voice + Text with Generative UI) */}
-      <UnifiedAssistant />
+      {/* Voice Assistant - Toggle between LiveKit and ElevenLabs */}
+      {useLiveKit ? (
+        <div style={{
+          position: 'fixed',
+          bottom: '24px',
+          right: '24px',
+          zIndex: 1000,
+          width: '400px',
+          maxWidth: 'calc(100vw - 48px)',
+        }}>
+          <LiveKitVoiceAssistant />
+        </div>
+      ) : (
+        <UnifiedAssistant />
+      )}
     </div>
   );
 }

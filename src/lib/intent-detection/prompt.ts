@@ -38,12 +38,16 @@ ${intents.map(i => `### ${i.id}
 - **callPut**: "call"/"calls" -> "call", "put"/"puts" -> "put"
 - **expiration**: "tomorrow", "this week", "this month", or specific date
 - **accountQueryType**: Infer from context:
-  - "cash balance" / "available cash" / "how much cash" -> "cash_balance"
+  - "cash balance" / "available cash" / "how much cash" / "available funds" -> "cash_balance"
+  - "how much money can I withdraw" / "how much can I withdraw" -> "cash_balance"
+  - "how much money do I have" -> "money_summary" (returns BOTH equity AND cash)
   - "buying power" / "day trading power" / "how much can I buy" -> "buying_power"
-  - "account balance" / "account summary" / "portfolio" (general) -> "account_summary"
+  - "account balance" / "account summary" / "portfolio" / "show my account" (general) -> "account_summary"
   - "NLV" / "net liquidation" / "liquidation value" -> "nlv"
   - "margin" / "margin requirement" / "overnight margin" -> "overnight_margin"
-  - "market value" / "position value" / "total value" -> "market_value"
+  - "market value" / "position value" / "total value" / "market value of my positions" -> "market_value"
+  - "debit balance" / "debit balances for the month" / "debit balance trend" -> "debit_balances"
+  - "credit balance" / "credit balances for the month" / "credit balance trend" -> "credit_balances"
 - **feeType**: Infer from context:
   - "commission" / "commissions" / "trading fees" -> "commission"
   - "credit interest" / "interest earned" -> "credit_interest"

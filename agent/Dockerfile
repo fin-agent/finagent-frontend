@@ -1,0 +1,64 @@
+# This is a Dockerfile that builds a minimal container for running LK Agents
+# For more information on the build process, see https://docs.livekit.io/agents/ops/deployment/builds/
+# syntax=docker/dockerfile:1
+
+# Use the official Node.js v22 base image
+# We use the slim variant to keep the image size smaller while still having essential tools
+ARG NODE_VERSION=22
+FROM node:${NODE_VERSION}-slim AS base
+
+# Install required system packages then clean up the apt cache for a smaller image
+# ca-certificates: enables TLS/SSL for securely fetching dependencies and calling HTTPS services
+# --no-install-recommends keeps the image minimal
+RUN apt-get update -qq && apt-get install --no-install-recommends -y ca-certificates && rm -rf /var/lib/apt/lists/*
+
+# Create a new directory for our application code
+# And set it as the working directory
+WORKDIR /app
+
+# Copy just the dependency files first, for more efficient layer caching
+COPY package.json package-lock.json ./
+
+# Install dependencies using npm
+# --ci ensures we use exact versions from package-lock.json for reproducible builds
+RUN npm ci
+
+# Copy all remaining application files into the container
+# This includes source code, configuration files, and dependency specifications
+# (Excludes files specified in .dockerignore)
+COPY . .
+
+# Build the project
+RUN npm run build
+
+# Create a non-privileged user that the app will run under
+# See https://docs.docker.com/develop/develop-images/dockerfile_best-practices/#user
+ARG UID=10001
+RUN adduser \
+    --disabled-password \
+    --gecos "" \
+    --home "/app" \
+    --shell "/sbin/nologin" \
+    --uid "${UID}" \
+    appuser
+
+# Set proper permissions
+RUN chown -R appuser:appuser /app
+USER appuser
+
+# Pre-download any ML models or files the agent needs
+# This ensures the container is ready to run immediately without downloading
+# dependencies at runtime, which improves startup time and reliability
+RUN npm run download-files
+
+# Switch back to root to remove dev dependencies and finalize setup
+USER root
+RUN npm prune --omit=dev && chown -R appuser:appuser /app
+USER appuser
+
+# Set Node.js to production mode
+ENV NODE_ENV=production
+
+# Run the application
+# The "start" command tells the worker to connect to LiveKit and begin waiting for jobs.
+CMD [ "npm", "start" ]

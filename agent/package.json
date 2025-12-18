@@ -1,0 +1,30 @@
+{
+  "name": "finagent-livekit-agent",
+  "version": "1.0.0",
+  "description": "LiveKit voice agent for FinAgent trading assistant",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx index.ts dev",
+    "start": "node dist/index.js start",
+    "download-files": "tsc && node dist/index.js download-files",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@livekit/agents": "^1.0.27",
+    "@livekit/agents-plugin-deepgram": "^1.0.27",
+    "@livekit/agents-plugin-elevenlabs": "^1.0.27",
+    "@livekit/agents-plugin-livekit": "^1.0.27",
+    "@livekit/agents-plugin-silero": "^1.0.27",
+    "@livekit/protocol": "^1.43.4",
+    "@supabase/supabase-js": "^2.45.0",
+    "dotenv": "^16.4.5",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "tsx": "^4.15.0",
+    "typescript": "^5.4.5"
+  }
+}

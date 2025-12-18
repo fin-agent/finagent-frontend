@@ -48,7 +48,8 @@ interface AccountBalanceRow {
 }
 
 type QueryType = 'cash_balance' | 'buying_power' | 'account_summary' | 'nlv' |
-                 'overnight_margin' | 'market_value' | 'debit_balances' | 'credit_balances';
+                 'overnight_margin' | 'market_value' | 'debit_balances' | 'credit_balances' |
+                 'money_summary';
 
 function formatCurrency(value: number): string {
   return new Intl.NumberFormat('en-US', {
@@ -147,10 +148,24 @@ export async function POST(req: NextRequest) {
       const minDate = data.find(d => d[balanceField] === min)?.Date;
 
       const balanceType = queryType === 'debit_balances' ? 'debit' : 'credit';
-      const periodDesc = timePeriod || 'available period';
+
+      // Extract month name from period description or use the data range
+      let monthName = 'the specified period';
+      if (timePeriod) {
+        const lowerPeriod = timePeriod.toLowerCase();
+        if (lowerPeriod.includes('last month') || lowerPeriod.includes('past month')) {
+          const lastMonth = new Date();
+          lastMonth.setMonth(lastMonth.getMonth() - 1);
+          monthName = lastMonth.toLocaleDateString('en-US', { month: 'long' });
+        } else if (lowerPeriod.includes('this month')) {
+          monthName = new Date().toLocaleDateString('en-US', { month: 'long' });
+        } else {
+          monthName = timePeriod;
+        }
+      }
 
       return NextResponse.json({
-        response: `Your ${balanceType} balance for the ${periodDesc}: Average: ${formatCurrency(avg)}, Highest: ${formatCurrency(max)} on ${formatDate(maxDate || '')}, Lowest: ${formatCurrency(min)} on ${formatDate(minDate || '')}.`,
+        response: `Your average ${balanceType} balance for the month of ${monthName} is ${formatCurrency(avg)}. The highest ${balanceType} balance was on ${formatDate(maxDate || '')} at ${formatCurrency(max)}. The lowest ${balanceType} balance was on ${formatDate(minDate || '')} at ${formatCurrency(min)}.`,
       });
     }
 
@@ -181,7 +196,12 @@ export async function POST(req: NextRequest) {
     switch (queryType) {
       case 'cash_balance':
         return NextResponse.json({
-          response: `Your account cash balance as of ${balanceDate} is ${formatCurrency(balance.CashBalance)}. Your total account equity is ${formatCurrency(balance['Account Equity'])}.`,
+          response: `Your account cash balance as of ${balanceDate} is ${formatCurrency(balance.CashBalance)}`,
+        });
+
+      case 'money_summary':
+        return NextResponse.json({
+          response: `Your account cash balance as of ${balanceDate} is ${formatCurrency(balance.CashBalance)}, and your account equity is ${formatCurrency(balance['Account Equity'])}`,
         });
 
       case 'buying_power':
@@ -194,10 +214,13 @@ export async function POST(req: NextRequest) {
           response: `Your net liquidation value (account equity) as of ${balanceDate} is ${formatCurrency(balance['Account Equity'])}.`,
         });
 
-      case 'overnight_margin':
+      case 'overnight_margin': {
+        const houseExcessDeficit = balance.HouseExcessDeficit;
+        const houseLabel = houseExcessDeficit >= 0 ? 'house excess' : 'house deficit';
         return NextResponse.json({
-          response: `Your overnight margin status as of ${balanceDate}: House Requirement: ${formatCurrency(balance.HouseRequirment)}, House Excess/Deficit: ${formatCurrency(balance.HouseExcessDeficit)}, Federal Requirement: ${formatCurrency(balance.FedRequirement)}, Federal Excess/Deficit: ${formatCurrency(balance.FedExcessDeficit)}.`,
+          response: `Your house requirement as of ${balanceDate} is ${formatCurrency(balance.HouseRequirment)}, and your ${houseLabel} is ${formatCurrency(Math.abs(houseExcessDeficit))}`,
         });
+      }
 
       case 'market_value': {
         const stockLong = balance['Stock LMV'] || 0;
@@ -205,7 +228,7 @@ export async function POST(req: NextRequest) {
         const optionsLong = balance['Options LMV'] || 0;
         const optionsShort = balance['Optons SMV'] || 0; // DB typo
         return NextResponse.json({
-          response: `Market value of your positions as of ${balanceDate}: Stock Long: ${formatCurrency(stockLong)}, Stock Short: ${formatCurrency(stockShort)}, Options Long: ${formatCurrency(optionsLong)}, Options Short: ${formatCurrency(optionsShort)}.`,
+          response: `The market value of your long stock positions is ${formatCurrency(stockLong)}, your long options positions is ${formatCurrency(optionsLong)}, your short stock positions is ${formatCurrency(stockShort)}, and your short options positions is ${formatCurrency(optionsShort)}`,
         });
       }
 

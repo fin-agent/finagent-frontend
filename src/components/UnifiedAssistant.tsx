@@ -575,13 +575,19 @@ function detectUserQueryIntent(query: string): QueryIntent | null {
   const callPut = isCallQuery && !isPutQuery ? 'call' : isPutQuery && !isCallQuery ? 'put' : undefined;
 
   // 1. Account balance queries
-  if (/\b(balance|buying\s*power|equity|margin|net\s*liquidation|nlv|market\s*value)\b/i.test(lowerQuery)) {
+  if (/\b(balance|buying\s*power|equity|margin|net\s*liquidation|nlv|market\s*value|withdraw|available\s*funds|how\s*much\s*money)\b/i.test(lowerQuery)) {
     let accountQueryType: AccountQueryType = 'account_summary';
-    if (/cash\s*balance/i.test(lowerQuery)) accountQueryType = 'cash_balance';
+    // "How much money do I have?" returns BOTH equity AND cash
+    if (/how\s*much\s*money\s*(do\s*i|have)/i.test(lowerQuery)) accountQueryType = 'money_summary';
+    // Withdrawal or available funds maps to cash_balance
+    else if (/withdraw|available\s*(funds|cash)/i.test(lowerQuery)) accountQueryType = 'cash_balance';
+    else if (/cash\s*balance/i.test(lowerQuery)) accountQueryType = 'cash_balance';
     else if (/buying\s*power/i.test(lowerQuery)) accountQueryType = 'buying_power';
     else if (/nlv|net\s*liquidation/i.test(lowerQuery)) accountQueryType = 'nlv';
     else if (/margin/i.test(lowerQuery)) accountQueryType = 'overnight_margin';
     else if (/market\s*value/i.test(lowerQuery)) accountQueryType = 'market_value';
+    else if (/debit\s*balance/i.test(lowerQuery)) accountQueryType = 'debit_balances';
+    else if (/credit\s*balance/i.test(lowerQuery)) accountQueryType = 'credit_balances';
     return { cardType: 'account-balance', accountQueryType, timePeriod };
   }
 
@@ -1461,6 +1467,17 @@ function detectAccountBalanceQuery(text: string): { queryType: AccountQueryType;
   );
   if (hasAccountSummary || hasMultipleFields) {
     return { queryType: 'account_summary', timePeriod };
+  }
+
+  // Money summary pattern: response mentions cash AND equity together (but not full summary)
+  // This matches "How much money do I have?" responses that show both values
+  const hasCashAndEquity = (
+    /cash\s+balance/i.test(text) &&
+    /account\s+equity/i.test(text) &&
+    !/buying\s+power/i.test(text) // Not a full summary
+  );
+  if (hasCashAndEquity) {
+    return { queryType: 'money_summary', timePeriod };
   }
 
   // Margin patterns (check before market value since margin responses may mention stock values)

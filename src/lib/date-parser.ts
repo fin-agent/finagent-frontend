@@ -251,6 +251,36 @@ export function parseTimeExpression(expression: string): ParsedDateQuery | null 
     };
   }
 
+  // Pattern: "this year"
+  if (/^this\s*year$/.test(lowerExpr)) {
+    const startDate = new Date(today.getFullYear(), 0, 1); // Jan 1
+    return {
+      type: 'range',
+      dateRange: {
+        startDate: toDBDate(startDate),
+        endDate: toDBDate(today),
+        description: 'this year',
+        tradingDays: Math.ceil((today.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1
+      }
+    };
+  }
+
+  // Pattern: "last year"
+  if (/^last\s*year$/.test(lowerExpr)) {
+    const lastYear = today.getFullYear() - 1;
+    const startDate = new Date(lastYear, 0, 1); // Jan 1 of last year
+    const endDate = new Date(lastYear, 11, 31); // Dec 31 of last year
+    return {
+      type: 'range',
+      dateRange: {
+        startDate: toDBDate(startDate),
+        endDate: toDBDate(endDate),
+        description: 'last year',
+        tradingDays: 365
+      }
+    };
+  }
+
   // Pattern: Day of week - "Monday", "Tuesday", etc.
   const dayOfWeekMap: Record<string, number> = {
     'sunday': 0,
@@ -602,6 +632,36 @@ export function parseTimePeriodToResolvedDates(timePeriod: string): ResolvedDate
         startDate: toDBDate(startDate),
         endDate: toDBDate(endDate),
         description: `${month1Display} and ${month2Display}`
+      };
+    }
+  }
+
+  // Pattern: Single month name - "September", "August", "October"
+  const singleMonthMatch = lowerExpr.match(
+    new RegExp(`^(${monthNames})$`, 'i')
+  );
+  if (singleMonthMatch) {
+    const monthStr = singleMonthMatch[1].toLowerCase();
+    const month = monthNameToNumber[monthStr];
+
+    if (month !== undefined) {
+      const year = today.getFullYear();
+      let startDate = new Date(year, month, 1);
+      let endDate = new Date(year, month + 1, 0); // Last day of month
+
+      // If month is in future, use previous year
+      if (startDate > today) {
+        startDate = new Date(year - 1, month, 1);
+        endDate = new Date(year - 1, month + 1, 0);
+      }
+
+      const monthDisplay = new Date(2025, month, 1).toLocaleDateString('en-US', { month: 'long' });
+
+      return {
+        type: 'range',
+        startDate: toDBDate(startDate),
+        endDate: toDBDate(endDate),
+        description: monthDisplay
       };
     }
   }

@@ -189,8 +189,19 @@ export async function classifyIntent(userQuery: string, options?: ClassifyOption
     console.log(`[Intent Classifier] Query: "${userQuery.substring(0, 50)}..." -> Intent: ${result.intent} (${(result.confidence * 100).toFixed(0)}% conf) [${elapsed}ms]`);
     console.log('[Intent Classifier] Entities:', result.entities);
 
-    // Handle unknown intent
+    // Handle unknown intent - but still return entities if present (for symbol extraction)
     if (result.intent === 'unknown' || result.confidence < 0.3) {
+      // Check if we have useful entities even with unknown intent
+      // This is critical for extracting symbols from agent responses
+      if (result.entities && Object.keys(result.entities).length > 0) {
+        console.log('[Intent Classifier] No confident intent, but entities extracted:', result.entities);
+        return {
+          intent: 'unknown',
+          confidence: result.confidence,
+          entities: result.entities,
+          cardType: 'none',
+        };
+      }
       console.log('[Intent Classifier] No confident match found');
       return null;
     }

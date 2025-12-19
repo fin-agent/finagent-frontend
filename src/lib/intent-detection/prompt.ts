@@ -23,6 +23,20 @@ ${intents.map(i => `### ${i.id}
   - "Apple" -> "AAPL", "Tesla" -> "TSLA", "Google" -> "GOOGL", "Amazon" -> "AMZN"
   - "Microsoft" -> "MSFT", "Nvidia" -> "NVDA", "Meta" -> "META", "Netflix" -> "NFLX"
   - "GameStop" -> "GME", "AMD" -> "AMD", "Intel" -> "INTC", "Qualcomm" -> "QCOM"
+
+  **CRITICAL: Speech Recognition Corrections**
+  Voice transcription often mishears stock tickers. When you see these patterns, correct them:
+  - "M10", "M 10", "MTN", "emten" -> "MTEN" (Marathon Digital Holdings)
+  - "LC ID", "L C I D", "lucid" -> "LCID" (Lucid Motors)
+  - "UI path", "you eye path" -> "PATH" (UiPath)
+  - "B M N R", "bmnr" -> "BMNR"
+  - "C R C L", "crcl", "circle" -> "CRCL"
+  - "R G C", "rgc" -> "RGC"
+
+  **Symbol Extraction from Response Text**
+  This classifier is also used to extract symbols from agent responses (not just user queries).
+  When the input contains phrases like "for stock XXXX" or "stock XXXX", extract XXXX as the symbol.
+  Example: "The total locate fees you paid for stock MTEN since this year is $67.00" -> symbol: "MTEN"
 - **timePeriod**: (String) Time references - ALWAYS extract alongside dateFilter for backwards compatibility:
   - Relative: "today", "yesterday", "tomorrow"
   - Week-based: "this week", "last week"
@@ -116,7 +130,14 @@ Respond with ONLY valid JSON:
   "entities": { ... extracted entities ... }
 }
 
-If the query doesn't match any financial trading intent, respond:
+If the query doesn't match any financial trading intent BUT contains a stock symbol, still extract it:
+{
+  "intent": "unknown",
+  "confidence": 0.0,
+  "entities": {"symbol": "EXTRACTED_SYMBOL"}
+}
+
+If no intent AND no symbol can be extracted:
 {
   "intent": "unknown",
   "confidence": 0.0,
@@ -171,5 +192,17 @@ Query: "Show my trades for July 1st and August 1st"
 Response: {"intent": "trades.time_based", "confidence": 0.95, "entities": {"timePeriod": "July 1st and August 1st", "dateFilter": {"type": "discrete", "dates": ["2025-07-01", "2025-08-01"], "description": "July 1st and August 1st"}}}
 
 Query: "Options I sold from November 15 to December 5"
-Response: {"intent": "options.bulk", "confidence": 0.94, "entities": {"tradeType": "sell", "timePeriod": "November 15 to December 5", "dateFilter": {"type": "range", "startDate": "2025-11-15", "endDate": "2025-12-05", "description": "November 15 to December 5"}}}`;
+Response: {"intent": "options.bulk", "confidence": 0.94, "entities": {"tradeType": "sell", "timePeriod": "November 15 to December 5", "dateFilter": {"type": "range", "startDate": "2025-11-15", "endDate": "2025-12-05", "description": "November 15 to December 5"}}}
+
+Query: "How much did I pay to borrow M10 stock this year?" (SPEECH RECOGNITION: M10 -> MTEN)
+Response: {"intent": "fees.query", "confidence": 0.92, "entities": {"symbol": "MTEN", "feeType": "locate_fee", "timePeriod": "this year"}}
+
+Query: "What are my locate fees for emten?" (SPEECH RECOGNITION: emten -> MTEN)
+Response: {"intent": "fees.query", "confidence": 0.90, "entities": {"symbol": "MTEN", "feeType": "locate_fee"}}
+
+Query: "The total locate fees you paid for stock MTEN since this year is $67.00" (AGENT RESPONSE - extract symbol only)
+Response: {"intent": "unknown", "confidence": 0.0, "entities": {"symbol": "MTEN"}}
+
+Query: "Your commissions for AAPL last month were $125.50" (AGENT RESPONSE - extract symbol only)
+Response: {"intent": "unknown", "confidence": 0.0, "entities": {"symbol": "AAPL"}}`;
 }

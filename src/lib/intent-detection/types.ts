@@ -19,7 +19,8 @@ export type CardType =
   | 'expiring-options'
   | 'last-option'
   | 'account-balance'
-  | 'fees';
+  | 'fees'
+  | 'none'; // Used for entity extraction from agent responses (no UI card)
 
 // Domain categories for intents
 export type IntentDomain = 'trades' | 'options' | 'account' | 'fees' | 'positions' | 'dividends' | 'tax';

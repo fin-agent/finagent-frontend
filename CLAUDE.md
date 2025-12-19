@@ -325,10 +325,12 @@ All generative UI components use **inline React styles** (not Tailwind classes) 
 - Alternating row backgrounds for readability
 - Color-coded values (green for positive, red for negative, gold for equity)
 
-**FeesSummary Design:**
-- Fee type icons and accent colors per category
-- Hero amount display with gradient text
-- Recent activity breakdown section
+**FeesSummary Design (Compact):**
+- Compact layout optimized to fit in chat panel without scrolling
+- Fee type icons (28x28px) and accent colors per category
+- Hero amount display (24px) with gradient text
+- Stats grid with "Transactions" and "Average" metrics
+- Recent activity breakdown (3 items max, 90px height)
 
 ### Voice/UI Trades Synchronization
 
@@ -359,6 +361,59 @@ Advanced query UI uses **net amount** (after fees) for premium totals to match E
 - `totalPremium` = sum of `NetAmount` fields (includes commission deductions)
 - `avgPremium` = average premium per share across trades
 - This ensures UI cards show the same values the voice agent speaks
+
+### Voice/UI Symbol Synchronization ("Wait for LLM" Pattern)
+
+When regex detection can't extract a symbol from a query, the UI must **wait for LLM classification** before fetching data. This prevents voice/UI drift where the voice says correct data but UI shows wrong data.
+
+**Problem Scenario:**
+```
+User says: "How much did I pay to borrow MTEN stock this year?"
+ElevenLabs transcribes: "M10" (speech recognition error)
+Regex extracts: symbol="" (M10 not recognized)
+Without fix: UI fetches ALL locate fees ($424) instead of MTEN ($67)
+Voice says: "$67 for MTEN" (correct - server LLM inferred MTEN)
+UI shows: "$424" (wrong - no symbol filter applied)
+```
+
+**Solution: `shouldWaitForLLM` Flag**
+
+In `UnifiedAssistant.tsx`, when intent detection succeeds but symbol extraction fails for queries that likely contain a symbol:
+
+```typescript
+// Detect if query likely has symbol but regex couldn't extract it
+const shouldWaitForLLM = (intentType && !symbol && queryLikelyHasSymbol(userText));
+
+if (shouldWaitForLLM) {
+  console.log('🔄 [Wait-for-LLM] Query has intent but no symbol, waiting for LLM...');
+  // Don't prefetch UI data - wait for LLM classification
+}
+```
+
+**Speech Recognition Corrections:**
+
+ElevenLabs speech-to-text often mishears stock tickers. The LLM prompt includes corrections:
+
+| Transcribed | Corrected |
+|-------------|-----------|
+| "M10", "M 10", "MTN", "emten" | MTEN |
+| "LC ID", "L C I D", "lucid" | LCID |
+| "UI path", "you eye path" | PATH |
+
+The LLM naturally corrects these from context (e.g., "locate fees for M10" → symbol: "MTEN").
+
+**Symbol Extraction from Agent Responses:**
+
+For `CardType: 'none'` (entity extraction), the classifier extracts symbols from agent responses:
+```
+Agent: "The total locate fees you paid for stock MTEN this year is $67.00"
+LLM extracts: { symbol: "MTEN" } → Used to re-fetch UI with correct filter
+```
+
+**Key Files:**
+- `src/components/UnifiedAssistant.tsx` - `shouldWaitForLLM` logic
+- `src/lib/intent-detection/prompt.ts` - Speech correction rules
+- `src/lib/intent-detection/types.ts` - `CardType: 'none'` for entity extraction
 
 ## Environment Variables
 

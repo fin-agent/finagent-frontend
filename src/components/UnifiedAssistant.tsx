@@ -662,6 +662,17 @@ function buildAveragePriceCalculationExplanation(tradeUI: TradeUIData | null): s
 function detectUserQueryIntent(query: string): QueryIntent | null {
   const lowerQuery = query.toLowerCase();
 
+  // Speech recognition correction map - voice transcription often mishears stock tickers
+  // These corrections are applied BEFORE symbol extraction
+  const speechCorrections: Record<string, string> = {
+    'm10': 'MTEN', 'm 10': 'MTEN', 'mtn': 'MTEN', 'emten': 'MTEN', 'em ten': 'MTEN',
+    'lc id': 'LCID', 'l c i d': 'LCID', 'lucid': 'LCID',
+    'ui path': 'PATH', 'you eye path': 'PATH',
+    'bmnr': 'BMNR', 'b m n r': 'BMNR',
+    'crcl': 'CRCL', 'c r c l': 'CRCL', 'circle': 'CRCL',
+    'rgc': 'RGC', 'r g c': 'RGC',
+  };
+
   // Company name to symbol mapping for user queries
   const companyToSymbol: Record<string, string> = {
     'apple': 'AAPL', 'google': 'GOOGL', 'alphabet': 'GOOGL',
@@ -674,21 +685,45 @@ function detectUserQueryIntent(query: string): QueryIntent | null {
   // Extract symbol from query - check company names first, then uppercase tickers
   let symbol: string | undefined;
 
-  // Check for company names
-  for (const [company, ticker] of Object.entries(companyToSymbol)) {
-    if (new RegExp(`\\b${company}\\b`, 'i').test(lowerQuery)) {
-      symbol = ticker;
+  // FIRST: Check for speech recognition corrections (highest priority)
+  for (const [misheard, correct] of Object.entries(speechCorrections)) {
+    if (new RegExp(`\\b${misheard.replace(/\s+/g, '\\s*')}\\b`, 'i').test(lowerQuery)) {
+      symbol = correct;
       break;
     }
   }
 
-  // If no company name found, check for uppercase tickers
+  // SECOND: Check for company names
+  if (!symbol) {
+    for (const [company, ticker] of Object.entries(companyToSymbol)) {
+      if (new RegExp(`\\b${company}\\b`, 'i').test(lowerQuery)) {
+        symbol = ticker;
+        break;
+      }
+    }
+  }
+
+  // THIRD: Check for uppercase tickers (letters only)
   if (!symbol) {
     const symbolMatch = query.match(/\b([A-Z]{2,5})\b/g);
     symbol = symbolMatch?.find(s =>
       KNOWN_SYMBOLS.includes(s) ||
       !['THE', 'FOR', 'AND', 'ALL', 'MY', 'HOW', 'WHAT', 'SHOW', 'GET', 'DID', 'HAVE', 'HAS'].includes(s)
     );
+  }
+
+  // FOURTH: Check for alphanumeric patterns like M10, NVDA2 (speech recognition artifacts)
+  if (!symbol) {
+    const alphanumMatch = query.match(/\b([A-Z][A-Z0-9]{1,4})\b/g);
+    const candidate = alphanumMatch?.find(s =>
+      /[0-9]/.test(s) && // Must contain a digit (to avoid catching normal words)
+      !['THE', 'FOR', 'AND', 'ALL', 'MY', 'HOW', 'WHAT', 'SHOW', 'GET', 'DID', 'HAVE', 'HAS', '1ST', '2ND', '3RD'].includes(s)
+    );
+    if (candidate) {
+      // Check if this alphanumeric pattern has a known correction
+      const corrected = speechCorrections[candidate.toLowerCase()];
+      symbol = corrected || candidate;
+    }
   }
 
   // Extract time period from query (comprehensive patterns)
@@ -2559,11 +2594,20 @@ const UnifiedAssistant: React.FC = () => {
             const token = Date.now();
             pendingVoiceIntentTokenRef.current = token;
 
+            // Detect if the query likely references a symbol we couldn't extract
+            // (e.g., "M10 stock" where M10 is a misheard ticker)
+            const queryLikelyHasSymbol = /\b(stock|ticker|shares?|borrow(?:ing)?)\b/i.test(userQuery);
+
             // Fast path: regex intent (sync) so we can prefetch before the assistant responds.
             console.log('🔍 [REGEX] ================================');
             console.log('🔍 [REGEX] Query:', userQuery);
             const fastIntent = detectUserQueryIntent(userQuery);
-            if (fastIntent) {
+
+            // Determine if we should wait for LLM instead of prefetching with incomplete data
+            // Wait for LLM if: intent detected but no symbol AND query likely has a symbol reference
+            const shouldWaitForLLM = fastIntent && !fastIntent.symbol && queryLikelyHasSymbol;
+
+            if (fastIntent && !shouldWaitForLLM) {
               console.log('🔍 [REGEX] ✅ Detected intent:', fastIntent.cardType, '| symbol:', fastIntent.symbol, '| timePeriod:', fastIntent.timePeriod);
               pendingQueryIntentRef.current = fastIntent;
               pendingTradeUIRequestRef.current = fetchTradeData(
@@ -2581,6 +2625,12 @@ const UnifiedAssistant: React.FC = () => {
               pendingAnswerOverrideRef.current = pendingTradeUIRequestRef.current.then((tradeUI) =>
                 buildAnswerOverride(fastIntent, tradeUI)
               );
+            } else if (shouldWaitForLLM) {
+              console.log('🔍 [REGEX] ⏳ Intent detected but no symbol - waiting for LLM:', fastIntent.cardType);
+              // Store intent but DON'T prefetch - let LLM provide the symbol
+              pendingQueryIntentRef.current = fastIntent;
+              pendingTradeUIRequestRef.current = null;
+              pendingAnswerOverrideRef.current = null;
             } else {
               console.log('🔍 [REGEX] ❌ No intent detected');
               // Clear any stale pending intent from prior cycles.
@@ -2589,8 +2639,8 @@ const UnifiedAssistant: React.FC = () => {
               pendingAnswerOverrideRef.current = null;
             }
 
-            // Slow path: LLM classifier (async). If it differs from the fast intent, refine it,
-            // but only if we haven't already consumed the pending intent for an assistant reply.
+            // LLM classifier (async) - provides accurate symbol extraction
+            // If regex couldn't get a symbol, LLM result will trigger the prefetch
             void (async () => {
               console.log('🤖 [LLM] ================================');
               console.log('🤖 [LLM] Query:', userQuery);
@@ -2598,11 +2648,51 @@ const UnifiedAssistant: React.FC = () => {
               const llmIntent = await classifyIntentViaAPI(userQuery);
               if (!llmIntent) {
                 console.log('🤖 [LLM] ❌ No intent returned (failed or low confidence)');
+                // If we were waiting for LLM and it failed, fall back to regex intent without symbol
+                if (shouldWaitForLLM && pendingQueryIntentRef.current && !pendingTradeUIRequestRef.current) {
+                  console.log('🤖 [LLM] Falling back to regex intent without symbol');
+                  const fallbackIntent = pendingQueryIntentRef.current;
+                  pendingTradeUIRequestRef.current = fetchTradeData(
+                    '',
+                    fallbackIntent.cardType,
+                    fallbackIntent.tradeType,
+                    fallbackIntent.timePeriod,
+                    {
+                      callPut: fallbackIntent.callPut,
+                      expiration: fallbackIntent.expiration,
+                      accountQueryType: fallbackIntent.accountQueryType,
+                      feeType: fallbackIntent.feeType,
+                    }
+                  );
+                }
                 return;
               }
               console.log('🤖 [LLM] ✅ Detected intent:', llmIntent.cardType, '| symbol:', llmIntent.symbol, '| timePeriod:', llmIntent.timePeriod);
 
               if (pendingVoiceIntentTokenRef.current !== token) return;
+
+              // If we were waiting for LLM to provide symbol, use LLM result directly
+              if (shouldWaitForLLM || !pendingTradeUIRequestRef.current) {
+                console.log('🎯 [LLM] Using LLM intent (was waiting for symbol):', llmIntent);
+                pendingQueryIntentRef.current = llmIntent;
+                pendingTradeUIRequestRef.current = fetchTradeData(
+                  llmIntent.symbol || '',
+                  llmIntent.cardType,
+                  llmIntent.tradeType,
+                  llmIntent.timePeriod,
+                  {
+                    callPut: llmIntent.callPut,
+                    expiration: llmIntent.expiration,
+                    accountQueryType: llmIntent.accountQueryType,
+                    feeType: llmIntent.feeType,
+                  }
+                );
+                pendingAnswerOverrideRef.current = pendingTradeUIRequestRef.current.then((tradeUI) =>
+                  buildAnswerOverride(llmIntent, tradeUI)
+                );
+                return;
+              }
+
               if (!pendingQueryIntentRef.current) return;
 
               const current = pendingQueryIntentRef.current;
@@ -2623,7 +2713,7 @@ const UnifiedAssistant: React.FC = () => {
 
               if (isSame) return;
 
-              console.log('🎯 [Voice LLM Classifier] Intent:', llmIntent);
+              console.log('🎯 [Voice LLM Classifier] Updating intent:', llmIntent);
               pendingQueryIntentRef.current = llmIntent;
               pendingTradeUIRequestRef.current = fetchTradeData(
                 llmIntent.symbol || '',

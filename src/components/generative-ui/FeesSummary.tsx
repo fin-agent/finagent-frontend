@@ -92,37 +92,37 @@ const feeConfig: Record<FeeType, {
 const cardStyle: React.CSSProperties = {
   position: 'relative',
   overflow: 'hidden',
-  borderRadius: '16px',
+  borderRadius: '12px',
   background: `linear-gradient(to bottom right, ${colors.bgCard}, ${colors.bgCardVia}, ${colors.bgCard})`,
   border: `1px solid ${colors.border}`,
-  boxShadow: '0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.03)',
+  boxShadow: '0 4px 16px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.03)',
 };
 
 const headerStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'space-between',
-  padding: '16px 20px',
+  padding: '10px 14px',
   borderBottom: `1px solid ${colors.borderHeader}`,
   background: `linear-gradient(to right, transparent, ${colors.bgCardVia}, transparent)`,
 };
 
 const titleStyle: React.CSSProperties = {
-  fontSize: '14px',
+  fontSize: '12px',
   fontWeight: 500,
-  letterSpacing: '0.2em',
+  letterSpacing: '0.15em',
   textTransform: 'uppercase',
   color: colors.textTitle,
   margin: 0,
 };
 
 const periodBadgeStyle: React.CSSProperties = {
-  fontSize: '12px',
+  fontSize: '10px',
   fontFamily: 'monospace',
   letterSpacing: '0.05em',
   color: colors.textMuted,
-  padding: '4px 12px',
-  borderRadius: '20px',
+  padding: '3px 8px',
+  borderRadius: '12px',
   backgroundColor: colors.borderHeader,
   border: `1px solid ${colors.border}`,
 };
@@ -137,8 +137,8 @@ const labelStyle: React.CSSProperties = {
 
 const metricBoxStyle: React.CSSProperties = {
   position: 'relative',
-  padding: '16px',
-  borderRadius: '12px',
+  padding: '10px 12px',
+  borderRadius: '8px',
   backgroundColor: colors.bgMetric,
   border: `1px solid ${colors.borderLight}`,
   transition: 'all 0.3s ease',
@@ -146,14 +146,14 @@ const metricBoxStyle: React.CSSProperties = {
 
 const metricValueStyle: React.CSSProperties = {
   fontFamily: 'monospace',
-  fontSize: '20px',
+  fontSize: '16px',
   fontWeight: 600,
   color: colors.white,
 };
 
 const heroValueStyle = (color: string): React.CSSProperties => ({
   fontFamily: 'monospace',
-  fontSize: '36px',
+  fontSize: '24px',
   fontWeight: 700,
   letterSpacing: '-0.02em',
   background: `linear-gradient(90deg, ${color}, ${color}cc, ${color})`,
@@ -192,16 +192,16 @@ const BackgroundPattern = ({ accentColor }: { accentColor: string }) => (
 const IconBadge = ({ icon, color }: { icon: string; color: string }) => (
   <div
     style={{
-      width: '40px',
-      height: '40px',
-      borderRadius: '12px',
+      width: '28px',
+      height: '28px',
+      borderRadius: '8px',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      fontSize: '18px',
+      fontSize: '14px',
       background: `linear-gradient(135deg, ${color}20 0%, ${color}10 100%)`,
       border: `1px solid ${color}30`,
-      boxShadow: `0 0 20px ${color}15`,
+      boxShadow: `0 0 12px ${color}15`,
     }}
   >
     {icon}
@@ -219,25 +219,25 @@ export function FeesSummary({ feeType, totalAmount, transactionCount, timePeriod
 
       {/* Header */}
       <div style={headerStyle}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <IconBadge icon={config.icon} color={config.accentColor} />
           <div>
             <h3 style={titleStyle}>{displayTitle}</h3>
-            <p style={{ fontSize: '12px', color: colors.textMuted, margin: '4px 0 0 0' }}>{config.description}</p>
+            <p style={{ fontSize: '10px', color: colors.textMuted, margin: '2px 0 0 0' }}>{config.description}</p>
           </div>
         </div>
         <span style={periodBadgeStyle} data-testid="fees-card-period">{timePeriod}</span>
       </div>
 
       {/* Main content */}
-      <div style={{ position: 'relative', padding: '24px' }}>
+      <div style={{ position: 'relative', padding: '12px 14px' }}>
         {/* Hero amount */}
         <div
           style={{
             ...metricBoxStyle,
-            marginBottom: '24px',
+            marginBottom: '10px',
             textAlign: 'center',
-            padding: '24px',
+            padding: '12px',
             background: `linear-gradient(135deg, ${config.gradientFrom} 0%, ${colors.bgMetric} 100%)`,
             borderTop: `2px solid ${config.accentColor}`,
           }}
@@ -245,22 +245,22 @@ export function FeesSummary({ feeType, totalAmount, transactionCount, timePeriod
           <span style={labelStyle}>
             {config.isCredit ? 'Total Earned' : 'Total Paid'}
           </span>
-          <p style={{ ...heroValueStyle(config.accentColor), marginTop: '12px' }}>
+          <p style={{ ...heroValueStyle(config.accentColor), marginTop: '6px' }}>
             {formatCurrency(Math.abs(totalAmount))}
           </p>
         </div>
 
         {/* Stats grid */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px', marginBottom: '24px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px', marginBottom: '10px' }}>
           <div style={metricBoxStyle}>
             <span style={labelStyle}>Transactions</span>
-            <p style={{ ...metricValueStyle, marginTop: '8px' }}>
+            <p style={{ ...metricValueStyle, marginTop: '4px' }}>
               {transactionCount.toLocaleString()}
             </p>
           </div>
           <div style={metricBoxStyle}>
-            <span style={labelStyle}>Average per Transaction</span>
-            <p style={{ ...metricValueStyle, marginTop: '8px' }}>
+            <span style={labelStyle}>Average</span>
+            <p style={{ ...metricValueStyle, marginTop: '4px' }}>
               {formatCurrency(Math.abs(averageAmount))}
             </p>
           </div>
@@ -268,38 +268,38 @@ export function FeesSummary({ feeType, totalAmount, transactionCount, timePeriod
 
         {/* Breakdown section */}
         {breakdown && breakdown.length > 0 && (
-          <div style={{ borderTop: `1px solid ${colors.borderHeader}`, paddingTop: '20px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+          <div style={{ borderTop: `1px solid ${colors.borderHeader}`, paddingTop: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
               <span style={labelStyle}>Recent Activity</span>
-              <span style={{ fontSize: '10px', color: colors.textMuted }}>
-                Showing {Math.min(5, breakdown.length)} of {breakdown.length}
+              <span style={{ fontSize: '9px', color: colors.textMuted }}>
+                {Math.min(3, breakdown.length)} of {breakdown.length}
               </span>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '144px', overflowY: 'auto' }}>
-              {breakdown.slice(0, 5).map((item, index) => (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '90px', overflowY: 'auto' }}>
+              {breakdown.slice(0, 3).map((item, index) => (
                 <div
                   key={index}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-between',
-                    padding: '12px',
-                    borderRadius: '8px',
+                    padding: '6px 8px',
+                    borderRadius: '6px',
                     backgroundColor: colors.bgMetric,
                     border: `1px solid ${colors.borderHeader}`,
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <span style={{ fontSize: '12px', fontFamily: 'monospace', color: colors.textLabel }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '10px', fontFamily: 'monospace', color: colors.textLabel }}>
                       {formatCalendarDate(item.date)}
                     </span>
                     {item.symbol && (
                       <span
                         style={{
-                          fontSize: '12px',
+                          fontSize: '10px',
                           fontFamily: 'monospace',
-                          padding: '2px 8px',
-                          borderRadius: '4px',
+                          padding: '1px 5px',
+                          borderRadius: '3px',
                           background: `${config.accentColor}15`,
                           color: config.accentColor,
                           border: `1px solid ${config.accentColor}30`,
@@ -312,7 +312,7 @@ export function FeesSummary({ feeType, totalAmount, transactionCount, timePeriod
                   <span
                     style={{
                       fontFamily: 'monospace',
-                      fontSize: '14px',
+                      fontSize: '11px',
                       fontWeight: 500,
                       color: config.accentColor,
                     }}

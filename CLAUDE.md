@@ -394,6 +394,38 @@ AZURE_OPENAI_API_VERSION=2024-10-21  # Optional, defaults to 2024-10-21
 | `get_fees` | Commissions, interest charges, and locate fees |
 | `advanced_query` | Legacy flexible queries (use `get_options` for options) |
 
+## Troubleshooting
+
+### ElevenLabs Voice Agent Disconnects Immediately
+
+**Symptom:** WebSocket connects, agent sends greeting, then immediately disconnects with "WebSocket is already in CLOSING or CLOSED state" errors.
+
+**First thing to check:** Open browser DevTools console and look for the disconnect reason:
+```
+ElevenLabs disconnected {
+  "reason": "error",
+  "message": "This request exceeds your quota limit."
+}
+```
+
+**If you see "quota limit" error:**
+- This is a **billing issue**, not a code bug
+- Go to https://elevenlabs.io/app/billing to check quota usage
+- Either wait for quota to reset (monthly) or upgrade the plan
+- The voice agent will work normally once quota is available
+
+**Other disconnect reasons to check:**
+- `"reason": "timeout"` - Connection idle too long (check keepalive logic)
+- `"reason": "user"` - User or code initiated disconnect
+- Network errors - Check internet connectivity
+
+### Debug Logging for Voice Connection
+
+The `UnifiedAssistant.tsx` component includes debug logging for connection issues:
+- `🔄 [Status Change]` - Shows status transitions (connecting → connected → disconnecting → disconnected)
+- `🔴 [Disconnect]` - Shows disconnect reason, code, and message
+- `🟢 Started keepalive interval` - Confirms keepalive is active
+
 ## Testing
 
 Use Playwright MCP to test UI features:
@@ -416,3 +448,49 @@ When testing voice agent features:
 ## Testing Guidelines
 
 **IMPORTANT**: When testing LiveKit voice agent with Playwright, ALWAYS end the call/disconnect after testing to avoid running up credits. Use the 'End Call' or 'Disconnect' button after each test.
+
+## ElevenLabs Connection Stability
+
+### Auto-Reconnection
+
+The `UnifiedAssistant` component includes automatic reconnection for dropped ElevenLabs connections:
+
+- **Exponential backoff**: Reconnects after 2s, 4s, 8s delays
+- **Max attempts**: 3 reconnection attempts before giving up
+- **Smart detection**: Skips reconnection for quota/billing errors and intentional disconnects
+
+```typescript
+// Reconnection state (UnifiedAssistant.tsx lines 1717-1721)
+const reconnectAttemptsRef = useRef(0);
+const maxReconnectAttempts = 3;
+const baseReconnectDelay = 2000; // Doubles each attempt
+```
+
+### Keepalive Mechanism
+
+Per ElevenLabs documentation, a `user_activity` event is sent every 30 seconds to reset the turn timeout timer:
+
+```typescript
+// Keepalive interval (30s as per ElevenLabs docs)
+keepaliveIntervalRef.current = setInterval(() => {
+  conv.sendUserActivity();
+}, 30000);
+```
+
+### Disconnect Handling
+
+The `onDisconnect` handler categorizes disconnections:
+
+| Disconnect Type | Auto-Reconnect | Console Log |
+|----------------|----------------|-------------|
+| Quota exceeded | No | `⚠️ [Disconnect] Quota/billing error detected` |
+| User ended call | No | Normal disconnect |
+| Agent ended call | No | Normal disconnect |
+| Network/server error | Yes (up to 3x) | `🔄 [Reconnect] Attempting...` |
+
+### Troubleshooting Connection Drops
+
+1. **Check quota**: If you see "quota limit" errors, check ElevenLabs dashboard billing
+2. **Console logs**: Look for `🔴 [Disconnect]` messages with reason details
+3. **Reconnection logs**: `🔄 [Reconnect]` shows automatic reconnection attempts
+4. **Keepalive logs**: `🔄 Sent keepalive ping` every 30 seconds confirms connection is active

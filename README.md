@@ -170,6 +170,21 @@ The ElevenLabs agent has access to webhook tools that query trade data:
 
 **Important**: The agent is instructed to always pass ticker symbols (AAPL, GOOGL) not company names to tools.
 
+### Connection Stability
+
+The voice agent includes automatic reconnection and keepalive mechanisms:
+
+| Feature | Description |
+|---------|-------------|
+| **Auto-Reconnect** | Up to 3 attempts with exponential backoff (2s, 4s, 8s) |
+| **Keepalive** | `user_activity` ping every 30 seconds (per ElevenLabs docs) |
+| **Smart Detection** | Skips reconnection for quota/billing errors |
+
+**Console Logs:**
+- `🔄 [Reconnect] Attempting reconnection 1/3...` - Auto-reconnect in progress
+- `⚠️ [Disconnect] Quota/billing error detected` - Check ElevenLabs billing
+- `🔄 Sent keepalive ping to ElevenLabs` - Connection is healthy
+
 ### Tool Webhook Flow
 
 ```mermaid

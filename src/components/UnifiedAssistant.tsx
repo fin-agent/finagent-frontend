@@ -1714,6 +1714,11 @@ const UnifiedAssistant: React.FC = () => {
   const transcriptRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const keepaliveIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  // Reconnection state for auto-reconnect on unexpected disconnects
+  const reconnectAttemptsRef = useRef(0);
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const maxReconnectAttempts = 3;
+  const baseReconnectDelay = 2000; // 2 seconds, doubles each attempt
   const inputModeRef = useRef<InputMode>(inputMode);
   useEffect(() => {
     inputModeRef.current = inputMode;
@@ -2336,6 +2341,12 @@ const UnifiedAssistant: React.FC = () => {
     clientTools,
     onConnect: () => {
       console.log('ElevenLabs connected');
+      // Reset reconnection state on successful connection
+      reconnectAttemptsRef.current = 0;
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
       // Only clear transcript if not resuming from history
       if (!isResumingFromHistoryRef.current) {
         setTranscript([]);
@@ -2344,9 +2355,56 @@ const UnifiedAssistant: React.FC = () => {
       voiceTitleSetRef.current = false; // Reset title tracking
       setIsSending(false);
     },
-    onDisconnect: () => {
-      console.log('ElevenLabs disconnected');
+    onDisconnect: (details) => {
+      console.log('ElevenLabs disconnected', JSON.stringify(details, null, 2));
+      console.log('🔴 [Disconnect] Full details:', details);
+      // Extract message from error reason type (message only exists on error variant)
+      const errorMessage = details?.reason === 'error' ? (details as { message?: string }).message : undefined;
+      console.log('🔴 [Disconnect] Reason:', details?.reason, '| Message:', errorMessage);
       setIsSending(false);
+
+      // Check if this is a quota/billing error - don't auto-reconnect for these
+      const isQuotaError = errorMessage?.toLowerCase().includes('quota') ||
+                          errorMessage?.toLowerCase().includes('limit') ||
+                          errorMessage?.toLowerCase().includes('billing');
+
+      // Check if user intentionally disconnected
+      const isIntentionalDisconnect = details?.reason === 'user' || details?.reason === 'agent';
+
+      // Auto-reconnect for unexpected disconnects (network issues, server errors)
+      if (!isQuotaError && !isIntentionalDisconnect && inputModeRef.current === 'voice') {
+        if (reconnectAttemptsRef.current < maxReconnectAttempts) {
+          const delay = baseReconnectDelay * Math.pow(2, reconnectAttemptsRef.current);
+          reconnectAttemptsRef.current += 1;
+          console.log(`🔄 [Reconnect] Attempting reconnection ${reconnectAttemptsRef.current}/${maxReconnectAttempts} in ${delay}ms...`);
+
+          // Clear any existing reconnect timeout
+          if (reconnectTimeoutRef.current) {
+            clearTimeout(reconnectTimeoutRef.current);
+          }
+
+          reconnectTimeoutRef.current = setTimeout(async () => {
+            try {
+              console.log('🔄 [Reconnect] Starting reconnection...');
+              await navigator.mediaDevices.getUserMedia({ audio: true });
+              // @ts-expect-error - ElevenLabs SDK types
+              await elevenLabsConversation.startSession({ agentId, dynamicVariables: getElevenLabsDynamicVariables() });
+              console.log('✅ [Reconnect] Successfully reconnected!');
+              reconnectAttemptsRef.current = 0; // Reset on success
+            } catch (error) {
+              console.error('❌ [Reconnect] Failed to reconnect:', error);
+            }
+          }, delay);
+        } else {
+          console.log('❌ [Reconnect] Max reconnection attempts reached. Please manually reconnect.');
+          reconnectAttemptsRef.current = 0; // Reset for future attempts
+        }
+      } else if (isQuotaError) {
+        console.warn('⚠️ [Disconnect] Quota/billing error detected. Check your ElevenLabs dashboard.');
+      }
+    },
+    onStatusChange: (status) => {
+      console.log('🔄 [Status Change]', JSON.stringify(status));
     },
     onMessage: async (message) => {
       // DEBUG: Log raw ElevenLabs message object to compare voice vs text
@@ -2726,7 +2784,9 @@ const UnifiedAssistant: React.FC = () => {
       }
     },
     onError: (error) => {
-      console.error('ElevenLabs error:', error);
+      console.error('🔴 [ElevenLabs ERROR]', error);
+      console.error('🔴 [ElevenLabs ERROR] Type:', typeof error);
+      console.error('🔴 [ElevenLabs ERROR] JSON:', JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
       setIsSending(false);
     },
   });
@@ -3928,8 +3988,8 @@ const UnifiedAssistant: React.FC = () => {
     return null;
   };
 
-  // WebSocket keepalive to prevent inactivity timeout (ElevenLabs has 20s default timeout)
-  // Send user activity ping every 15 seconds while voice is connected
+  // WebSocket keepalive to prevent turn timeout (ElevenLabs docs recommend 30s interval)
+  // sendUserActivity resets the turn timeout timer, keeping the connection alive during silence
   // Store conversation in ref to avoid dependency issues
   const elevenLabsConversationRef = useRef(elevenLabsConversation);
   elevenLabsConversationRef.current = elevenLabsConversation;
@@ -3943,21 +4003,20 @@ const UnifiedAssistant: React.FC = () => {
         clearInterval(keepaliveIntervalRef.current);
       }
 
-      // Start keepalive interval
+      // Start keepalive interval (30s as recommended by ElevenLabs docs)
       keepaliveIntervalRef.current = setInterval(() => {
         const conv = elevenLabsConversationRef.current;
         if (conv.status === 'connected') {
-          // sendUserActivity signals the agent that user is still active
-          // This prevents the WebSocket from timing out due to inactivity
-          // Note: This method may not exist in newer SDK versions
+          // sendUserActivity resets the turn timeout timer, preventing disconnects during silence
+          // Per ElevenLabs docs: "This event is primarily used to reset the turn timeout timer"
           if (typeof conv.sendUserActivity === 'function') {
             conv.sendUserActivity();
             console.log('🔄 Sent keepalive ping to ElevenLabs');
           }
         }
-      }, 15000); // 15 seconds (under the 20s default timeout)
+      }, 30000); // 30 seconds (as per ElevenLabs documentation)
 
-      console.log('🟢 Started keepalive interval for voice connection');
+      console.log('🟢 Started keepalive interval for voice connection (30s)');
     }
 
     return () => {
@@ -3965,6 +4024,11 @@ const UnifiedAssistant: React.FC = () => {
         clearInterval(keepaliveIntervalRef.current);
         keepaliveIntervalRef.current = null;
         console.log('🔴 Cleared keepalive interval');
+      }
+      // Also clear any pending reconnection attempts
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
       }
     };
   }, [elevenLabsConversation.status, inputMode]);

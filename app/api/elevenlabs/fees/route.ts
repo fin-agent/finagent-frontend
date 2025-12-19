@@ -2,7 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import { parseTimePeriodToResolvedDates } from '@/src/lib/date-parser';
 import { normalizeSymbol } from '@/src/lib/symbol-utils';
-import { checkDataAvailability } from '@/src/lib/data-availability';
+import { suggestDataPeriod } from '@/src/lib/data-availability';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -72,14 +72,16 @@ export async function POST(req: NextRequest) {
       }
 
       if (!data || data.length === 0) {
-        // Check data availability to provide helpful suggestion
-        const { availableRange } = await checkDataAvailability('TradeData', resolved);
-        const suggestionText = availableRange.hasData
-          ? ` Data is available from ${new Date(availableRange.earliestDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} to ${new Date(availableRange.latestDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}. Would you like to try a different time period?`
-          : '';
+        // Use LLM-based suggestion for a natural time period with actual amount
+        const suggestion = await suggestDataPeriod('TradeData', description);
+        if (suggestion) {
+          return NextResponse.json({
+            response: `No commission data found for ${description}. However, I found ${formatCurrency(suggestion.amount)} in commissions for ${suggestion.suggestedPeriod}. Would you like to know more about that?`,
+          });
+        }
 
         return NextResponse.json({
-          response: `No commission data found for ${description}.${suggestionText}`,
+          response: `No commission data found for ${description}.`,
         });
       }
 
@@ -125,15 +127,24 @@ export async function POST(req: NextRequest) {
     }
 
     if (!data || data.length === 0) {
-      // Check data availability to provide helpful suggestion
-      const { availableRange } = await checkDataAvailability('FeesAndInterest', resolved);
-      const suggestionText = availableRange.hasData
-        ? ` Data is available from ${new Date(availableRange.earliestDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} to ${new Date(availableRange.latestDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}. Would you like to try a different time period?`
-        : '';
+      // Use LLM-based suggestion for a natural time period with actual amount
+      const normalizedSymbol = symbol ? normalizeSymbol(symbol) : undefined;
+      const suggestion = await suggestDataPeriod('FeesAndInterest', description, {
+        feeType: dbFeeType,
+        symbol: normalizedSymbol,
+      });
+
+      const feeTypeName = feeType.replace('_', ' ');
       const symbolText = symbol ? ` for ${normalizeSymbol(symbol)}` : '';
 
+      if (suggestion) {
+        return NextResponse.json({
+          response: `No ${feeTypeName} found${symbolText} for ${description}. However, I found ${formatCurrency(suggestion.amount)} in ${feeTypeName} for ${suggestion.suggestedPeriod}. Would you like to know more about that?`,
+        });
+      }
+
       return NextResponse.json({
-        response: `No ${feeType.replace('_', ' ')} data found${symbolText} for ${description}.${suggestionText}`,
+        response: `No ${feeTypeName} data found${symbolText} for ${description}.`,
       });
     }
 

@@ -442,14 +442,27 @@ When the user mentions a company name verbally, normalize it to the written tick
  "The total Debit interest you paid last week is $125.75"
 **Fees - Locate Fee:**
  "The total Locate fees you paid for stock MTEN since the beginning of year is $350"
-# No Results Handling
+# No Results Handling - Data Availability Suggestions
 
-**IMPORTANT: When tools return "no data found" responses, they now include helpful suggestions about available data ranges. READ THESE RESPONSES VERBATIM.**
+**IMPORTANT: When tools return "no data found" responses, they now include proactive suggestions about WHERE data IS available. READ THESE RESPONSES VERBATIM.**
 
-**Example tool response:**
-"No trades found for January. Data is available from Jan 14, 2025 to Nov 19, 2025. Would you like to try a different time period?"
+**The tools now suggest specific time periods with actual amounts/counts, not just date ranges.**
 
-**Say exactly what the tool returns.** Do NOT substitute with generic responses.
+**Example tool responses:**
+
+1. **Fees with no data:**
+   Tool returns: "No debit interest found for last week. However, I found $125.75 in debit interest for this month. Would you like to know more about that?"
+   → Say exactly this response verbatim
+
+2. **Trades with no data:**
+   Tool returns: "No trades found for yesterday. However, I found 47 trades for this month. Would you like to see those instead?"
+   → Say exactly this response verbatim
+
+3. **Account balance with no data:**
+   Tool returns: "No balance data found for last week. However, I found balance data for this month. Would you like to know more about that?"
+   → Say exactly this response verbatim
+
+**Say exactly what the tool returns.** The suggestions include real amounts/counts to help users understand what data is available.
 
 **Fallback responses (only if tool doesn't provide a suggestion):**
 - **Symbol not found:** "I don't see any trades for [Company Name] in your portfolio. Would you like me to check a different stock?"

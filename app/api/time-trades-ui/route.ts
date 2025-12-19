@@ -4,6 +4,7 @@ import { resolveDateFilter, parseTimePeriodToResolvedDates, type ResolvedDates }
 import { formatDisplayDate, formatDateRange } from '@/src/lib/date-utils';
 import { getTradeGrossUSD, safeParseNumber } from '@/src/lib/trade-math';
 import { normalizeSymbol } from '@/src/lib/symbol-utils';
+import { checkDataAvailability } from '@/src/lib/data-availability';
 import type { DateFilter } from '@/src/lib/intent-detection/types';
 
 const supabase = createClient(
@@ -69,6 +70,35 @@ export async function POST(req: NextRequest) {
     }
 
     const trades = data || [];
+
+    // If no trades found, check data availability for helpful suggestion
+    if (trades.length === 0) {
+      const { suggestion, availableRange } = await checkDataAvailability('TradeData', resolved);
+
+      return NextResponse.json({
+        timePeriod: {
+          description,
+          displayRange: resolved.type === 'discrete' && dates
+            ? dates.map(d => formatDisplayDate(d)).join(', ')
+            : formatDateRange(startDate || '', endDate || ''),
+          tradingDays: resolved.type === 'discrete' && dates ? dates.length : 1,
+        },
+        summary: {
+          totalTrades: 0,
+          stockCount: 0,
+          optionCount: 0,
+          totalValue: 0,
+          averagePrice: 0,
+        },
+        trades: [],
+        symbol: normalizedSymbol,
+        suggestion,
+        availableRange: availableRange.hasData ? {
+          earliestDate: availableRange.earliestDate,
+          latestDate: availableRange.latestDate,
+        } : null,
+      });
+    }
 
     // Calculate statistics
     const stockTrades = trades.filter(t => t.SecurityType === 'S');

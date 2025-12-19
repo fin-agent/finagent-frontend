@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { parseTimePeriodToResolvedDates } from '@/src/lib/date-parser';
 import { formatDisplayDate, formatDateRange } from '@/src/lib/date-utils';
 import { normalizeSymbol } from '@/src/lib/symbol-utils';
+import { checkDataAvailability } from '@/src/lib/data-availability';
 
 // Format date in PACIFIC TIMEZONE to match UI display
 // The UI renders dates in the user's browser (typically Pacific time)
@@ -107,13 +108,24 @@ export async function POST(req: NextRequest) {
     const symbolText = normalizedSymbol ? ` for ${normalizedSymbol}` : '';
 
     if (tradeCount === 0) {
+      // Check data availability to provide helpful suggestion
+      const { availableRange } = await checkDataAvailability('TradeData', resolved);
+      // Format suggestion more naturally for voice
+      const suggestionText = availableRange.hasData
+        ? ` Data is available from ${new Date(availableRange.earliestDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} to ${new Date(availableRange.latestDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}. Would you like to try a different time period?`
+        : '';
+
       return NextResponse.json({
-        response: `No trades found${symbolText} ${description}.`,
+        response: `No trades found${symbolText} for ${description}.${suggestionText}`,
         data: {
           tradeCount: 0,
           timePeriod: description,
           symbol: normalizedSymbol,
           trades: [],
+          availableRange: availableRange.hasData ? {
+            earliestDate: availableRange.earliestDate,
+            latestDate: availableRange.latestDate,
+          } : null,
         }
       });
     }

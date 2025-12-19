@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import { resolveDateFilter, parseTimePeriodToResolvedDates, type ResolvedDates } from '@/src/lib/date-parser';
 import { normalizeSymbol, parseOptionSymbol } from '@/src/lib/symbol-utils';
+import { checkDataAvailability } from '@/src/lib/data-availability';
 import type { DateFilter } from '@/src/lib/intent-detection/types';
 
 const supabase = createClient(
@@ -65,8 +66,20 @@ export async function POST(req: NextRequest) {
 
       const { data, error } = await query.order('Date', { ascending: false });
 
-      if (error || !data) {
-        return NextResponse.json({ error: 'No data found' });
+      if (error || !data || data.length === 0) {
+        const { suggestion, availableRange } = await checkDataAvailability('TradeData', resolved);
+        return NextResponse.json({
+          feeType,
+          totalAmount: 0,
+          transactionCount: 0,
+          timePeriod: description,
+          breakdown: [],
+          suggestion,
+          availableRange: availableRange.hasData ? {
+            earliestDate: availableRange.earliestDate,
+            latestDate: availableRange.latestDate,
+          } : null,
+        });
       }
 
       const totalAmount = data.reduce((sum, trade) => sum + Math.abs(trade.Commission || 0), 0);
@@ -111,8 +124,21 @@ export async function POST(req: NextRequest) {
 
     const { data, error } = await feesQuery.order('Date', { ascending: false });
 
-    if (error || !data) {
-      return NextResponse.json({ error: 'No data found' });
+    if (error || !data || data.length === 0) {
+      const { suggestion, availableRange } = await checkDataAvailability('FeesAndInterest', resolved);
+      return NextResponse.json({
+        feeType,
+        totalAmount: 0,
+        transactionCount: 0,
+        timePeriod: description,
+        symbol: symbol ? normalizeSymbol(symbol) : undefined,
+        breakdown: [],
+        suggestion,
+        availableRange: availableRange.hasData ? {
+          earliestDate: availableRange.earliestDate,
+          latestDate: availableRange.latestDate,
+        } : null,
+      });
     }
 
     const totalAmount = data.reduce((sum, fee) => sum + Math.abs(fee.Amount || 0), 0);

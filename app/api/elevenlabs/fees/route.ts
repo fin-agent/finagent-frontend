@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import { parseTimePeriodToResolvedDates } from '@/src/lib/date-parser';
 import { normalizeSymbol } from '@/src/lib/symbol-utils';
+import { checkDataAvailability } from '@/src/lib/data-availability';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -71,8 +72,14 @@ export async function POST(req: NextRequest) {
       }
 
       if (!data || data.length === 0) {
+        // Check data availability to provide helpful suggestion
+        const { availableRange } = await checkDataAvailability('TradeData', resolved);
+        const suggestionText = availableRange.hasData
+          ? ` Data is available from ${new Date(availableRange.earliestDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} to ${new Date(availableRange.latestDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}. Would you like to try a different time period?`
+          : '';
+
         return NextResponse.json({
-          response: `No commission data found for ${description}.`,
+          response: `No commission data found for ${description}.${suggestionText}`,
         });
       }
 
@@ -118,9 +125,15 @@ export async function POST(req: NextRequest) {
     }
 
     if (!data || data.length === 0) {
+      // Check data availability to provide helpful suggestion
+      const { availableRange } = await checkDataAvailability('FeesAndInterest', resolved);
+      const suggestionText = availableRange.hasData
+        ? ` Data is available from ${new Date(availableRange.earliestDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} to ${new Date(availableRange.latestDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}. Would you like to try a different time period?`
+        : '';
       const symbolText = symbol ? ` for ${normalizeSymbol(symbol)}` : '';
+
       return NextResponse.json({
-        response: `No ${feeType.replace('_', ' ')} data found${symbolText} for ${description}.`,
+        response: `No ${feeType.replace('_', ' ')} data found${symbolText} for ${description}.${suggestionText}`,
       });
     }
 

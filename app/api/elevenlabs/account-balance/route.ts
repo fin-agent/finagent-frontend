@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import { formatCalendarDate } from '@/src/lib/date-utils';
 import { parseTimePeriodToResolvedDates } from '@/src/lib/date-parser';
+import { checkDataAvailability } from '@/src/lib/data-availability';
 
 // Use formatCalendarDate from date-utils to apply demo date offset
 // This ensures voice and UI show the same dates
@@ -88,8 +89,16 @@ export async function POST(req: NextRequest) {
       }
 
       if (!data || data.length === 0) {
+        // Check data availability to provide helpful suggestion
+        const { availableRange } = resolved
+          ? await checkDataAvailability('AccountBalance', resolved)
+          : { availableRange: { hasData: false, earliestDate: '', latestDate: '' } };
+        const suggestionText = availableRange.hasData
+          ? ` Data is available from ${new Date(availableRange.earliestDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} to ${new Date(availableRange.latestDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}. Would you like to try a different time period?`
+          : '';
+
         return NextResponse.json({
-          response: 'No balance data found for the specified period.',
+          response: `No balance data found for the specified period.${suggestionText}`,
         });
       }
 

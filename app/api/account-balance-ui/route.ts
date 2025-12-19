@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import { resolveDateFilter, parseTimePeriodToResolvedDates, type ResolvedDates } from '@/src/lib/date-parser';
+import { checkDataAvailability } from '@/src/lib/data-availability';
 import type { DateFilter } from '@/src/lib/intent-detection/types';
 
 const supabase = createClient(
@@ -72,7 +73,19 @@ export async function POST(req: NextRequest) {
       const { data, error } = await query;
 
       if (error || !data || data.length === 0) {
-        return NextResponse.json({ error: 'No data found' });
+        const { suggestion, availableRange } = resolved
+          ? await checkDataAvailability('AccountBalance', resolved)
+          : { suggestion: null, availableRange: { hasData: false, earliestDate: '', latestDate: '' } };
+        return NextResponse.json({
+          queryType,
+          date: '',
+          balanceTrend: null,
+          suggestion,
+          availableRange: availableRange.hasData ? {
+            earliestDate: availableRange.earliestDate,
+            latestDate: availableRange.latestDate,
+          } : null,
+        });
       }
 
       const balanceField = queryType === 'debit_balances' ? 'DebitBalance' : 'CreditBalance';

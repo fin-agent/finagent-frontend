@@ -6,6 +6,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import type { ResolvedDates } from './date-parser';
+import { parseTimePeriodToResolvedDates } from './date-parser';
 import * as dotenv from 'dotenv';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -272,68 +273,136 @@ export async function suggestDataPeriod(
 ): Promise<DataPeriodSuggestion | null> {
   try {
     if (table === 'FeesAndInterest' && filters?.feeType) {
-      // Query with fee type filter
-      let query = supabase
+      // Query with fee type filter to get date range
+      let rangeQuery = supabase
+        .from(table)
+        .select('Date')
+        .eq('Type', filters.feeType);
+
+      if (filters.symbol) {
+        rangeQuery = rangeQuery.eq('Symbol', filters.symbol);
+      }
+
+      const { data: rangeData, error: rangeError } = await rangeQuery.order('Date', { ascending: true });
+
+      if (rangeError || !rangeData?.length) {
+        console.log(`[Data Availability] No ${filters.feeType} data found at all`);
+        return null;
+      }
+
+      const earliestDate = rangeData[0].Date;
+      const latestDate = rangeData[rangeData.length - 1].Date;
+
+      // Step 1: Get LLM to suggest a natural period
+      const suggestedPeriod = await suggestTimePeriodWithLLM(requestedPeriod, earliestDate, latestDate);
+
+      // Step 2: Parse the suggested period to get actual date range
+      const resolvedDates = parseTimePeriodToResolvedDates(suggestedPeriod);
+
+      // Step 3: Re-query with the suggested period's date range to get ACCURATE amount
+      let amountQuery = supabase
         .from(table)
         .select('Date, Amount')
         .eq('Type', filters.feeType);
 
       if (filters.symbol) {
-        query = query.eq('Symbol', filters.symbol);
+        amountQuery = amountQuery.eq('Symbol', filters.symbol);
       }
 
-      const { data: allData, error } = await query.order('Date', { ascending: true });
-
-      if (error || !allData?.length) {
-        console.log(`[Data Availability] No ${filters.feeType} data found at all`);
-        return null;
+      if (resolvedDates && resolvedDates.startDate && resolvedDates.endDate) {
+        amountQuery = amountQuery
+          .gte('Date', resolvedDates.startDate)
+          .lte('Date', resolvedDates.endDate);
       }
 
-      const earliestDate = allData[0].Date;
-      const latestDate = allData[allData.length - 1].Date;
+      const { data: periodData, error: periodError } = await amountQuery.order('Date', { ascending: true });
 
-      // Calculate total amount for all available data
-      const totalAmount = allData.reduce((sum, row) => sum + Math.abs(row.Amount || 0), 0);
-      const count = allData.length;
+      if (periodError || !periodData?.length) {
+        // Fallback to all data if period parsing failed
+        console.log(`[Data Availability] Could not fetch data for suggested period "${suggestedPeriod}", using all data`);
+        const totalAmount = rangeData.length; // Just count since we only selected Date
+        return {
+          suggestedPeriod,
+          amount: 0,
+          count: totalAmount,
+          startDate: earliestDate,
+          endDate: latestDate,
+        };
+      }
 
-      // Step 2: Get LLM to suggest a natural period
-      const suggestedPeriod = await suggestTimePeriodWithLLM(requestedPeriod, earliestDate, latestDate);
+      // Calculate amount for the suggested period
+      const totalAmount = periodData.reduce((sum, row) => sum + Math.abs(row.Amount || 0), 0);
+      const count = periodData.length;
+
+      console.log(`[Data Availability] Suggested period "${suggestedPeriod}": ${count} records, $${totalAmount.toFixed(2)}`);
 
       return {
         suggestedPeriod,
         amount: totalAmount,
         count,
-        startDate: earliestDate,
-        endDate: latestDate,
+        startDate: resolvedDates?.startDate || earliestDate,
+        endDate: resolvedDates?.endDate || latestDate,
       };
 
     } else if (table === 'TradeData') {
-      // Query trades
-      const { data: allData, error } = await supabase
+      // Query trades to get date range
+      const { data: rangeData, error: rangeError } = await supabase
         .from(table)
-        .select('Date, NetAmount')
+        .select('Date')
         .eq('AccountCode', ACCOUNT_CODE)
         .order('Date', { ascending: true });
 
-      if (error || !allData?.length) {
+      if (rangeError || !rangeData?.length) {
         console.log('[Data Availability] No trade data found at all');
         return null;
       }
 
-      const earliestDate = allData[0].Date;
-      const latestDate = allData[allData.length - 1].Date;
-      const count = allData.length;
-      const totalAmount = allData.reduce((sum, row) => sum + Math.abs(row.NetAmount || 0), 0);
+      const earliestDate = rangeData[0].Date;
+      const latestDate = rangeData[rangeData.length - 1].Date;
 
-      // Step 2: Get LLM to suggest a natural period
+      // Step 1: Get LLM to suggest a natural period
       const suggestedPeriod = await suggestTimePeriodWithLLM(requestedPeriod, earliestDate, latestDate);
+
+      // Step 2: Parse the suggested period to get actual date range
+      const resolvedDates = parseTimePeriodToResolvedDates(suggestedPeriod);
+
+      // Step 3: Re-query with the suggested period's date range to get ACCURATE amount
+      let amountQuery = supabase
+        .from(table)
+        .select('Date, Commission')
+        .eq('AccountCode', ACCOUNT_CODE);
+
+      if (resolvedDates && resolvedDates.startDate && resolvedDates.endDate) {
+        amountQuery = amountQuery
+          .gte('Date', resolvedDates.startDate)
+          .lte('Date', resolvedDates.endDate);
+      }
+
+      const { data: periodData, error: periodError } = await amountQuery.order('Date', { ascending: true });
+
+      if (periodError || !periodData?.length) {
+        console.log(`[Data Availability] Could not fetch data for suggested period "${suggestedPeriod}"`);
+        return {
+          suggestedPeriod,
+          amount: 0,
+          count: rangeData.length,
+          startDate: earliestDate,
+          endDate: latestDate,
+        };
+      }
+
+      // Calculate commission for the suggested period
+      const totalAmount = periodData.reduce((sum, row) => sum + Math.abs(row.Commission || 0), 0);
+      const count = periodData.length;
+
+      console.log(`[Data Availability] Suggested period "${suggestedPeriod}": ${count} trades, $${totalAmount.toFixed(2)} commission`);
 
       return {
         suggestedPeriod,
         amount: totalAmount,
         count,
-        startDate: earliestDate,
-        endDate: latestDate,
+        startDate: resolvedDates?.startDate || earliestDate,
+        endDate: resolvedDates?.endDate || latestDate,
       };
 
     } else {

@@ -299,6 +299,45 @@ export function parseTimeExpression(expression: string): ParsedDateQuery | null 
     };
   }
 
+  // Pattern: "last quarter" / "past quarter"
+  if (/^(last|past)\s*quarter$/.test(lowerExpr)) {
+    const currentMonth = today.getMonth();
+    const currentQuarter = Math.floor(currentMonth / 3); // 0=Q1, 1=Q2, 2=Q3, 3=Q4
+    const lastQuarter = currentQuarter === 0 ? 3 : currentQuarter - 1;
+    const lastQuarterYear = currentQuarter === 0 ? today.getFullYear() - 1 : today.getFullYear();
+    const startMonth = lastQuarter * 3; // Q1=0, Q2=3, Q3=6, Q4=9
+    const startDate = new Date(lastQuarterYear, startMonth, 1);
+    const endDate = new Date(lastQuarterYear, startMonth + 3, 0); // Last day of quarter
+    const quarterName = `Q${lastQuarter + 1} ${lastQuarterYear}`;
+    return {
+      type: 'range',
+      dateRange: {
+        startDate: toDBDate(startDate),
+        endDate: toDBDate(endDate),
+        description: `last quarter (${quarterName})`,
+        tradingDays: 90 // Approximate
+      }
+    };
+  }
+
+  // Pattern: "this quarter"
+  if (/^this\s*quarter$/.test(lowerExpr)) {
+    const currentMonth = today.getMonth();
+    const currentQuarter = Math.floor(currentMonth / 3);
+    const startMonth = currentQuarter * 3;
+    const startDate = new Date(today.getFullYear(), startMonth, 1);
+    const quarterName = `Q${currentQuarter + 1} ${today.getFullYear()}`;
+    return {
+      type: 'range',
+      dateRange: {
+        startDate: toDBDate(startDate),
+        endDate: toDBDate(today),
+        description: `this quarter (${quarterName})`,
+        tradingDays: Math.ceil((today.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)) + 1
+      }
+    };
+  }
+
   // Pattern: Day of week - "Monday", "Tuesday", etc.
   const dayOfWeekMap: Record<string, number> = {
     'sunday': 0,
@@ -418,6 +457,8 @@ export function extractTimePeriodFromQuery(query: string): string | null {
   const directPatterns = [
     'today', 'yesterday', 'this week', 'last week', 'past week',
     'this month', 'last month', 'past month',
+    'this quarter', 'last quarter', 'past quarter',
+    'this year', 'last year',
     'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'
   ];
 

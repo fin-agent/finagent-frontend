@@ -65,6 +65,7 @@ interface QueryIntent {
   expiration?: string;
   accountQueryType?: AccountQueryType;
   feeType?: FeeType;
+  dateFilter?: { type: string; startDate?: string; endDate?: string; description: string };
 }
 
 // High-signal option intents where regex patterns are very reliable
@@ -155,6 +156,74 @@ function isExplainCalculationQuery(query: string): boolean {
     /\bhow\b.*\bget\b.*\bthat\b/i.test(q) ||
     /\bhow\b.*\bcomputed\b/i.test(q)
   );
+}
+
+/**
+ * Detect if user is accepting a suggestion ("Would you like to know more?")
+ * Matches: "yes", "sure", "yeah", "tell me more", "show me", "okay", "please", etc.
+ */
+function isSuggestionFollowup(query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return false;
+  return (
+    /^(yes|yeah|yep|yup|sure|ok|okay|please|alright|y|yea)\.?!?$/i.test(q) ||
+    /^(tell|show)\s+(me|us)\s+(more|about|that)/i.test(q) ||
+    /^(yes|yeah|sure|ok|okay),?\s+(please|go ahead|tell me|show me)/i.test(q) ||
+    /^i('?d| would)\s+like\s+(to|that)/i.test(q) ||
+    /^(go\s+ahead|do\s+it|proceed)/i.test(q) ||
+    /^(sounds?\s+good|why\s+not|absolutely|definitely)/i.test(q)
+  );
+}
+
+/**
+ * Detect if user is asking a contextual follow-up with a time period change
+ * Examples: "And what about the last three months?", "How about last quarter?", "What about this year?"
+ *           "So how much has paid in the last three months?"
+ * Returns the extracted time period if detected, null otherwise
+ */
+function detectContextualTimePeriodFollowup(query: string): string | null {
+  const q = query.trim().toLowerCase();
+  if (!q) return null;
+
+  // Time period validation - must contain time-related words
+  const timeWords = /\b(last|past|this|previous|yesterday|today|week|month|year|quarter|days?|months?|years?|\d+)\b/i;
+
+  // Patterns for contextual follow-ups with time period changes
+  const patterns = [
+    // "and what about X", "how about X", "what about X"
+    /^(?:and\s+)?(?:what|how)\s+about\s+(?:the\s+)?(.+?)\??$/i,
+    // "and for X", "and in X"
+    /^(?:and\s+)?(?:for|in)\s+(?:the\s+)?(.+?)\??$/i,
+    // "show me the same for X"
+    /^(?:show\s+me\s+)?(?:the\s+)?(?:same\s+(?:for|thing)\s+)?(?:for\s+)?(.+?)\??$/i,
+    // "and X?" - short follow-up
+    /^and\s+(?:the\s+)?(.+?)\??$/i,
+    // "so how much [was paid/did I pay/has been paid] in/for the last X" - repeat question
+    /^(?:so\s+)?how\s+much\s+(?:was\s+paid|did\s+i\s+pay|has\s+(?:been\s+)?paid|have\s+i\s+paid)?\s*(?:in|for)?\s*(?:the\s+)?(.+?)\??$/i,
+    // "how much in/for X?" - shortened repeat
+    /^how\s+much\s+(?:in|for)\s+(?:the\s+)?(.+?)\??$/i,
+    // "what was it for X?" or "what is it for X?"
+    /^what\s+(?:was|is)\s+it\s+(?:for|in)\s+(?:the\s+)?(.+?)\??$/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = q.match(pattern);
+    if (match && match[1]) {
+      const timePart = match[1].trim();
+      // Validate it looks like a time period
+      if (timeWords.test(timePart)) {
+        return timePart;
+      }
+    }
+  }
+
+  // Fallback: check if query is just a time period (e.g., "the last three months?", "last quarter?")
+  const justTimePeriod = /^(?:the\s+)?(last|past|this)\s+(?:\d+\s+)?(week|month|year|quarter|days?|months?|years?)\??$/i;
+  if (justTimePeriod.test(q)) {
+    return q.replace(/\?$/, '').trim();
+  }
+
+  return null;
 }
 
 function normalizeTradeVerb(tradeType: string): 'buying' | 'selling' {
@@ -575,13 +644,33 @@ function buildAnswerOverride(intent: QueryIntent | null, tradeUI: TradeUIData | 
       timePeriod?: string;
       periodMonth?: string;
       symbol?: string;
+      suggestion?: {
+        period: string;
+        amount: number;
+        count: number;
+        startDate: string;
+        endDate: string;
+      } | null;
     };
 
     if (!d || d.error || !d.feeType || d.totalAmount === undefined) return null;
 
     const feeType = tradeUI.feeType || d.feeType || intent.feeType || 'commission';
-    const amount = formatUSDCurrency(d.totalAmount);
     const timePeriod = d.timePeriod || tradeUI.timePeriod || intent.timePeriod || '';
+    const hasNoData = Math.abs(d.totalAmount) < 0.01 && (d.transactionCount || 0) === 0;
+
+    // If no data found but we have a suggestion, show the suggestion text
+    if (hasNoData && d.suggestion) {
+      const feeTypeName = feeType === 'commission' ? 'commission' :
+        feeType === 'credit_interest' ? 'credit interest' :
+        feeType === 'debit_interest' ? 'debit interest' :
+        feeType === 'locate_fee' ? 'locate fees' : 'fees';
+      const symbolText = d.symbol ? ` for ${d.symbol}` : '';
+      const suggestionAmount = formatUSDCurrency(d.suggestion.amount);
+      return `No ${feeTypeName} found${symbolText} for ${timePeriod}. However, I found ${suggestionAmount} in ${feeTypeName} for ${d.suggestion.period}. Would you like to know more about that?`;
+    }
+
+    const amount = formatUSDCurrency(d.totalAmount);
 
     const monthFromLabel = (() => {
       if (d.periodMonth) return d.periodMonth;
@@ -1777,6 +1866,16 @@ const UnifiedAssistant: React.FC = () => {
   // Stores the most recently rendered assistant card, used for follow-ups like
   // "how are you calculating this?"
   const lastAssistantTradeUIRef = useRef<TradeUIData | null>(null);
+  // Stores the last data suggestion offered (for "would you like to know more?" follow-ups)
+  const lastSuggestionRef = useRef<{
+    feeType: FeeType;
+    timePeriod: string;
+    startDate: string;
+    endDate: string;
+    amount: number;
+    count: number;
+    symbol?: string;
+  } | null>(null);
   // Used to avoid rendering a new UI card for purely explanatory follow-ups.
   const suppressNextTradeUICardRef = useRef(false);
   // Track when an intent-based card was rendered to prevent fallback from overriding
@@ -2297,6 +2396,21 @@ const UnifiedAssistant: React.FC = () => {
 
           if (tradeUI) {
             lastAssistantTradeUIRef.current = tradeUI;
+            // Store suggestion for follow-up handling
+            if (tradeUI.type === 'fees' && tradeUI.data) {
+              const feesData = tradeUI.data as { suggestion?: { period: string; amount: number; count: number; startDate: string; endDate: string } | null; feeType?: FeeType; symbol?: string; timePeriod?: string };
+              if (feesData.suggestion) {
+                lastSuggestionRef.current = {
+                  feeType: tradeUI.feeType || feesData.feeType || 'commission',
+                  timePeriod: feesData.suggestion.period,
+                  startDate: feesData.suggestion.startDate,
+                  endDate: feesData.suggestion.endDate,
+                  amount: feesData.suggestion.amount,
+                  count: feesData.suggestion.count,
+                  symbol: feesData.symbol || tradeUI.symbol,
+                };
+              }
+            }
             setTranscript(prev => prev.map((m) => m.id === newMessageId ? { ...m, tradeUI } : m));
           }
         })();
@@ -2314,7 +2428,7 @@ const UnifiedAssistant: React.FC = () => {
     type: 'summary' | 'detailed' | 'stats' | 'profitable' | 'time-based' | 'option-stats' | 'average-price' | 'advanced-options' | 'highest-strike' | 'total-premium' | 'expiring-options' | 'last-option' | 'account-balance' | 'fees',
     tradeType?: 'buy' | 'sell' | 'all',
     timePeriod?: string,
-    extraParams?: { callPut?: 'call' | 'put'; expiration?: string; aggregation?: string; accountQueryType?: AccountQueryType; feeType?: FeeType; includeTrades?: boolean }
+    extraParams?: { callPut?: 'call' | 'put'; expiration?: string; aggregation?: string; accountQueryType?: AccountQueryType; feeType?: FeeType; includeTrades?: boolean; dateFilter?: { type: string; startDate?: string; endDate?: string; description: string } }
   ): Promise<TradeUIData | null> => {
     try {
       let endpoint: string;
@@ -2332,7 +2446,13 @@ const UnifiedAssistant: React.FC = () => {
         return { type, symbol: '', accountQueryType: extraParams?.accountQueryType, data };
       } else if (type === 'fees') {
         endpoint = '/api/fees-ui';
-        body = { feeType: extraParams?.feeType, timePeriod, symbol: symbol || undefined };
+        // If dateFilter provided (e.g., from suggestion follow-up), use it instead of timePeriod
+        body = {
+          feeType: extraParams?.feeType,
+          timePeriod,
+          symbol: symbol || undefined,
+          dateFilter: extraParams?.dateFilter,
+        };
         const res = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -2969,6 +3089,21 @@ const UnifiedAssistant: React.FC = () => {
 
             if (tradeUI) {
               lastAssistantTradeUIRef.current = tradeUI;
+              // Store suggestion for follow-up handling
+              if (tradeUI.type === 'fees' && tradeUI.data) {
+                const feesData = tradeUI.data as { suggestion?: { period: string; amount: number; count: number; startDate: string; endDate: string } | null; feeType?: FeeType; symbol?: string; timePeriod?: string };
+                if (feesData.suggestion) {
+                  lastSuggestionRef.current = {
+                    feeType: tradeUI.feeType || feesData.feeType || 'commission',
+                    timePeriod: feesData.suggestion.period,
+                    startDate: feesData.suggestion.startDate,
+                    endDate: feesData.suggestion.endDate,
+                    amount: feesData.suggestion.amount,
+                    count: feesData.suggestion.count,
+                    symbol: feesData.symbol || tradeUI.symbol,
+                  };
+                }
+              }
               setTranscript(prev => prev.map((m) => m.id === newMessageId ? { ...m, tradeUI } : m));
             }
           })();
@@ -3290,6 +3425,7 @@ const UnifiedAssistant: React.FC = () => {
 	    setIsSending(true);
 
 	    const isCalcFollowup = isExplainCalculationQuery(message);
+	    const isSuggestionAccept = isSuggestionFollowup(message) && lastSuggestionRef.current !== null;
 	    let intent: QueryIntent | null = null;
 
 	    if (isCalcFollowup) {
@@ -3302,7 +3438,59 @@ const UnifiedAssistant: React.FC = () => {
 	      }
 	    }
 
-	    if (!isCalcFollowup) {
+	    // Handle user accepting a suggestion (e.g., "yes" to "Would you like to know more?")
+	    if (isSuggestionAccept && lastSuggestionRef.current) {
+	      console.log('📊 [Suggestion Follow-up] User accepted suggestion, fetching data for:', lastSuggestionRef.current.timePeriod);
+	      const suggestion = lastSuggestionRef.current;
+	      // Create a synthetic intent to fetch fees data with the suggested period
+	      // Use explicit dateFilter with startDate/endDate for reliable date handling
+	      intent = {
+	        cardType: 'fees',
+	        feeType: suggestion.feeType,
+	        timePeriod: suggestion.timePeriod,
+	        symbol: suggestion.symbol,
+	        // Pass dateFilter with explicit dates for the follow-up fetch
+	        dateFilter: {
+	          type: 'range',
+	          startDate: suggestion.startDate,
+	          endDate: suggestion.endDate,
+	          description: suggestion.timePeriod,
+	        },
+	      };
+	      // Clear the suggestion after using it
+	      lastSuggestionRef.current = null;
+	    }
+
+	    // Handle contextual follow-up with time period change (e.g., "And what about last three months?")
+	    // This preserves the previous query's context (feeType, cardType) but uses the new time period
+	    const contextualTimePeriod = detectContextualTimePeriodFollowup(message);
+	    const isContextualFollowup = contextualTimePeriod && lastAssistantTradeUIRef.current !== null;
+
+	    if (isContextualFollowup && lastAssistantTradeUIRef.current && !isSuggestionAccept) {
+	      const prevUI = lastAssistantTradeUIRef.current;
+	      console.log('📊 [Contextual Follow-up] Detected time period change:', contextualTimePeriod, '| Previous context:', prevUI.type);
+
+	      // Create intent based on previous query type with new time period
+	      if (prevUI.type === 'fees' && prevUI.feeType) {
+	        intent = {
+	          cardType: 'fees',
+	          feeType: prevUI.feeType,
+	          timePeriod: contextualTimePeriod,
+	          symbol: prevUI.symbol,
+	        };
+	        console.log('📊 [Contextual Follow-up] Created fees intent:', intent);
+	      } else if (prevUI.type === 'account-balance' && prevUI.accountQueryType) {
+	        intent = {
+	          cardType: 'account-balance',
+	          accountQueryType: prevUI.accountQueryType,
+	          timePeriod: contextualTimePeriod,
+	        };
+	        console.log('📊 [Contextual Follow-up] Created account intent:', intent);
+	      }
+	      // Could add more types here (trades, options, etc.) as needed
+	    }
+
+	    if (!isCalcFollowup && !isSuggestionAccept && !isContextualFollowup) {
 	      // Classify query intent using GPT-based LLM classifier with confidence-based selection
 	      console.log('🎯 [Intent Detection] User query:', message);
 	      const regexIntent = detectUserQueryIntent(message);
@@ -3371,6 +3559,7 @@ const UnifiedAssistant: React.FC = () => {
                 expiration: intent.expiration,
                 accountQueryType: intent.accountQueryType,
                 feeType: intent.feeType,
+                dateFilter: intent.dateFilter,
               }
             )
           : null;
@@ -3385,6 +3574,21 @@ const UnifiedAssistant: React.FC = () => {
         };
 
         lastAssistantTradeUIRef.current = tradeUI;
+        // Store suggestion for follow-up handling
+        if (tradeUI && tradeUI.type === 'fees' && tradeUI.data) {
+          const feesData = tradeUI.data as { suggestion?: { period: string; amount: number; count: number; startDate: string; endDate: string } | null; feeType?: FeeType; symbol?: string; timePeriod?: string };
+          if (feesData.suggestion) {
+            lastSuggestionRef.current = {
+              feeType: tradeUI.feeType || feesData.feeType || 'commission',
+              timePeriod: feesData.suggestion.period,
+              startDate: feesData.suggestion.startDate,
+              endDate: feesData.suggestion.endDate,
+              amount: feesData.suggestion.amount,
+              count: feesData.suggestion.count,
+              symbol: feesData.symbol || tradeUI.symbol,
+            };
+          }
+        }
         setTranscript(prev => [...prev, assistantMessage]);
         setIsSending(false);
         return;
@@ -3403,6 +3607,7 @@ const UnifiedAssistant: React.FC = () => {
 		              expiration: intent.expiration,
 		              accountQueryType: intent.accountQueryType,
 		              feeType: intent.feeType,
+		              dateFilter: intent.dateFilter,
 		            }
 		          )
 		        : null;

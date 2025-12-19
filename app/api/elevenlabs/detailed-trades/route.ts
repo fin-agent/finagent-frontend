@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
-import { normalizeSymbol } from '@/src/lib/symbol-utils';
+import { normalizeSymbol, parseOptionSymbol } from '@/src/lib/symbol-utils';
+import { formatCalendarDate } from '@/src/lib/date-utils';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -8,6 +9,32 @@ const supabase = createClient(
 );
 
 const ACCOUNT_CODE = 'C40421';
+
+// UI data structure for TradesTable component
+interface DetailedTradesUIData {
+  symbol: string;
+  tradeCount: number;
+  stockCount: number;
+  optionCount: number;
+  buyCount: number;
+  sellCount: number;
+  totalShares: number;
+  totalContracts: number;
+  totalQuantity: number;
+  totalValue: number;
+  avgValue: number;
+  trades: Array<{
+    Date: string;
+    Symbol: string;
+    TradeType: string;
+    SecurityType: string;
+    StockShareQty?: string;
+    OptionContracts?: string;
+    StockTradePrice?: string;
+    OptionTradePremium?: string;
+    NetAmount?: string;
+  }>;
+}
 
 // Format number for TTS (no commas)
 function formatNumber(num: number): string {
@@ -43,14 +70,44 @@ export async function POST(req: NextRequest) {
       .order('Date', { ascending: false });
 
     if (error) {
+      const uiData: DetailedTradesUIData = {
+        symbol: normalizedSymbol,
+        tradeCount: 0,
+        stockCount: 0,
+        optionCount: 0,
+        buyCount: 0,
+        sellCount: 0,
+        totalShares: 0,
+        totalContracts: 0,
+        totalQuantity: 0,
+        totalValue: 0,
+        avgValue: 0,
+        trades: [],
+      };
       return NextResponse.json({
         response: `Error getting trade details for ${normalizedSymbol}: ${error.message}`,
+        uiData,
       });
     }
 
     if (!data || data.length === 0) {
+      const uiData: DetailedTradesUIData = {
+        symbol: normalizedSymbol,
+        tradeCount: 0,
+        stockCount: 0,
+        optionCount: 0,
+        buyCount: 0,
+        sellCount: 0,
+        totalShares: 0,
+        totalContracts: 0,
+        totalQuantity: 0,
+        totalValue: 0,
+        avgValue: 0,
+        trades: [],
+      };
       return NextResponse.json({
         response: `No trades found for ${normalizedSymbol}.`,
+        uiData,
       });
     }
 
@@ -88,7 +145,33 @@ export async function POST(req: NextRequest) {
 
     response += `. Total value: ${formatCurrency(totalValue)} with an average of ${formatCurrency(avgValue)} per trade.`;
 
-    return NextResponse.json({ response });
+    // Build UI data with all trade details
+    const uiData: DetailedTradesUIData = {
+      symbol: normalizedSymbol,
+      tradeCount: data.length,
+      stockCount: stockTrades.length,
+      optionCount: optionTrades.length,
+      buyCount,
+      sellCount,
+      totalShares,
+      totalContracts,
+      totalQuantity,
+      totalValue: Math.round(totalValue * 100) / 100,
+      avgValue: Math.round(avgValue * 100) / 100,
+      trades: data.slice(0, 50).map(t => ({
+        Date: formatCalendarDate(t.Date),
+        Symbol: parseOptionSymbol(t.Symbol),
+        TradeType: t.TradeType,
+        SecurityType: t.SecurityType,
+        StockShareQty: t.StockShareQty,
+        OptionContracts: t.OptionContracts,
+        StockTradePrice: t.StockTradePrice,
+        OptionTradePremium: t.OptionTradePremium,
+        NetAmount: t.NetAmount,
+      })),
+    };
+
+    return NextResponse.json({ response, uiData });
   } catch (error) {
     console.error('Detailed trades error:', error);
     return NextResponse.json({

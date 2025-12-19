@@ -38,6 +38,33 @@ interface AccountBalanceRow {
 type QueryType = 'cash_balance' | 'buying_power' | 'account_summary' | 'nlv' |
                  'cash_and_equity' | 'overnight_margin' | 'market_value' | 'debit_balances' | 'credit_balances';
 
+// UI data structure for AccountSummary component
+interface AccountBalanceUIData {
+  queryType: QueryType;
+  timePeriod?: string;
+  asOfDate: string;
+  cashBalance?: number;
+  accountEquity?: number;
+  dayTradingBP?: number;
+  stockLMV?: number;
+  stockSMV?: number;
+  optionsLMV?: number;
+  optionsSMV?: number;
+  houseRequirement?: number;
+  houseExcessDeficit?: number;
+  debitBalance?: number;
+  creditBalance?: number;
+  // For balance trends
+  avgBalance?: number;
+  maxBalance?: number;
+  minBalance?: number;
+  maxBalanceDate?: string;
+  minBalanceDate?: string;
+  suggestion?: {
+    period: string;
+  } | null;
+}
+
 function formatCurrency(value: number): string {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
@@ -83,8 +110,14 @@ export async function POST(req: NextRequest) {
       const { data, error } = await query;
 
       if (error) {
+        const uiData: AccountBalanceUIData = {
+          queryType,
+          timePeriod: resolved?.description || timePeriod,
+          asOfDate: '',
+        };
         return NextResponse.json({
           response: `Error retrieving balance data: ${error.message}`,
+          uiData,
         });
       }
 
@@ -94,13 +127,28 @@ export async function POST(req: NextRequest) {
         const suggestion = await suggestDataPeriod('AccountBalance', periodDescription);
 
         if (suggestion) {
+          const uiData: AccountBalanceUIData = {
+            queryType,
+            timePeriod: periodDescription,
+            asOfDate: '',
+            suggestion: {
+              period: suggestion.suggestedPeriod,
+            },
+          };
           return NextResponse.json({
             response: `No balance data found for ${periodDescription}. However, I found balance data for ${suggestion.suggestedPeriod}. Would you like to know more about that?`,
+            uiData,
           });
         }
 
+        const uiData: AccountBalanceUIData = {
+          queryType,
+          timePeriod: periodDescription,
+          asOfDate: '',
+        };
         return NextResponse.json({
           response: `No balance data found for ${periodDescription}.`,
+          uiData,
         });
       }
 
@@ -117,8 +165,20 @@ export async function POST(req: NextRequest) {
       const highestDate = formatDate(maxDate || '');
       const lowestDate = formatDate(minDate || '');
 
+      const uiData: AccountBalanceUIData = {
+        queryType,
+        timePeriod: periodLabel,
+        asOfDate: data[0]?.Date || '',
+        avgBalance: avg,
+        maxBalance: max,
+        minBalance: min,
+        maxBalanceDate: highestDate,
+        minBalanceDate: lowestDate,
+      };
+
       return NextResponse.json({
         response: `Your Average ${balanceType} balance for ${periodLabel} is ${formatCurrency(avg)}. The Highest ${balanceType} balance was on ${highestDate} in the amount of ${formatCurrency(max)}. The Lowest ${balanceType} balance was on ${lowestDate} in the amount of ${formatCurrency(min)}`,
+        uiData,
       });
     }
 
@@ -132,39 +192,70 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (error) {
+      const uiData: AccountBalanceUIData = {
+        queryType,
+        asOfDate: '',
+      };
       return NextResponse.json({
         response: `Error retrieving account balance: ${error.message}`,
+        uiData,
       });
     }
 
     if (!data) {
+      const uiData: AccountBalanceUIData = {
+        queryType,
+        asOfDate: '',
+      };
       return NextResponse.json({
         response: 'No account balance data found.',
+        uiData,
       });
     }
 
     const balance = data as AccountBalanceRow;
     const balanceDate = formatDate(balance.Date);
 
+    // Build base uiData with all available account fields
+    const baseUIData: AccountBalanceUIData = {
+      queryType,
+      asOfDate: balanceDate,
+      cashBalance: balance.CashBalance,
+      accountEquity: balance['Account Equity'],
+      dayTradingBP: balance.DayTradingBP,
+      stockLMV: balance['Stock LMV'] || 0,
+      stockSMV: balance['Stock SMV'] || 0,
+      optionsLMV: balance['Options LMV'] || 0,
+      optionsSMV: balance['Optons SMV'] || 0, // DB typo
+      houseRequirement: balance.HouseRequirment,
+      houseExcessDeficit: balance.HouseExcessDeficit,
+      debitBalance: balance.DebitBalance,
+      creditBalance: balance.CreditBalance,
+    };
+
     switch (queryType) {
       case 'cash_balance':
         return NextResponse.json({
           response: `Your account cash balance as of ${balanceDate} is ${formatCurrency(balance.CashBalance)}`,
+          uiData: baseUIData,
         });
 
       case 'cash_and_equity':
         return NextResponse.json({
           response: `Your account cash balance as of ${balanceDate} is ${formatCurrency(balance.CashBalance)} and account equity is ${formatCurrency(balance['Account Equity'])}`,
+          uiData: baseUIData,
         });
 
       case 'buying_power':
         return NextResponse.json({
           response: `Your Day Trade Buying power as of ${balanceDate} is ${formatCurrency(balance.DayTradingBP)}`,
+          uiData: baseUIData,
         });
 
       case 'nlv':
         return NextResponse.json({
           response: `Your account Net Liquidation value as of ${balanceDate} is ${formatCurrency(balance['Account Equity'])}`,
+          uiData: baseUIData,
         });
 
       case 'overnight_margin':
@@ -174,6 +265,7 @@ export async function POST(req: NextRequest) {
           const amount = formatCurrency(Math.abs(excessDeficit));
           return NextResponse.json({
             response: `Your account House requirement as of ${balanceDate} is ${formatCurrency(balance.HouseRequirment)} and ${label} is ${amount}`,
+            uiData: baseUIData,
           });
         }
 
@@ -184,6 +276,7 @@ export async function POST(req: NextRequest) {
         const optionsShort = balance['Optons SMV'] || 0; // DB typo
         return NextResponse.json({
           response: `The market value of your long stock positions is ${formatCurrency(stockLong)}, your long options positions is ${formatCurrency(optionsLong)}, your short stock positions is ${formatCurrency(stockShort)}, your short options positions is ${formatCurrency(optionsShort)}`,
+          uiData: baseUIData,
         });
       }
 
@@ -191,6 +284,7 @@ export async function POST(req: NextRequest) {
       default:
         return NextResponse.json({
           response: `Your account summary as of ${balanceDate}: Cash Balance is ${formatCurrency(balance.CashBalance)}, Account Equity is ${formatCurrency(balance['Account Equity'])}, Day Trading BP is ${formatCurrency(balance.DayTradingBP)}, Stock Long Market value is ${formatCurrency(balance['Stock LMV'] || 0)}, Stock Short Market value is ${formatCurrency(balance['Stock SMV'] || 0)}, Options Long Market value is ${formatCurrency(balance['Options LMV'] || 0)}, Options Short Market value is ${formatCurrency(balance['Optons SMV'] || 0)}`,
+          uiData: baseUIData,
         });
     }
   } catch (error) {

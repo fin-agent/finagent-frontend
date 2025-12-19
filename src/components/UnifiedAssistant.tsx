@@ -1968,14 +1968,28 @@ const UnifiedAssistant: React.FC = () => {
     };
 
     const get_detailed_trades = async (parameters: Record<string, unknown>) => {
-      const symbol = getToolSymbol(parameters);
-      // Fetch from UI endpoint for richer data
-      const uiPayload = await postJson('/api/trades-ui', { symbol });
-      // Store UI data for rendering
-      toolUIDataRef.current = { type: 'detailed', symbol: symbol || '', data: uiPayload };
-      console.log('📊 [Detailed Trades Tool] Set toolUIDataRef:', toolUIDataRef.current);
-      // Get voice response from voice endpoint
+      console.log('📊 [Detailed Trades Tool] ================================');
+      console.log('📊 [Detailed Trades Tool] Parameters:', JSON.stringify(parameters, null, 2));
+
+      // CRITICAL: Use LLM-corrected symbol from intent classifier if available
+      const rawSymbol = getToolSymbol(parameters);
+      const llmSymbol = pendingQueryIntentRef.current?.symbol;
+      const symbol = llmSymbol || rawSymbol;
+
+      console.log('📊 [Detailed Trades] Raw symbol:', rawSymbol);
+      console.log('📊 [Detailed Trades] LLM-corrected symbol:', llmSymbol);
+      console.log('📊 [Detailed Trades] Using symbol:', symbol);
+
+      // SINGLE FETCH: Voice endpoint returns BOTH response AND uiData
       const voicePayload = await postJson('/api/elevenlabs/detailed-trades', { symbol });
+
+      // Store UI data from voice response (guaranteed sync)
+      if (voicePayload && typeof voicePayload === 'object' && 'uiData' in voicePayload) {
+        toolUIDataRef.current = { type: 'detailed', symbol: symbol || '', data: voicePayload.uiData };
+        console.log('📊 [Detailed Trades Tool] Set toolUIDataRef from voice response:', toolUIDataRef.current);
+      }
+
+      console.log('📊 [Detailed Trades Tool] ================================');
       return unwrapResponse(voicePayload);
     };
 
@@ -2010,17 +2024,32 @@ const UnifiedAssistant: React.FC = () => {
     };
 
     const get_time_based_trades = async (parameters: Record<string, unknown>) => {
-      const symbol = getToolSymbol(parameters);
+      console.log('📊 [Time Based Trades Tool] ================================');
+      console.log('📊 [Time Based Trades Tool] Parameters:', JSON.stringify(parameters, null, 2));
+
+      // CRITICAL: Use LLM-corrected symbol from intent classifier if available
+      const rawSymbol = getToolSymbol(parameters);
+      const llmSymbol = pendingQueryIntentRef.current?.symbol;
+      const symbol = llmSymbol || rawSymbol;
+
+      console.log('📊 [Time Based Trades] Raw symbol:', rawSymbol);
+      console.log('📊 [Time Based Trades] LLM-corrected symbol:', llmSymbol);
+      console.log('📊 [Time Based Trades] Using symbol:', symbol);
+
       const timePeriod = getString(parameters, 'time_period');
       const calculation = getString(parameters, 'calculation');
       const tradeType = getString(parameters, 'trade_type');
-      // Fetch UI data
-      const uiPayload = await postJson('/api/time-trades-ui', { symbol: symbol || null, timePeriod });
-      // Store UI data for rendering
-      toolUIDataRef.current = { type: 'time-based', symbol: symbol || '', timePeriod, data: uiPayload };
-      console.log('📊 [Time Based Trades Tool] Set toolUIDataRef:', toolUIDataRef.current);
-      // Get voice response
+
+      // SINGLE FETCH: Voice endpoint returns BOTH response AND uiData
       const voicePayload = await postJson('/api/elevenlabs/time-trades', { symbol, time_period: timePeriod, calculation, trade_type: tradeType });
+
+      // Store UI data from voice response (guaranteed sync)
+      if (voicePayload && typeof voicePayload === 'object' && 'uiData' in voicePayload) {
+        toolUIDataRef.current = { type: 'time-based', symbol: symbol || '', timePeriod, data: voicePayload.uiData };
+        console.log('📊 [Time Based Trades Tool] Set toolUIDataRef from voice response:', toolUIDataRef.current);
+      }
+
+      console.log('📊 [Time Based Trades Tool] ================================');
       return unwrapResponse(voicePayload);
     };
 
@@ -2067,18 +2096,21 @@ const UnifiedAssistant: React.FC = () => {
       console.log('💰 [Account Balance Tool] Parameters:', JSON.stringify(parameters, null, 2));
       const queryType = getString(parameters, 'query_type');
       const timePeriod = getString(parameters, 'time_period');
-      // Fetch UI data
-      const uiPayload = await postJson('/api/account-balance-ui', { queryType, timePeriod });
-      // Store UI data for rendering
-      toolUIDataRef.current = {
-        type: 'account-balance',
-        symbol: '',
-        accountQueryType: queryType as AccountQueryType,
-        data: uiPayload
-      };
-      console.log('💰 [Account Balance Tool] Set toolUIDataRef:', toolUIDataRef.current);
-      // Get voice response
+
+      // SINGLE FETCH: Voice endpoint returns BOTH response AND uiData
       const voicePayload = await postJson('/api/elevenlabs/account-balance', { query_type: queryType, time_period: timePeriod });
+
+      // Store UI data from voice response (guaranteed sync)
+      if (voicePayload && typeof voicePayload === 'object' && 'uiData' in voicePayload) {
+        toolUIDataRef.current = {
+          type: 'account-balance',
+          symbol: '',
+          accountQueryType: queryType as AccountQueryType,
+          data: voicePayload.uiData
+        };
+        console.log('💰 [Account Balance Tool] Set toolUIDataRef from voice response:', toolUIDataRef.current);
+      }
+
       const result = unwrapResponse(voicePayload);
       console.log('💰 [Account Balance Tool] Webhook Response:', result);
       console.log('💰 [Account Balance Tool] ================================');
@@ -2090,20 +2122,32 @@ const UnifiedAssistant: React.FC = () => {
       console.log('💸 [Fees Tool] Parameters:', JSON.stringify(parameters, null, 2));
       const feeType = getString(parameters, 'fee_type');
       const timePeriod = getString(parameters, 'time_period');
-      const symbol = getToolSymbol(parameters);
-      // Fetch UI data
-      const uiPayload = await postJson('/api/fees-ui', { feeType, timePeriod, symbol: symbol || undefined });
-      // Store UI data for rendering
-      toolUIDataRef.current = {
-        type: 'fees',
-        symbol: symbol || '',
-        feeType: feeType as FeeType,
-        timePeriod,
-        data: uiPayload
-      };
-      console.log('💸 [Fees Tool] Set toolUIDataRef:', toolUIDataRef.current);
-      // Get voice response
+
+      // CRITICAL: Use LLM-corrected symbol from intent classifier if available
+      // This fixes speech-to-text errors like "M10" → "MTEN"
+      const rawSymbol = getToolSymbol(parameters);
+      const llmSymbol = pendingQueryIntentRef.current?.symbol;
+      const symbol = llmSymbol || rawSymbol;
+
+      console.log('💸 [Fees Tool] Raw symbol from ElevenLabs:', rawSymbol);
+      console.log('💸 [Fees Tool] LLM-corrected symbol:', llmSymbol);
+      console.log('💸 [Fees Tool] Using symbol:', symbol);
+
+      // SINGLE FETCH: Voice endpoint returns BOTH response AND uiData
       const voicePayload = await postJson('/api/elevenlabs/fees', { fee_type: feeType, time_period: timePeriod, symbol });
+
+      // Store UI data from voice response (guaranteed sync)
+      if (voicePayload && typeof voicePayload === 'object' && 'uiData' in voicePayload) {
+        toolUIDataRef.current = {
+          type: 'fees',
+          symbol: symbol || '',
+          feeType: feeType as FeeType,
+          timePeriod,
+          data: voicePayload.uiData
+        };
+        console.log('💸 [Fees Tool] Set toolUIDataRef from voice response:', toolUIDataRef.current);
+      }
+
       const result = unwrapResponse(voicePayload);
       console.log('💸 [Fees Tool] Webhook Response:', result);
       console.log('💸 [Fees Tool] ================================');

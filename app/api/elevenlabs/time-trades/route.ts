@@ -114,7 +114,7 @@ export async function POST(req: NextRequest) {
       if (suggestion) {
         return NextResponse.json({
           response: `No trades found${symbolText} for ${description}. However, I found ${suggestion.count} trades for ${suggestion.suggestedPeriod}. Would you like to see those instead?`,
-          data: {
+          uiData: {
             tradeCount: 0,
             timePeriod: description,
             symbol: normalizedSymbol,
@@ -131,7 +131,7 @@ export async function POST(req: NextRequest) {
 
       return NextResponse.json({
         response: `No trades found${symbolText} for ${description}.`,
-        data: {
+        uiData: {
           tradeCount: 0,
           timePeriod: description,
           symbol: normalizedSymbol,
@@ -228,7 +228,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       response,
-      data: {
+      uiData: {
         tradeCount,
         stockCount,
         optionCount,

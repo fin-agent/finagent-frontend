@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import { parseTimePeriodToResolvedDates } from '@/src/lib/date-parser';
-import { normalizeSymbol } from '@/src/lib/symbol-utils';
+import { normalizeSymbol, parseOptionSymbol } from '@/src/lib/symbol-utils';
 import { suggestDataPeriod } from '@/src/lib/data-availability';
 
 const supabase = createClient(
@@ -12,6 +12,27 @@ const supabase = createClient(
 const ACCOUNT_CODE = 'C40421';
 
 type FeeType = 'commission' | 'credit_interest' | 'debit_interest' | 'locate_fee';
+
+// UI data structure for FeesSummary component
+interface FeesUIData {
+  feeType: FeeType;
+  totalAmount: number;
+  transactionCount: number;
+  timePeriod: string;
+  symbol?: string;
+  breakdown?: Array<{
+    date: string;
+    amount: number;
+    symbol?: string;
+  }>;
+  suggestion?: {
+    period: string;
+    amount: number;
+    count: number;
+    startDate: string;
+    endDate: string;
+  } | null;
+}
 
 function formatCurrency(value: number): string {
   return new Intl.NumberFormat('en-US', {
@@ -54,7 +75,7 @@ export async function POST(req: NextRequest) {
     if (feeType === 'commission') {
       let query = supabase
         .from('TradeData')
-        .select('Commission, Date')
+        .select('Commission, Date, Symbol')
         .eq('AccountCode', ACCOUNT_CODE);
 
       if (resolved.type === 'discrete' && dates && dates.length > 0) {
@@ -63,34 +84,74 @@ export async function POST(req: NextRequest) {
         query = query.gte('Date', startDate).lte('Date', endDate);
       }
 
-      const { data, error } = await query;
+      const { data, error } = await query.order('Date', { ascending: false });
 
       if (error) {
+        const uiData: FeesUIData = {
+          feeType: 'commission',
+          totalAmount: 0,
+          transactionCount: 0,
+          timePeriod: description,
+        };
         return NextResponse.json({
           response: `Error retrieving commission data: ${error.message}`,
+          uiData,
         });
       }
 
-      const totalCommission = data ? data.reduce((sum, trade) => sum + (trade.Commission || 0), 0) : 0;
+      const totalCommission = data ? data.reduce((sum, trade) => sum + Math.abs(trade.Commission || 0), 0) : 0;
 
       // Suggest alternatives if no data OR if total commission is effectively zero
       if (!data || data.length === 0 || Math.abs(totalCommission) < 0.01) {
         // Use LLM-based suggestion for a natural time period with actual amount
         const suggestion = await suggestDataPeriod('TradeData', description);
         if (suggestion && suggestion.amount > 0) {
+          const uiData: FeesUIData = {
+            feeType: 'commission',
+            totalAmount: 0,
+            transactionCount: 0,
+            timePeriod: description,
+            suggestion: {
+              period: suggestion.suggestedPeriod,
+              amount: suggestion.amount,
+              count: suggestion.count,
+              startDate: suggestion.startDate,
+              endDate: suggestion.endDate,
+            },
+          };
           return NextResponse.json({
             response: `No commission data found for ${description}. However, I found ${formatCurrency(suggestion.amount)} in commissions for ${suggestion.suggestedPeriod}. Would you like to know more about that?`,
+            uiData,
           });
         }
 
+        const uiData: FeesUIData = {
+          feeType: 'commission',
+          totalAmount: 0,
+          transactionCount: 0,
+          timePeriod: description,
+        };
         return NextResponse.json({
           response: `No commission data found for ${description}.`,
+          uiData,
         });
       }
 
       const amount = formatCurrency(Math.abs(totalCommission));
+      const uiData: FeesUIData = {
+        feeType: 'commission',
+        totalAmount: Math.abs(totalCommission),
+        transactionCount: data.length,
+        timePeriod: description,
+        breakdown: data.slice(0, 10).map(t => ({
+          date: t.Date,
+          amount: Math.abs(t.Commission || 0),
+          symbol: parseOptionSymbol(t.Symbol),
+        })),
+      };
       return NextResponse.json({
         response: `The total commission you paid in ${description} is ${amount}`,
+        uiData,
       });
     }
 
@@ -120,56 +181,114 @@ export async function POST(req: NextRequest) {
       feesQuery = feesQuery.eq('Symbol', normalizedSymbol);
     }
 
-    const { data, error } = await feesQuery;
+    const { data, error } = await feesQuery.order('Date', { ascending: false });
+
+    const normalizedSymbol = symbol ? normalizeSymbol(symbol) : undefined;
 
     if (error) {
+      const uiData: FeesUIData = {
+        feeType,
+        totalAmount: 0,
+        transactionCount: 0,
+        timePeriod: description,
+        symbol: normalizedSymbol,
+      };
       return NextResponse.json({
         response: `Error retrieving fee data: ${error.message}`,
+        uiData,
       });
     }
 
-    const totalAmount = data ? data.reduce((sum, fee) => sum + (fee.Amount || 0), 0) : 0;
+    const totalAmount = data ? data.reduce((sum, fee) => sum + Math.abs(fee.Amount || 0), 0) : 0;
 
     // Suggest alternatives if no data OR if total amount is effectively zero
     if (!data || data.length === 0 || Math.abs(totalAmount) < 0.01) {
       // Use LLM-based suggestion for a natural time period with actual amount
-      const normalizedSymbol = symbol ? normalizeSymbol(symbol) : undefined;
       const suggestion = await suggestDataPeriod('FeesAndInterest', description, {
         feeType: dbFeeType,
         symbol: normalizedSymbol,
       });
 
       const feeTypeName = feeType.replace('_', ' ');
-      const symbolText = symbol ? ` for ${normalizeSymbol(symbol)}` : '';
+      const symbolText = symbol ? ` for ${normalizedSymbol}` : '';
 
       if (suggestion && suggestion.amount > 0) {
+        const uiData: FeesUIData = {
+          feeType,
+          totalAmount: 0,
+          transactionCount: 0,
+          timePeriod: description,
+          symbol: normalizedSymbol,
+          suggestion: {
+            period: suggestion.suggestedPeriod,
+            amount: suggestion.amount,
+            count: suggestion.count,
+            startDate: suggestion.startDate,
+            endDate: suggestion.endDate,
+          },
+        };
         return NextResponse.json({
           response: `No ${feeTypeName} found${symbolText} for ${description}. However, I found ${formatCurrency(suggestion.amount)} in ${feeTypeName} for ${suggestion.suggestedPeriod}. Would you like to know more about that?`,
+          uiData,
         });
       }
 
+      const uiData: FeesUIData = {
+        feeType,
+        totalAmount: 0,
+        transactionCount: 0,
+        timePeriod: description,
+        symbol: normalizedSymbol,
+      };
       return NextResponse.json({
         response: `No ${feeTypeName} data found${symbolText} for ${description}.`,
+        uiData,
       });
     }
 
-    // Build response based on fee type
+    // Build response based on fee type - include transaction count
+    const txCount = data.length;
+    const txCountText = txCount > 1 ? ` across ${txCount} transactions` : '';
+
     let response = '';
     switch (feeType) {
       case 'credit_interest':
-        response = `The total credit interest you received for ${description} is ${formatCurrency(Math.abs(totalAmount))}`;
+        response = `The total credit interest you received for ${description} is ${formatCurrency(Math.abs(totalAmount))}${txCountText}`;
         break;
       case 'debit_interest':
-        response = `The total Debit interest you paid ${description} is ${formatCurrency(Math.abs(totalAmount))}`;
+        response = `The total Debit interest you paid for ${description} is ${formatCurrency(Math.abs(totalAmount))}${txCountText}`;
         break;
       case 'locate_fee': {
-        const symbolText = symbol ? ` for stock ${normalizeSymbol(symbol)}` : '';
-        response = `The total Locate fees you paid${symbolText} since ${description} is ${formatCurrency(Math.abs(totalAmount))}`;
+        const symbolText = symbol ? ` for stock ${normalizedSymbol}` : '';
+        response = `The total Locate fees you paid${symbolText} for ${description} is ${formatCurrency(Math.abs(totalAmount))}${txCountText}`;
         break;
       }
     }
 
-    return NextResponse.json({ response });
+    // Add breakdown summary for large transaction counts
+    if (txCount > 3) {
+      const topTransactions = data.slice(0, 3).map(f => {
+        const date = new Date(f.Date).toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
+        return `${formatCurrency(Math.abs(f.Amount || 0))} on ${date}`;
+      });
+      response += `. The most recent charges were ${topTransactions.join(', ')}`;
+    }
+
+    // Build UI data with breakdown
+    const uiData: FeesUIData = {
+      feeType,
+      totalAmount: Math.abs(totalAmount),
+      transactionCount: data.length,
+      timePeriod: description,
+      symbol: normalizedSymbol,
+      breakdown: data.slice(0, 10).map(f => ({
+        date: f.Date,
+        amount: Math.abs(f.Amount || 0),
+        symbol: f.Symbol ? parseOptionSymbol(f.Symbol) : undefined,
+      })),
+    };
+
+    return NextResponse.json({ response, uiData });
 
   } catch (error) {
     console.error('Fees error:', error);

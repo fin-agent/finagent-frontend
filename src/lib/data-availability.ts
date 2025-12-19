@@ -174,13 +174,91 @@ function getEnvVar(key: string, defaultValue: string = ''): string {
 }
 
 /**
+ * PARSEABLE_PERIODS - These are the ONLY periods that are guaranteed to parse correctly
+ * The LLM suggestion must be one of these, or we use a deterministic fallback
+ */
+const PARSEABLE_PERIODS = [
+  'this week',
+  'last week',
+  'this month',
+  'last month',
+  'this year',
+  'last year',
+  'the last 7 days',
+  'the last 30 days',
+  'the last two weeks',
+  'the last three months',
+  'the last six months',
+  'the past week',
+  'the past month',
+  'the past two weeks',
+  'the past three months',
+  'the past six months',
+];
+
+/**
+ * Calculate a deterministic suggested period based on data date range
+ * This ensures we ALWAYS return a parseable period
+ */
+function calculateDeterministicPeriod(earliestDate: string, latestDate: string): string {
+  const earliest = new Date(earliestDate);
+  const latest = new Date(latestDate);
+
+  // Calculate how many days of data we have
+  const dataSpanDays = Math.ceil((latest.getTime() - earliest.getTime()) / (1000 * 60 * 60 * 24));
+
+  // Choose the most appropriate period based on data span
+  if (dataSpanDays <= 7) {
+    return 'this week';
+  } else if (dataSpanDays <= 14) {
+    return 'the last two weeks';
+  } else if (dataSpanDays <= 31) {
+    return 'this month';
+  } else if (dataSpanDays <= 90) {
+    return 'the last three months';
+  } else if (dataSpanDays <= 180) {
+    return 'the last six months';
+  } else {
+    return 'this year';
+  }
+}
+
+/**
+ * Validate that a suggested period is parseable
+ */
+function isParseablePeriod(period: string): boolean {
+  const normalized = period.toLowerCase().trim();
+
+  // Check against known parseable periods
+  if (PARSEABLE_PERIODS.some(p => normalized === p || normalized.includes(p))) {
+    return true;
+  }
+
+  // Also accept variations like "last 6 months", "past 3 months"
+  if (/^(the )?(last|past) \d+ (days?|weeks?|months?|years?)$/i.test(normalized)) {
+    return true;
+  }
+
+  // Try to actually parse it
+  const resolved = parseTimePeriodToResolvedDates(period);
+  if (!resolved) return false;
+  const hasStartDate = resolved.startDate !== null && resolved.startDate !== undefined;
+  const hasDates = Array.isArray(resolved.dates) && resolved.dates.length > 0;
+  return hasStartDate || hasDates;
+}
+
+/**
  * Use LLM to suggest a natural time period based on available data range
+ * ALWAYS returns a parseable period - uses deterministic fallback if LLM fails
  */
 async function suggestTimePeriodWithLLM(
   requestedPeriod: string,
   earliestDate: string,
   latestDate: string
 ): Promise<string> {
+  // Calculate deterministic fallback first - this is ALWAYS parseable
+  const deterministicPeriod = calculateDeterministicPeriod(earliestDate, latestDate);
+
   try {
     const deploymentName = getEnvVar('AZURE_OPENAI_MODEL', 'gpt-5.2');
     const apiVersion = getEnvVar('AZURE_OPENAI_API_VERSION', '2024-10-21');
@@ -188,28 +266,29 @@ async function suggestTimePeriodWithLLM(
     const rawEndpoint = getEnvVar('AZURE_EXISTING_AIPROJECT_ENDPOINT') || getEnvVar('AZURE_OPENAI_ENDPOINT');
 
     if (!rawEndpoint || !apiKey) {
-      console.warn('[Data Availability] Missing Azure OpenAI config, using fallback');
-      return 'this year'; // Fallback
+      console.warn('[Data Availability] Missing Azure OpenAI config, using deterministic fallback');
+      return deterministicPeriod;
     }
 
     const url = new URL(rawEndpoint);
     const baseURL = `${url.origin}/openai/deployments/${deploymentName}`;
     const requestUrl = `${baseURL}/chat/completions?api-version=${apiVersion}`;
 
-    const formattedEarliest = formatDateForDisplay(earliestDate);
-    const formattedLatest = formatDateForDisplay(latestDate);
-
     const prompt = `The user asked for data from "${requestedPeriod}" but no data was found for that period.
-Data IS available from ${formattedEarliest} to ${formattedLatest}.
+Data IS available from ${formatDateForDisplay(earliestDate)} to ${formatDateForDisplay(latestDate)}.
 
-Suggest a natural, conversational time period to offer the user based on the available date range.
-Respond with ONLY the period name - no extra text. Examples:
+Suggest a natural time period to offer the user. You MUST respond with ONLY ONE of these EXACT phrases:
+- "this week"
+- "last week"
 - "this month"
-- "the past two weeks"
+- "last month"
 - "this year"
-- "the last 30 days"
+- "the last two weeks"
+- "the last three months"
+- "the last six months"
 
-Keep it concise and natural.`;
+Choose the one that best matches the available data range.
+Respond with ONLY the period name - no other text.`;
 
     const response = await fetch(requestUrl, {
       method: 'POST',
@@ -221,27 +300,34 @@ Keep it concise and natural.`;
         messages: [
           { role: 'user', content: prompt },
         ],
-        temperature: 0.3,
-        max_completion_tokens: 50,
+        temperature: 0.1, // Low temperature for consistency
+        max_completion_tokens: 30,
       }),
     });
 
     if (!response.ok) {
       console.warn('[Data Availability] LLM request failed:', response.status);
-      return 'this year'; // Fallback
+      return deterministicPeriod;
     }
 
     const result = await response.json() as {
       choices: Array<{ message: { content: string } }>;
     };
 
-    const suggestion = result.choices[0]?.message?.content?.trim() || 'this year';
-    console.log(`[Data Availability] LLM suggested period: "${suggestion}" for requested "${requestedPeriod}"`);
-    return suggestion;
+    const suggestion = result.choices[0]?.message?.content?.trim() || '';
+
+    // CRITICAL: Validate the suggestion is parseable
+    if (suggestion && isParseablePeriod(suggestion)) {
+      console.log(`[Data Availability] LLM suggested period: "${suggestion}" (validated parseable)`);
+      return suggestion;
+    } else {
+      console.warn(`[Data Availability] LLM returned non-parseable period: "${suggestion}", using deterministic: "${deterministicPeriod}"`);
+      return deterministicPeriod;
+    }
 
   } catch (error) {
     console.error('[Data Availability] LLM suggestion error:', error);
-    return 'this year'; // Fallback
+    return deterministicPeriod;
   }
 }
 

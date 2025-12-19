@@ -451,15 +451,15 @@ When the user mentions a company name verbally, normalize it to the written tick
 **Example tool responses:**
 
 1. **Fees with no data:**
-   Tool returns: "No debit interest found for last week. However, I found $125.75 in debit interest for this month. Would you like to know more about that?"
+   Tool returns: "No debit interest was found for last week. However, I found $125.75 in debit interest for this month. Would you like to know more about that?"
    → Say exactly this response verbatim
 
 2. **Trades with no data:**
-   Tool returns: "No trades found for yesterday. However, I found 47 trades for this month. Would you like to see those instead?"
+   Tool returns: "No trades were found for yesterday. However, I found 47 trades for this month. Would you like to see those instead?"
    → Say exactly this response verbatim
 
 3. **Account balance with no data:**
-   Tool returns: "No balance data found for last week. However, I found balance data for this month. Would you like to know more about that?"
+   Tool returns: "No balance data was found for last week. However, I found balance data for this month. Would you like to know more about that?"
    → Say exactly this response verbatim
 
 **Say exactly what the tool returns.** The suggestions include real amounts/counts to help users understand what data is available.

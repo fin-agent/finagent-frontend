@@ -237,6 +237,24 @@ export function parseTimeExpression(expression: string): ParsedDateQuery | null 
     };
   }
 
+  // Pattern: "last N months" / "past N months" (supports spelled-out numbers)
+  const monthsMatch = lowerExpr.match(new RegExp(`^(?:last|past|the\\s+(?:last|past))\\s*(${numberWordsPattern})\\s*months?$`, 'i'));
+  if (monthsMatch) {
+    const numMonths = parseNumber(monthsMatch[1]);
+    if (numMonths !== null && numMonths > 0) {
+      const startDate = new Date(today.getFullYear(), today.getMonth() - numMonths, today.getDate());
+      return {
+        type: 'range',
+        dateRange: {
+          startDate: toDBDate(startDate),
+          endDate: toDBDate(today),
+          description: `last ${numMonths} months`,
+          tradingDays: numMonths * 30 // Approximate
+        }
+      };
+    }
+  }
+
   // Pattern: "this month"
   if (/^this\s*month$/.test(lowerExpr)) {
     const startDate = new Date(today.getFullYear(), today.getMonth(), 1);

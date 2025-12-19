@@ -5,6 +5,14 @@ import { formatCalendarDate } from '@/src/lib/date-utils';
 
 export type FeeType = 'commission' | 'credit_interest' | 'debit_interest' | 'locate_fee';
 
+export interface DataSuggestion {
+  period: string;
+  amount: number;
+  count: number;
+  startDate: string;
+  endDate: string;
+}
+
 export interface FeesSummaryProps {
   feeType: FeeType;
   totalAmount: number;
@@ -16,6 +24,7 @@ export interface FeesSummaryProps {
     amount: number;
     symbol?: string;
   }>;
+  suggestion?: DataSuggestion | null;
 }
 
 // Colors for the premium theme
@@ -208,10 +217,11 @@ const IconBadge = ({ icon, color }: { icon: string; color: string }) => (
   </div>
 );
 
-export function FeesSummary({ feeType, totalAmount, transactionCount, timePeriod, symbol, breakdown }: FeesSummaryProps) {
+export function FeesSummary({ feeType, totalAmount, transactionCount, timePeriod, symbol, breakdown, suggestion }: FeesSummaryProps) {
   const config = feeConfig[feeType];
   const averageAmount = transactionCount > 0 ? totalAmount / transactionCount : 0;
   const displayTitle = feeType === 'locate_fee' && symbol ? `Locate Fees — ${symbol}` : config.title;
+  const hasNoData = totalAmount < 0.01 && transactionCount === 0;
 
   return (
     <div style={cardStyle} data-testid="fees-summary-card" data-fee-type={feeType}>
@@ -231,40 +241,68 @@ export function FeesSummary({ feeType, totalAmount, transactionCount, timePeriod
 
       {/* Main content */}
       <div style={{ position: 'relative', padding: '12px 14px' }}>
-        {/* Hero amount */}
-        <div
-          style={{
-            ...metricBoxStyle,
-            marginBottom: '10px',
-            textAlign: 'center',
-            padding: '12px',
-            background: `linear-gradient(135deg, ${config.gradientFrom} 0%, ${colors.bgMetric} 100%)`,
-            borderTop: `2px solid ${config.accentColor}`,
-          }}
-        >
-          <span style={labelStyle}>
-            {config.isCredit ? 'Total Earned' : 'Total Paid'}
-          </span>
-          <p style={{ ...heroValueStyle(config.accentColor), marginTop: '6px' }}>
-            {formatCurrency(Math.abs(totalAmount))}
-          </p>
-        </div>
+        {/* Hero amount or Suggestion */}
+        {hasNoData && suggestion ? (
+          <div
+            style={{
+              ...metricBoxStyle,
+              marginBottom: '10px',
+              textAlign: 'center',
+              padding: '14px',
+              background: `linear-gradient(135deg, ${config.gradientFrom} 0%, ${colors.bgMetric} 100%)`,
+              borderTop: `2px solid ${colors.gold}`,
+            }}
+          >
+            <span style={{ ...labelStyle, color: colors.textMuted }}>
+              No data for {timePeriod}
+            </span>
+            <p style={{ fontSize: '12px', color: colors.textLabel, margin: '8px 0' }}>
+              However, I found data for <span style={{ color: colors.gold, fontWeight: 600 }}>{suggestion.period}</span>
+            </p>
+            <p style={{ ...heroValueStyle(colors.green), marginTop: '6px' }}>
+              {formatCurrency(Math.abs(suggestion.amount))}
+            </p>
+            <p style={{ fontSize: '10px', color: colors.textMuted, marginTop: '6px' }}>
+              {suggestion.count} transactions available
+            </p>
+          </div>
+        ) : (
+          <div
+            style={{
+              ...metricBoxStyle,
+              marginBottom: '10px',
+              textAlign: 'center',
+              padding: '12px',
+              background: `linear-gradient(135deg, ${config.gradientFrom} 0%, ${colors.bgMetric} 100%)`,
+              borderTop: `2px solid ${config.accentColor}`,
+            }}
+          >
+            <span style={labelStyle}>
+              {config.isCredit ? 'Total Earned' : 'Total Paid'}
+            </span>
+            <p style={{ ...heroValueStyle(config.accentColor), marginTop: '6px' }}>
+              {formatCurrency(Math.abs(totalAmount))}
+            </p>
+          </div>
+        )}
 
-        {/* Stats grid */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px', marginBottom: '10px' }}>
-          <div style={metricBoxStyle}>
-            <span style={labelStyle}>Transactions</span>
-            <p style={{ ...metricValueStyle, marginTop: '4px' }}>
-              {transactionCount.toLocaleString()}
-            </p>
+        {/* Stats grid - only show when we have data */}
+        {!hasNoData && (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px', marginBottom: '10px' }}>
+            <div style={metricBoxStyle}>
+              <span style={labelStyle}>Transactions</span>
+              <p style={{ ...metricValueStyle, marginTop: '4px' }}>
+                {transactionCount.toLocaleString()}
+              </p>
+            </div>
+            <div style={metricBoxStyle}>
+              <span style={labelStyle}>Average</span>
+              <p style={{ ...metricValueStyle, marginTop: '4px' }}>
+                {formatCurrency(Math.abs(averageAmount))}
+              </p>
+            </div>
           </div>
-          <div style={metricBoxStyle}>
-            <span style={labelStyle}>Average</span>
-            <p style={{ ...metricValueStyle, marginTop: '4px' }}>
-              {formatCurrency(Math.abs(averageAmount))}
-            </p>
-          </div>
-        </div>
+        )}
 
         {/* Breakdown section */}
         {breakdown && breakdown.length > 0 && (

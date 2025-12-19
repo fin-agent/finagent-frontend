@@ -4179,6 +4179,13 @@ const UnifiedAssistant: React.FC = () => {
           amount: number;
           symbol?: string;
         }>;
+        suggestion?: {
+          period: string;
+          amount: number;
+          count: number;
+          startDate: string;
+          endDate: string;
+        } | null;
       };
 
       if (feesData.feeType && feesData.totalAmount !== undefined) {
@@ -4191,6 +4198,7 @@ const UnifiedAssistant: React.FC = () => {
               timePeriod={feesData.timePeriod}
               symbol={feesData.symbol}
               breakdown={feesData.breakdown}
+              suggestion={feesData.suggestion}
             />
           </div>
         );

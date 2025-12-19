@@ -116,7 +116,7 @@ export async function POST(req: NextRequest) {
       const lowestDate = formatDate(minDate || '');
 
       return NextResponse.json({
-        response: `Your average ${balanceType} balance for ${periodLabel} is ${formatCurrency(avg)}.\nThe highest ${balanceType} balance was on ${highestDate} at ${formatCurrency(max)}.\nThe lowest ${balanceType} balance was on ${lowestDate} at ${formatCurrency(min)}.`,
+        response: `Your Average ${balanceType} balance for ${periodLabel} is ${formatCurrency(avg)}. The Highest ${balanceType} balance was on ${highestDate} in the amount of ${formatCurrency(max)}. The Lowest ${balanceType} balance was on ${lowestDate} in the amount of ${formatCurrency(min)}`,
       });
     }
 
@@ -152,26 +152,26 @@ export async function POST(req: NextRequest) {
 
       case 'cash_and_equity':
         return NextResponse.json({
-          response: `Your account cash balance as of ${balanceDate} is ${formatCurrency(balance.CashBalance)}, and your account equity is ${formatCurrency(balance['Account Equity'])}`,
+          response: `Your account cash balance as of ${balanceDate} is ${formatCurrency(balance.CashBalance)} and account equity is ${formatCurrency(balance['Account Equity'])}`,
         });
 
       case 'buying_power':
         return NextResponse.json({
-          response: `Your day trading buying power as of ${balanceDate} is ${formatCurrency(balance.DayTradingBP)}`,
+          response: `Your Day Trade Buying power as of ${balanceDate} is ${formatCurrency(balance.DayTradingBP)}`,
         });
 
       case 'nlv':
         return NextResponse.json({
-          response: `Your net liquidation value as of ${balanceDate} is ${formatCurrency(balance['Account Equity'])}`,
+          response: `Your account Net Liquidation value as of ${balanceDate} is ${formatCurrency(balance['Account Equity'])}`,
         });
 
       case 'overnight_margin':
         {
           const excessDeficit = balance.HouseExcessDeficit || 0;
-          const label = excessDeficit >= 0 ? 'excess' : 'deficit';
+          const label = excessDeficit >= 0 ? 'House Excess' : 'House Deficit';
           const amount = formatCurrency(Math.abs(excessDeficit));
           return NextResponse.json({
-            response: `Your house requirement as of ${balanceDate} is ${formatCurrency(balance.HouseRequirment)}, and your house ${label} is ${amount}`,
+            response: `Your account House requirement as of ${balanceDate} is ${formatCurrency(balance.HouseRequirment)} and ${label} is ${amount}`,
           });
         }
 
@@ -181,14 +181,14 @@ export async function POST(req: NextRequest) {
         const optionsLong = balance['Options LMV'] || 0;
         const optionsShort = balance['Optons SMV'] || 0; // DB typo
         return NextResponse.json({
-          response: `The market value of your long stock positions is ${formatCurrency(stockLong)}, your long options positions is ${formatCurrency(optionsLong)}, your short stock positions is ${formatCurrency(stockShort)}, and your short options positions is ${formatCurrency(optionsShort)}`,
+          response: `The market value of your long stock positions is ${formatCurrency(stockLong)}, your long options positions is ${formatCurrency(optionsLong)}, your short stock positions is ${formatCurrency(stockShort)}, your short options positions is ${formatCurrency(optionsShort)}`,
         });
       }
 
       case 'account_summary':
       default:
         return NextResponse.json({
-          response: `Your account summary as of ${balanceDate}:\n\n* Cash Balance: ${formatCurrency(balance.CashBalance)}\n* Account Equity: ${formatCurrency(balance['Account Equity'])}\n* Day Trading Buying Power: ${formatCurrency(balance.DayTradingBP)}\n* Stock Long Market Value: ${formatCurrency(balance['Stock LMV'] || 0)}\n* Stock Short Market Value: ${formatCurrency(balance['Stock SMV'] || 0)}\n* Options Long Market Value: ${formatCurrency(balance['Options LMV'] || 0)}\n* Options Short Market Value: ${formatCurrency(balance['Optons SMV'] || 0)}`,
+          response: `Your account summary as of ${balanceDate}: Cash Balance is ${formatCurrency(balance.CashBalance)}, Account Equity is ${formatCurrency(balance['Account Equity'])}, Day Trading BP is ${formatCurrency(balance.DayTradingBP)}, Stock Long Market value is ${formatCurrency(balance['Stock LMV'] || 0)}, Stock Short Market value is ${formatCurrency(balance['Stock SMV'] || 0)}, Options Long Market value is ${formatCurrency(balance['Options LMV'] || 0)}, Options Short Market value is ${formatCurrency(balance['Optons SMV'] || 0)}`,
         });
     }
   } catch (error) {

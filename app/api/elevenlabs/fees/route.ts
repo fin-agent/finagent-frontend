@@ -86,7 +86,7 @@ export async function POST(req: NextRequest) {
       const totalCommission = data.reduce((sum, trade) => sum + (trade.Commission || 0), 0);
       const amount = formatCurrency(Math.abs(totalCommission));
       return NextResponse.json({
-        response: `The total commission you paid for ${description} is ${amount}`,
+        response: `The total commission you paid in ${description} is ${amount}`,
       });
     }
 
@@ -146,11 +146,11 @@ export async function POST(req: NextRequest) {
         response = `The total credit interest you received for ${description} is ${formatCurrency(Math.abs(totalAmount))}`;
         break;
       case 'debit_interest':
-        response = `The total debit interest you paid for ${description} is ${formatCurrency(Math.abs(totalAmount))}`;
+        response = `The total Debit interest you paid ${description} is ${formatCurrency(Math.abs(totalAmount))}`;
         break;
       case 'locate_fee': {
         const symbolText = symbol ? ` for stock ${normalizeSymbol(symbol)}` : '';
-        response = `The total locate fees you paid${symbolText} for ${description} is ${formatCurrency(Math.abs(totalAmount))}`;
+        response = `The total Locate fees you paid${symbolText} since ${description} is ${formatCurrency(Math.abs(totalAmount))}`;
         break;
       }
     }

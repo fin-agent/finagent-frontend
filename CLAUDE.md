@@ -39,6 +39,16 @@ curl -X POST http://localhost:3000/api/elevenlabs/detailed-trades \
 
 The full voice agent flow uses production webhooks. Test API logic locally with curl/Postman before deploying.
 
+### Voice/UI Testing Requires Deployment
+
+**IMPORTANT FOR CLAUDE:** When making changes to `app/api/elevenlabs/*` endpoints (voice webhooks), **notify the user that testing the voice agent requires deploying to Vercel first**. The ElevenLabs voice agent calls production URLs, not localhost, so:
+
+1. Local changes to voice endpoints won't affect the voice agent until deployed
+2. UI changes may work locally, but voice responses will use production code
+3. This can cause voice/UI drift where they show different data
+
+After making voice endpoint changes, remind the user: "This change affects the voice agent. I'll commit and push to Vercel so you can test the voice flow."
+
 ## Architecture
 
 ### Core Data Flow

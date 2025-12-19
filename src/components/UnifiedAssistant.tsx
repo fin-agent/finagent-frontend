@@ -2755,6 +2755,42 @@ const UnifiedAssistant: React.FC = () => {
               }
             }
 
+            // VOICE MODE: Handle user accepting a suggestion (e.g., "yes" to "Would you like to know more?")
+            // This mirrors the text mode handling at handleSendMessage
+            const voiceSuggestionAccept = isSuggestionFollowup(userQuery) && lastSuggestionRef.current !== null;
+            if (voiceSuggestionAccept && lastSuggestionRef.current) {
+              console.log('📊 [Voice Suggestion Follow-up] User accepted suggestion, setting intent for:', lastSuggestionRef.current.timePeriod);
+              const suggestion = lastSuggestionRef.current;
+              // Create a synthetic intent to fetch fees data with the suggested period
+              const suggestionIntent: QueryIntent = {
+                cardType: 'fees',
+                feeType: suggestion.feeType,
+                timePeriod: suggestion.timePeriod,
+                symbol: suggestion.symbol,
+                dateFilter: {
+                  type: 'range',
+                  startDate: suggestion.startDate,
+                  endDate: suggestion.endDate,
+                  description: suggestion.timePeriod,
+                },
+              };
+              pendingQueryIntentRef.current = suggestionIntent;
+              pendingTradeUIRequestRef.current = fetchTradeData(
+                suggestionIntent.symbol || '',
+                suggestionIntent.cardType,
+                undefined,
+                suggestionIntent.timePeriod,
+                {
+                  feeType: suggestionIntent.feeType,
+                  dateFilter: suggestionIntent.dateFilter,
+                }
+              );
+              // Clear suggestion after use
+              lastSuggestionRef.current = null;
+              // Don't run further intent detection - we have what we need
+              return;
+            }
+
             const token = Date.now();
             pendingVoiceIntentTokenRef.current = token;
 

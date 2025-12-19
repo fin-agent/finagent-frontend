@@ -425,6 +425,62 @@ LLM extracts: { symbol: "MTEN" } → Used to re-fetch UI with correct filter
 - `src/lib/intent-detection/prompt.ts` - Speech correction rules
 - `src/lib/intent-detection/types.ts` - `CardType: 'none'` for entity extraction
 
+### Voice/UI Single-Fetch Architecture
+
+Voice webhooks return **both** `response` AND `uiData` in a single API call to prevent voice/UI drift:
+
+```typescript
+// Voice webhook returns both response and UI data
+return NextResponse.json({
+  response: "The total debit interest for last six months is $402 across 13 transactions",
+  uiData: {
+    feeType: 'debit_interest',
+    totalAmount: 402,
+    transactionCount: 13,
+    timePeriod: 'the last six months',
+    breakdown: [...],
+    suggestion: null  // Only set when no data found
+  }
+});
+```
+
+**Key Principle:** Single source of truth - voice webhook computes data once, both voice and UI use that exact data.
+
+### Data Availability Suggestions (`src/lib/data-availability.ts`)
+
+When queries return no data, the system suggests available data periods:
+
+**Parseable Periods Whitelist:**
+```typescript
+const PARSEABLE_PERIODS = [
+  'this week', 'last week',
+  'this month', 'last month',
+  'this year', 'last year',
+  'the last two weeks', 'the last three months', 'the last six months'
+];
+```
+
+**Deterministic Fallback:**
+If LLM suggests non-parseable period (e.g., "Mar 30 to Sep 10, 2025"), system uses deterministic fallback based on data span.
+
+**Key Functions:**
+- `suggestDataPeriod(table, requestedPeriod, filters)` - Returns parseable period with actual amount
+- `isParseablePeriod(period)` - Validates period is parseable
+- `calculateDeterministicPeriod(earliest, latest)` - Fallback based on data span
+
+### "Yes" Follow-Up Handling
+
+Agent prompt (`prompts/finagent-neo.md`) includes rules for handling affirmative responses to suggestions:
+
+```markdown
+**When a tool returns "no data found" with a suggestion, and the user responds
+with an affirmative, you MUST call the tool again with the SUGGESTED time period.**
+
+**Affirmative patterns:** "Yes", "Sure", "Okay", "Yeah", "Please"
+```
+
+**DO NOT repeat suggestion from memory - MUST call tool again for full breakdown.**
+
 ## Environment Variables
 
 ```env

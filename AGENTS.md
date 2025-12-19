@@ -17,3 +17,18 @@ Follow the concise, imperative style already in the log (`fixed keys`, `changed 
 
 ## Environment & Security Notes
 Secrets and API keys belong in a local `.env` file and should be exposed to Vite as `VITE_*` variables (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`). Never commit `.env` files or Supabase service keys. When editing `supabase/` migrations, run `supabase db lint` (via the Supabase CLI) before submitting changes and coordinate deploys with backend maintainers.
+
+## Voice/UI Architecture Notes
+This project uses ElevenLabs Conversational AI for voice interactions. Key architectural patterns:
+
+### Single-Fetch Pattern
+Voice webhooks (`app/api/elevenlabs/*`) return **both** `response` (for TTS) and `uiData` (for UI rendering) in a single call. This prevents voice/UI drift where the voice says one thing but UI shows different data.
+
+### Parseable Period Suggestions
+When no data is found, the system suggests available data periods. These suggestions must be parseable by `src/lib/date-parser.ts`. The `src/lib/data-availability.ts` module validates and falls back to deterministic periods if LLM suggests non-parseable dates.
+
+### Agent Prompt Updates
+The ElevenLabs agent prompt lives in `prompts/finagent-neo.md`. When updating, copy to ElevenLabs dashboard. Key sections:
+- Follow-up query handling (same tool with new parameters)
+- "Yes" response handling (re-call tool with suggested period)
+- Transaction detail queries (call same tool for breakdown)

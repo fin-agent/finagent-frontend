@@ -602,6 +602,75 @@ For "show trades" queries, both voice and UI return **identical summary metrics*
 
 **UI Card:** TradesTable displays the same summary values in the header.
 
+### Voice/UI Sync: Single-Fetch Architecture
+
+To prevent drift between what the voice says and what the UI shows, all voice webhooks return **both** `response` (for TTS) **and** `uiData` (for UI rendering) in a single API call:
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Client as UnifiedAssistant
+    participant Webhook as Voice Webhook
+    participant DB as Supabase
+
+    User->>Client: "Show debit interest last month"
+    Client->>Webhook: POST /api/elevenlabs/fees
+    Webhook->>DB: Query FeesAndInterest
+    Webhook-->>Client: { response: "$125.75...", uiData: {...} }
+    Client->>Client: Voice speaks response
+    Client->>Client: UI renders uiData
+    Note over Client: Voice and UI show SAME data
+```
+
+**Key Principle:** Single source of truth - the voice webhook computes the data once, and both voice and UI use that exact same data.
+
+### Data Availability Suggestions
+
+When a query returns no data for the requested time period, the system proactively suggests available data:
+
+```
+User: "Debit interest last week"
+Voice: "No debit interest found for last week. However, I found $402.00 for the last six months. Would you like to know more about that?"
+```
+
+**Parseable Period Validation:**
+
+The system ensures suggested time periods are always parseable by the date parser:
+
+| Suggested Period | Why It's Valid |
+|-----------------|----------------|
+| `this week`, `last week` | Relative week references |
+| `this month`, `last month` | Relative month references |
+| `the last two weeks` | Explicit duration |
+| `the last six months` | Explicit duration |
+
+**Deterministic Fallback:**
+
+If the LLM suggests a non-parseable period (e.g., "Mar 30 to Sep 10, 2025"), the system falls back to a deterministic suggestion based on data span:
+
+```typescript
+if (dataSpanDays <= 7) return 'this week';
+else if (dataSpanDays <= 14) return 'the last two weeks';
+else if (dataSpanDays <= 31) return 'this month';
+else if (dataSpanDays <= 90) return 'the last three months';
+else if (dataSpanDays <= 180) return 'the last six months';
+else return 'this year';
+```
+
+### "Yes" Follow-Up Handling
+
+When users respond affirmatively to a suggestion, the agent calls the tool again with the suggested period:
+
+```
+User: "Debit interest last week"
+Agent: "No data found. I found $402 for the last six months. Would you like to know more?"
+User: "Yes"
+Agent: [calls get_fees with time_period: "last six months"]
+Agent: "The total debit interest for the last six months is $402 across 13 transactions."
+```
+
+**This ensures the UI card appears with full transaction breakdown.**
+
 ---
 
 ## Database Schema

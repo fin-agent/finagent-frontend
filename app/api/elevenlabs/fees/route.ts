@@ -71,10 +71,13 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      if (!data || data.length === 0) {
+      const totalCommission = data ? data.reduce((sum, trade) => sum + (trade.Commission || 0), 0) : 0;
+
+      // Suggest alternatives if no data OR if total commission is effectively zero
+      if (!data || data.length === 0 || Math.abs(totalCommission) < 0.01) {
         // Use LLM-based suggestion for a natural time period with actual amount
         const suggestion = await suggestDataPeriod('TradeData', description);
-        if (suggestion) {
+        if (suggestion && suggestion.amount > 0) {
           return NextResponse.json({
             response: `No commission data found for ${description}. However, I found ${formatCurrency(suggestion.amount)} in commissions for ${suggestion.suggestedPeriod}. Would you like to know more about that?`,
           });
@@ -85,7 +88,6 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      const totalCommission = data.reduce((sum, trade) => sum + (trade.Commission || 0), 0);
       const amount = formatCurrency(Math.abs(totalCommission));
       return NextResponse.json({
         response: `The total commission you paid in ${description} is ${amount}`,
@@ -126,7 +128,10 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    if (!data || data.length === 0) {
+    const totalAmount = data ? data.reduce((sum, fee) => sum + (fee.Amount || 0), 0) : 0;
+
+    // Suggest alternatives if no data OR if total amount is effectively zero
+    if (!data || data.length === 0 || Math.abs(totalAmount) < 0.01) {
       // Use LLM-based suggestion for a natural time period with actual amount
       const normalizedSymbol = symbol ? normalizeSymbol(symbol) : undefined;
       const suggestion = await suggestDataPeriod('FeesAndInterest', description, {
@@ -137,7 +142,7 @@ export async function POST(req: NextRequest) {
       const feeTypeName = feeType.replace('_', ' ');
       const symbolText = symbol ? ` for ${normalizeSymbol(symbol)}` : '';
 
-      if (suggestion) {
+      if (suggestion && suggestion.amount > 0) {
         return NextResponse.json({
           response: `No ${feeTypeName} found${symbolText} for ${description}. However, I found ${formatCurrency(suggestion.amount)} in ${feeTypeName} for ${suggestion.suggestedPeriod}. Would you like to know more about that?`,
         });
@@ -147,8 +152,6 @@ export async function POST(req: NextRequest) {
         response: `No ${feeTypeName} data found${symbolText} for ${description}.`,
       });
     }
-
-    const totalAmount = data.reduce((sum, fee) => sum + (fee.Amount || 0), 0);
 
     // Build response based on fee type
     let response = '';

@@ -1754,6 +1754,9 @@ const UnifiedAssistant: React.FC = () => {
   // ElevenLabs SDK can sometimes fire onMessage multiple times for the same message
   const lastProcessedTextMessageRef = useRef<{ content: string; timestamp: number } | null>(null);
   const lastProcessedVoiceMessageRef = useRef<{ content: string; timestamp: number } | null>(null);
+  // UI data set directly by client tools - bypasses pattern matching for reliable rendering
+  // This ensures voice response and UI card use the SAME data (no drift)
+  const toolUIDataRef = useRef<TradeUIData | null>(null);
 
   function isIdleNudgeMessage(text: string): boolean {
     const trimmed = text.trim();
@@ -1822,71 +1825,127 @@ const UnifiedAssistant: React.FC = () => {
     };
 
     const get_trade_summary = async (parameters: Record<string, unknown>) => {
-      const payload = await postJson('/api/elevenlabs/trade-summary', {
-        symbol: getToolSymbol(parameters),
-      });
+      const symbol = getToolSymbol(parameters);
+      const payload = await postJson('/api/elevenlabs/trade-summary', { symbol });
+      // Store UI data for rendering
+      toolUIDataRef.current = { type: 'summary', symbol: symbol || '', data: payload };
+      console.log('📊 [Trade Summary Tool] Set toolUIDataRef:', toolUIDataRef.current);
       return unwrapResponse(payload);
     };
 
     const get_detailed_trades = async (parameters: Record<string, unknown>) => {
-      const payload = await postJson('/api/elevenlabs/detailed-trades', {
-        symbol: getToolSymbol(parameters),
-      });
-      return unwrapResponse(payload);
+      const symbol = getToolSymbol(parameters);
+      // Fetch from UI endpoint for richer data
+      const uiPayload = await postJson('/api/trades-ui', { symbol });
+      // Store UI data for rendering
+      toolUIDataRef.current = { type: 'detailed', symbol: symbol || '', data: uiPayload };
+      console.log('📊 [Detailed Trades Tool] Set toolUIDataRef:', toolUIDataRef.current);
+      // Get voice response from voice endpoint
+      const voicePayload = await postJson('/api/elevenlabs/detailed-trades', { symbol });
+      return unwrapResponse(voicePayload);
     };
 
     const get_trade_stats = async (parameters: Record<string, unknown>) => {
-      const payload = await postJson('/api/elevenlabs/trade-stats', {
-        symbol: getToolSymbol(parameters),
-        trade_type: getString(parameters, 'trade_type'),
-        time_period: getString(parameters, 'time_period'),
-      });
-      return unwrapResponse(payload);
+      const symbol = getToolSymbol(parameters);
+      const tradeType = getString(parameters, 'trade_type');
+      const timePeriod = getString(parameters, 'time_period');
+      // Fetch both stock and option stats for UI
+      const [stockData, optionData] = await Promise.all([
+        postJson('/api/trade-stats', { symbol, tradeType: tradeType || 'all', timePeriod }),
+        postJson('/api/option-stats', { symbol, tradeType: tradeType || 'all', timePeriod }),
+      ]);
+      // Store UI data for rendering
+      toolUIDataRef.current = { type: 'stats', symbol: symbol || '', tradeType: tradeType as 'buy' | 'sell' | undefined, timePeriod, data: stockData, optionData };
+      console.log('📊 [Trade Stats Tool] Set toolUIDataRef:', toolUIDataRef.current);
+      // Get voice response
+      const voicePayload = await postJson('/api/elevenlabs/trade-stats', { symbol, trade_type: tradeType, time_period: timePeriod });
+      return unwrapResponse(voicePayload);
     };
 
     const get_profitable_trades = async (parameters: Record<string, unknown>) => {
-      const payload = await postJson('/api/elevenlabs/profitable-trades', {
-        symbol: getToolSymbol(parameters),
-        time_period: getString(parameters, 'time_period'),
-      });
-      return unwrapResponse(payload);
+      const symbol = getToolSymbol(parameters);
+      const timePeriod = getString(parameters, 'time_period');
+      // Fetch UI data
+      const uiPayload = await postJson('/api/profitable-trades-ui', { symbol, timePeriod });
+      // Store UI data for rendering
+      toolUIDataRef.current = { type: 'profitable', symbol: symbol || '', timePeriod, data: uiPayload };
+      console.log('📊 [Profitable Trades Tool] Set toolUIDataRef:', toolUIDataRef.current);
+      // Get voice response
+      const voicePayload = await postJson('/api/elevenlabs/profitable-trades', { symbol, time_period: timePeriod });
+      return unwrapResponse(voicePayload);
     };
 
     const get_time_based_trades = async (parameters: Record<string, unknown>) => {
-      const payload = await postJson('/api/elevenlabs/time-trades', {
-        symbol: getToolSymbol(parameters),
-        time_period: getString(parameters, 'time_period'),
-        calculation: getString(parameters, 'calculation'),
-        trade_type: getString(parameters, 'trade_type'),
-      });
-      return unwrapResponse(payload);
+      const symbol = getToolSymbol(parameters);
+      const timePeriod = getString(parameters, 'time_period');
+      const calculation = getString(parameters, 'calculation');
+      const tradeType = getString(parameters, 'trade_type');
+      // Fetch UI data
+      const uiPayload = await postJson('/api/time-trades-ui', { symbol: symbol || null, timePeriod });
+      // Store UI data for rendering
+      toolUIDataRef.current = { type: 'time-based', symbol: symbol || '', timePeriod, data: uiPayload };
+      console.log('📊 [Time Based Trades Tool] Set toolUIDataRef:', toolUIDataRef.current);
+      // Get voice response
+      const voicePayload = await postJson('/api/elevenlabs/time-trades', { symbol, time_period: timePeriod, calculation, trade_type: tradeType });
+      return unwrapResponse(voicePayload);
     };
 
     const get_advanced_trades = async (parameters: Record<string, unknown>) => {
-      const payload = await postJson('/api/elevenlabs/advanced-query', {
-        symbol: getToolSymbol(parameters),
-        security_type: getString(parameters, 'security_type'),
-        trade_type: getString(parameters, 'trade_type'),
-        call_put: getString(parameters, 'call_put'),
-        from_date: getString(parameters, 'from_date'),
-        to_date: getString(parameters, 'to_date'),
-        expiration: getString(parameters, 'expiration'),
-        strike: parameters['strike'],
-        aggregation: getString(parameters, 'aggregation'),
-        limit: parameters['limit'],
-        order_by: getString(parameters, 'order_by'),
+      const symbol = getToolSymbol(parameters);
+      const securityType = getString(parameters, 'security_type');
+      const tradeType = getString(parameters, 'trade_type');
+      const callPut = getString(parameters, 'call_put');
+      const fromDate = getString(parameters, 'from_date');
+      const toDate = getString(parameters, 'to_date');
+      const expiration = getString(parameters, 'expiration');
+      // Fetch UI data
+      const uiPayload = await postJson('/api/advanced-query-ui', {
+        symbol: symbol || undefined,
+        securityType: securityType === 'option' ? 'O' : securityType === 'stock' ? 'S' : undefined,
+        tradeType: tradeType === 'buy' ? 'B' : tradeType === 'sell' ? 'S' : undefined,
+        callPut: callPut === 'call' ? 'C' : callPut === 'put' ? 'P' : undefined,
+        fromDate,
+        toDate,
+        expiration,
       });
-      return unwrapResponse(payload);
+      // Store UI data for rendering
+      toolUIDataRef.current = {
+        type: 'advanced-options',
+        symbol: symbol || '',
+        tradeType: tradeType as 'buy' | 'sell' | undefined,
+        callPut: callPut as 'call' | 'put' | undefined,
+        expiration,
+        data: uiPayload
+      };
+      console.log('📊 [Advanced Trades Tool] Set toolUIDataRef:', toolUIDataRef.current);
+      // Get voice response
+      const voicePayload = await postJson('/api/elevenlabs/advanced-query', {
+        symbol, security_type: securityType, trade_type: tradeType, call_put: callPut,
+        from_date: fromDate, to_date: toDate, expiration,
+        strike: parameters['strike'], aggregation: getString(parameters, 'aggregation'),
+        limit: parameters['limit'], order_by: getString(parameters, 'order_by'),
+      });
+      return unwrapResponse(voicePayload);
     };
 
     const get_account_balance = async (parameters: Record<string, unknown>) => {
       console.log('💰 [Account Balance Tool] ================================');
       console.log('💰 [Account Balance Tool] Parameters:', JSON.stringify(parameters, null, 2));
-      const payload = await postJson('/api/elevenlabs/account-balance', {
-        query_type: getString(parameters, 'query_type'),
-        time_period: getString(parameters, 'time_period'),
-      });
-      const result = unwrapResponse(payload);
+      const queryType = getString(parameters, 'query_type');
+      const timePeriod = getString(parameters, 'time_period');
+      // Fetch UI data
+      const uiPayload = await postJson('/api/account-balance-ui', { queryType, timePeriod });
+      // Store UI data for rendering
+      toolUIDataRef.current = {
+        type: 'account-balance',
+        symbol: '',
+        accountQueryType: queryType as AccountQueryType,
+        data: uiPayload
+      };
+      console.log('💰 [Account Balance Tool] Set toolUIDataRef:', toolUIDataRef.current);
+      // Get voice response
+      const voicePayload = await postJson('/api/elevenlabs/account-balance', { query_type: queryType, time_period: timePeriod });
+      const result = unwrapResponse(voicePayload);
       console.log('💰 [Account Balance Tool] Webhook Response:', result);
       console.log('💰 [Account Balance Tool] ================================');
       return result;
@@ -1895,12 +1954,23 @@ const UnifiedAssistant: React.FC = () => {
     const get_fees = async (parameters: Record<string, unknown>) => {
       console.log('💸 [Fees Tool] ================================');
       console.log('💸 [Fees Tool] Parameters:', JSON.stringify(parameters, null, 2));
-      const payload = await postJson('/api/elevenlabs/fees', {
-        fee_type: getString(parameters, 'fee_type'),
-        time_period: getString(parameters, 'time_period'),
-        symbol: getToolSymbol(parameters),
-      });
-      const result = unwrapResponse(payload);
+      const feeType = getString(parameters, 'fee_type');
+      const timePeriod = getString(parameters, 'time_period');
+      const symbol = getToolSymbol(parameters);
+      // Fetch UI data
+      const uiPayload = await postJson('/api/fees-ui', { feeType, timePeriod, symbol: symbol || undefined });
+      // Store UI data for rendering
+      toolUIDataRef.current = {
+        type: 'fees',
+        symbol: symbol || '',
+        feeType: feeType as FeeType,
+        timePeriod,
+        data: uiPayload
+      };
+      console.log('💸 [Fees Tool] Set toolUIDataRef:', toolUIDataRef.current);
+      // Get voice response
+      const voicePayload = await postJson('/api/elevenlabs/fees', { fee_type: feeType, time_period: timePeriod, symbol });
+      const result = unwrapResponse(voicePayload);
       console.log('💸 [Fees Tool] Webhook Response:', result);
       console.log('💸 [Fees Tool] ================================');
       return result;
@@ -2008,10 +2078,20 @@ const UnifiedAssistant: React.FC = () => {
           }
           let tradeUI: TradeUIData | undefined;
 
+          // HIGHEST PRIORITY: Use UI data set directly by client tools (single source of truth)
+          if (toolUIDataRef.current) {
+            tradeUI = toolUIDataRef.current;
+            toolUIDataRef.current = null; // Clear after use
+            console.log('🎯 [Tool Direct] Using UI data from client tool:', tradeUI.type);
+            // Mark timestamp to prevent fallback from overriding
+            lastIntentCardRenderedAtRef.current = Date.now();
+          }
+
           // PRIMARY: Use stored intent from user's query (deterministic)
+          // Skip if we already have UI data from client tool
           const pendingIntent = pendingQueryIntentRef.current;
           const pendingTradeUIRequest = pendingTradeUIRequestRef.current;
-          if (pendingIntent) {
+          if (!tradeUI && pendingIntent) {
             console.log('🎯 [Intent-Based] Using stored intent:', pendingIntent);
             // Consume intent for this assistant response (only once we have a real assistant answer)
             pendingQueryIntentRef.current = null;
@@ -2577,10 +2657,20 @@ const UnifiedAssistant: React.FC = () => {
             }
             let tradeUI: TradeUIData | undefined;
 
+            // HIGHEST PRIORITY: Use UI data set directly by client tools (single source of truth)
+            if (toolUIDataRef.current) {
+              tradeUI = toolUIDataRef.current;
+              toolUIDataRef.current = null; // Clear after use
+              console.log('🎯 [Voice Tool Direct] Using UI data from client tool:', tradeUI.type);
+              // Mark timestamp to prevent fallback from overriding
+              lastIntentCardRenderedAtRef.current = Date.now();
+            }
+
             // PRIMARY: Use stored intent from user's query (deterministic)
+            // Skip if we already have UI data from client tool
             const pendingIntent = pendingQueryIntentRef.current;
             const pendingTradeUIRequest = pendingTradeUIRequestRef.current;
-            if (pendingIntent) {
+            if (!tradeUI && pendingIntent) {
               console.log('🎯 [Voice Intent-Based] Using stored intent:', pendingIntent);
               // Consume intent for this assistant response (only once we have a real assistant answer)
               pendingQueryIntentRef.current = null;

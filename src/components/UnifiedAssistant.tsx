@@ -2845,6 +2845,38 @@ const UnifiedAssistant: React.FC = () => {
               }
             }
 
+            // SYMBOL CORRECTION: For fees queries, extract symbol from agent's response using LLM
+            // The server webhook LLM corrects speech recognition errors (e.g., "M10" → "MTEN"),
+            // but our local intent detection uses the user's transcribed message which has errors.
+            // This re-fetches UI data with the symbol the agent actually mentioned.
+            if (tradeUI && tradeUI.type === 'fees') {
+              console.log('🔍 [Symbol Correction] Fees query detected, checking agent response for symbol...');
+              console.log('🔍 [Symbol Correction] Current tradeUI.symbol:', tradeUI.symbol);
+              try {
+                const agentClassification = await classifyIntentViaAPI(assistantContent);
+                const extractedSymbol = agentClassification?.symbol;
+                console.log('🔍 [Symbol Correction] LLM extracted symbol from agent response:', extractedSymbol);
+
+                // Re-fetch if agent mentioned a different symbol than what we used
+                if (extractedSymbol && extractedSymbol !== tradeUI.symbol) {
+                  console.log('🔍 [Symbol Correction] Symbol mismatch! Re-fetching with correct symbol:', extractedSymbol);
+                  const correctedData = await fetchTradeData(
+                    extractedSymbol,
+                    'fees',
+                    undefined,
+                    (tradeUI.data as { timePeriod?: string })?.timePeriod || pendingIntent?.timePeriod,
+                    { feeType: tradeUI.feeType }
+                  );
+                  if (correctedData) {
+                    tradeUI = correctedData;
+                    console.log('🔍 [Symbol Correction] ✅ Successfully re-fetched with corrected symbol');
+                  }
+                }
+              } catch (error) {
+                console.warn('🔍 [Symbol Correction] Failed to extract symbol from agent response:', error);
+              }
+            }
+
             if (tradeUI) {
               lastAssistantTradeUIRef.current = tradeUI;
               setTranscript(prev => prev.map((m) => m.id === newMessageId ? { ...m, tradeUI } : m));

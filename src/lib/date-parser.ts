@@ -78,7 +78,10 @@ export interface ParsedDateQuery {
  * @returns ParsedDateQuery with DB-adjusted dates, or null if not parseable
  */
 export function parseTimeExpression(expression: string): ParsedDateQuery | null {
-  const lowerExpr = expression.toLowerCase().trim();
+  // Strip common prefixes like "in ", "for ", "during " that ElevenLabs may include
+  let lowerExpr = expression.toLowerCase().trim();
+  lowerExpr = lowerExpr.replace(/^(in|for|during)\s+/i, '');
+
   const today = getPacificToday();
   today.setHours(0, 0, 0, 0);
 
@@ -580,7 +583,10 @@ export function resolveDateFilter(filter: DateFilter): ResolvedDates {
  * @returns ResolvedDates or null if not parseable
  */
 export function parseTimePeriodToResolvedDates(timePeriod: string): ResolvedDates | null {
-  const lowerExpr = timePeriod.toLowerCase().trim();
+  // Strip common prefixes like "in ", "for ", "during " that ElevenLabs may include
+  let lowerExpr = timePeriod.toLowerCase().trim();
+  lowerExpr = lowerExpr.replace(/^(in|for|during)\s+/i, '');
+
   const today = getPacificToday();
   today.setHours(0, 0, 0, 0);
 

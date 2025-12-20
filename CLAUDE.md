@@ -236,6 +236,41 @@ The database contains demo data with fixed dates. Date utilities convert between
 
 **Usage in UI endpoints**: Import from `@/src/lib/date-utils` (note: `@` alias maps to project root, not `src/`)
 
+### Natural Language Date Parsing (`src/lib/date-parser.ts`)
+
+Parses natural language time expressions into database-ready date ranges. Handles ElevenLabs prefix variations automatically.
+
+**Key Functions:**
+
+| Function | Purpose |
+|----------|---------|
+| `parseTimeExpression(expr)` | Parse natural language → DateRange with DB-adjusted dates |
+| `parseTimePeriodToResolvedDates(period)` | Extended parser for date ranges and discrete dates |
+| `extractTimePeriodFromQuery(query)` | Extract time portion from a full query |
+| `resolveDateFilter(filter)` | Resolve LLM DateFilter to DB-ready dates |
+
+**Prefix Stripping:**
+
+ElevenLabs often sends time periods with prepositions like "in October", "for last week", "during September". Both `parseTimeExpression()` and `parseTimePeriodToResolvedDates()` automatically strip these prefixes:
+
+```typescript
+// Handles: "in October" → "october"
+// Handles: "for last week" → "last week"
+// Handles: "during September" → "september"
+lowerExpr = lowerExpr.replace(/^(in|for|during)\s+/i, '');
+```
+
+**Supported Expressions:**
+
+| Category | Examples |
+|----------|----------|
+| Relative | `today`, `yesterday`, `last week`, `this month` |
+| N-Days | `last 5 days`, `past 10 days` |
+| Months | `October`, `September`, `in August` |
+| Date Ranges | `June 1st to 7th`, `November 15 to December 5` |
+| Multi-Month | `August and September`, `August through October` |
+| Discrete Dates | `July 1st and August 1st` |
+
 ### Voice/UI Date Synchronization
 
 **Two date handling modes** depending on query type:

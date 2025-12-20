@@ -27,6 +27,12 @@ Voice webhooks (`app/api/elevenlabs/*`) return **both** `response` (for TTS) and
 ### Parseable Period Suggestions
 When no data is found, the system suggests available data periods. These suggestions must be parseable by `src/lib/date-parser.ts`. The `src/lib/data-availability.ts` module validates and falls back to deterministic periods if LLM suggests non-parseable dates.
 
+### Date Parser Prefix Handling
+ElevenLabs often sends time periods with prepositions like "in October", "for last week", "during September". The date parser (`src/lib/date-parser.ts`) automatically strips these prefixes (`in`, `for`, `during`) before parsing. This means:
+- "in October" → parses as "October"
+- "for last week" → parses as "last week"
+- "during September" → parses as "September"
+
 ### Agent Prompt Updates
 The ElevenLabs agent prompt lives in `prompts/finagent-neo.md`. When updating, copy to ElevenLabs dashboard. Key sections:
 - Follow-up query handling (same tool with new parameters)

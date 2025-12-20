@@ -447,6 +447,16 @@ export function demoDateToRealDate(demoDateStr: string): Date {
 
 The date parser converts natural language time expressions into database-ready date ranges.
 
+#### Prefix Stripping
+
+ElevenLabs often sends time periods with prepositions like "in October", "for last week", "during September". The parser automatically strips these prefixes before processing:
+
+```typescript
+// Handles: "in October" → "october"
+// Handles: "for last week" → "last week"
+// Handles: "during September" → "september"
+```
+
 #### Supported Time Expressions
 
 | Category | Examples | Parsed Result |
@@ -458,14 +468,20 @@ The date parser converts natural language time expressions into database-ready d
 | **Day Names** | "Monday", "Tuesday", "last Friday" | Most recent occurrence |
 | **Specific Dates** | "November 18th", "Nov 18", "December 3rd" | Exact calendar date |
 | **Spelled Numbers** | "last five days", "past twenty days" | Converts words to numbers |
+| **Single Months** | "October", "in September", "August" | Full calendar month |
+| **Date Ranges** | "June 1st to 7th", "November 15 to December 5" | Start-to-end date range |
+| **Multi-Month** | "August and September", "August through October" | Multi-month range |
+| **Discrete Dates** | "July 1st and August 1st" | Array of specific dates |
 
 #### Key Functions
 
 | Function | Purpose |
 |----------|---------|
 | `parseTimeExpression(expr)` | Parse natural language → DateRange with DB-adjusted dates |
+| `parseTimePeriodToResolvedDates(period)` | Extended parser for date ranges, discrete dates, and month names |
 | `extractTimePeriodFromQuery(query)` | Extract time portion from a full query ("trades for last week" → "last week") |
 | `isTimeBasedQuery(query)` | Check if query contains a time expression |
+| `resolveDateFilter(filter)` | Resolve LLM DateFilter to database-ready dates |
 
 #### DateRange Interface
 

@@ -868,9 +868,10 @@ function detectUserQueryIntent(query: string): QueryIntent | null {
   }
 
   // 2. Fees queries
-  if (/\b(fees?|commissions?|interest|locate|borrow(?:ing)?)\b/i.test(lowerQuery)) {
+  if (/\b(fees?|commissions?|interest|locate|borrow(?:ing)?|short\s+interest)\b/i.test(lowerQuery)) {
     let feeType: FeeType = 'commission';
     if (/credit\s*interest/i.test(lowerQuery)) feeType = 'credit_interest';
+    else if (/short\s+interest/i.test(lowerQuery)) feeType = 'short_interest'; // Must check before debit_interest
     else if (/debit\s*interest|margin\s*interest/i.test(lowerQuery)) feeType = 'debit_interest';
     else if (/locate|borrow(?:ing)?|stock\s+borrow/i.test(lowerQuery)) feeType = 'locate_fee';
     return { cardType: 'fees', feeType, timePeriod, symbol };
@@ -1815,8 +1816,13 @@ function detectFeesQuery(text: string): { feeType: FeeType; symbol?: string; tim
     return { feeType: 'credit_interest', timePeriod };
   }
 
-  // Debit interest patterns (includes "short interest" and "debit balance charges")
-  if (/debit\s+interest|interest\s+(?:paid|you\s+paid)|margin\s+interest|short\s+interest|debit\s+balance\s+charge/i.test(text)) {
+  // Short interest patterns (borrow fees for shorting stocks) - must check BEFORE debit_interest
+  if (/short\s+interest/i.test(text)) {
+    return { feeType: 'short_interest', symbol, timePeriod };
+  }
+
+  // Debit interest patterns (margin interest charges)
+  if (/debit\s+interest|interest\s+(?:paid|you\s+paid)|margin\s+interest|debit\s+balance\s+charge/i.test(text)) {
     return { feeType: 'debit_interest', timePeriod };
   }
 

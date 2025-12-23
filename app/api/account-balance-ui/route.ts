@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
-import { resolveDateFilter, parseTimePeriodToResolvedDates, type ResolvedDates } from '@/src/lib/date-parser';
+import { parseTimePeriodToResolvedDates, type ResolvedDates } from '@/src/lib/date-parser';
 import { checkDataAvailability } from '@/src/lib/data-availability';
 import type { DateFilter } from '@/src/lib/intent-detection/types';
 
@@ -49,9 +49,18 @@ export async function POST(req: NextRequest) {
     // This prevents voice/UI drift where voice says one amount but UI shows different
     let resolved: ResolvedDates | null = null;
 
-    // For dateFilter with explicit startDate/endDate (e.g., from suggestion follow-up), use those dates
+    // For dateFilter with explicit startDate/endDate (e.g., from suggestion follow-up),
+    // use those dates DIRECTLY without applying offset again.
+    // These dates come from suggestDataPeriod() which already returns demo-adjusted dates.
+    // If we call resolveDateFilter(), it applies the offset AGAIN causing voice/UI drift.
     if (dateFilter && (dateFilter as DateFilter).startDate && (dateFilter as DateFilter).endDate) {
-      resolved = resolveDateFilter(dateFilter as DateFilter);
+      const df = dateFilter as DateFilter;
+      resolved = {
+        type: df.type === 'discrete' ? 'discrete' : 'range',
+        startDate: df.startDate,
+        endDate: df.endDate,
+        description: df.description || timePeriod || 'selected period',
+      };
     } else if (timePeriod) {
       // Primary path: parse time period string (matches voice endpoint)
       resolved = parseTimePeriodToResolvedDates(timePeriod);

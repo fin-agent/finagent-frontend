@@ -2,6 +2,26 @@
  * Symbol utilities for parsing and normalizing stock/option symbols
  */
 
+// Speech recognition corrections - voice transcription often mishears tickers
+const SPEECH_CORRECTIONS: Record<string, string> = {
+  'm10': 'MTEN',
+  'm 10': 'MTEN',
+  'mtn': 'MTEN',
+  'emten': 'MTEN',
+  'lc id': 'LCID',
+  'l c i d': 'LCID',
+  'lucid': 'LCID',
+  'ui path': 'PATH',
+  'you eye path': 'PATH',
+  'b m n r': 'BMNR',
+  'bmnr': 'BMNR',
+  'c r c l': 'CRCL',
+  'crcl': 'CRCL',
+  'circle': 'CRCL',
+  'r g c': 'RGC',
+  'rgc': 'RGC',
+};
+
 // Map company names to ticker symbols
 export const SYMBOL_MAP: Record<string, string> = {
   'apple': 'AAPL',
@@ -55,9 +75,10 @@ export const SYMBOL_MAP: Record<string, string> = {
 
 /**
  * Normalize a company name or symbol to its ticker
- * Handles: OCC option symbols, company names, and raw tickers
+ * Handles: Speech corrections, OCC option symbols, company names, and raw tickers
  *
- * e.g., "Apple" -> "AAPL"
+ * e.g., "M10" -> "MTEN" (speech recognition correction)
+ *       "Apple" -> "AAPL" (company name)
  *       "tesla" -> "TSLA"
  *       "TSLA251129C00350000" -> "TSLA" (extracts from OCC)
  *       "AAPL" -> "AAPL"
@@ -66,26 +87,31 @@ export function normalizeSymbol(input: string): string {
   if (!input) return input;
 
   const trimmed = input.trim();
+  const lower = trimmed.toLowerCase();
 
-  // 1. Check if it's an OCC option symbol and extract the ticker
+  // 1. Check speech recognition corrections FIRST (handles "M10" -> "MTEN", etc.)
+  if (SPEECH_CORRECTIONS[lower]) {
+    return SPEECH_CORRECTIONS[lower];
+  }
+
+  // 2. Check if it's an OCC option symbol and extract the ticker
   if (isOptionSymbol(trimmed.toUpperCase())) {
     return parseOptionSymbol(trimmed.toUpperCase());
   }
 
-  // 2. Check if it looks like an OCC symbol (has digits after letters)
+  // 3. Check if it looks like an OCC symbol (has digits after letters)
   // This catches partial or malformed OCC symbols like "TSLA251129"
   const occMatch = trimmed.toUpperCase().match(/^([A-Z]{1,6})\d/);
   if (occMatch) {
     return occMatch[1];
   }
 
-  // 3. Check company name map
-  const lower = trimmed.toLowerCase();
+  // 4. Check company name map
   if (SYMBOL_MAP[lower]) {
     return SYMBOL_MAP[lower];
   }
 
-  // 4. Default to uppercase
+  // 5. Default to uppercase
   return trimmed.toUpperCase();
 }
 

@@ -178,7 +178,7 @@ function isSuggestionFollowup(query: string): boolean {
 /**
  * Detect if user is asking a contextual follow-up with a time period change
  * Examples: "And what about the last three months?", "How about last quarter?", "What about this year?"
- *           "So how much has paid in the last three months?"
+ *           "And what's this year?", "What's last month?", "So how much has paid in the last three months?"
  * Returns the extracted time period if detected, null otherwise
  */
 function detectContextualTimePeriodFollowup(query: string): string | null {
@@ -192,6 +192,8 @@ function detectContextualTimePeriodFollowup(query: string): string | null {
   const patterns = [
     // "and what about X", "how about X", "what about X"
     /^(?:and\s+)?(?:what|how)\s+about\s+(?:the\s+)?(.+?)\??$/i,
+    // "and what's X" / "and what is X" / "what's X" - common voice follow-up
+    /^(?:and\s+)?what(?:'s|\s+is)\s+(?:the\s+)?(.+?)\??$/i,
     // "and for X", "and in X"
     /^(?:and\s+)?(?:for|in)\s+(?:the\s+)?(.+?)\??$/i,
     // "show me the same for X"

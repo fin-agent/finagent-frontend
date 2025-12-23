@@ -23,15 +23,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Time period is required' }, { status: 400 });
     }
 
-    // Resolve dates: prefer dateFilter from LLM, fallback to regex parsing
+    // IMPORTANT: Always use parseTimePeriodToResolvedDates to match voice endpoint
+    // This prevents voice/UI drift where voice says one amount but UI shows different
     let resolved: ResolvedDates | null = null;
 
-    if (dateFilter) {
-      // Use LLM-provided structured date filter
+    // For dateFilter with explicit startDate/endDate (e.g., from suggestion follow-up), use those dates
+    if (dateFilter && (dateFilter as DateFilter).startDate && (dateFilter as DateFilter).endDate) {
       resolved = resolveDateFilter(dateFilter as DateFilter);
     } else if (timePeriod) {
-      // Fallback: parse time period string with regex
+      // Primary path: parse time period string (matches voice endpoint)
       resolved = parseTimePeriodToResolvedDates(timePeriod);
+    } else if (dateFilter && (dateFilter as DateFilter).period) {
+      // Fallback: if only period provided in dateFilter, parse it
+      resolved = parseTimePeriodToResolvedDates((dateFilter as DateFilter).period!);
     }
 
     if (!resolved) {

@@ -90,8 +90,9 @@ ${intents.map(i => `### ${i.id}
 - **feeType**: Infer from context:
   - "commission" / "commissions" / "trading fees" -> "commission"
   - "credit interest" / "interest earned" -> "credit_interest"
-  - "debit interest" / "margin interest" / "interest charged" / "short interest" -> "debit_interest"
+  - "debit interest" / "margin interest" / "interest charged" -> "debit_interest"
   - "locate fee" / "borrow fee" / "stock borrow" -> "locate_fee"
+  - "short interest" / "short borrow interest" / "shorting interest" -> "short_interest"
 
 ## Intent Disambiguation Rules
 
@@ -204,5 +205,14 @@ Query: "The total locate fees you paid for stock MTEN since this year is $67.00"
 Response: {"intent": "unknown", "confidence": 0.0, "entities": {"symbol": "MTEN"}}
 
 Query: "Your commissions for AAPL last month were $125.50" (AGENT RESPONSE - extract symbol only)
-Response: {"intent": "unknown", "confidence": 0.0, "entities": {"symbol": "AAPL"}}`;
+Response: {"intent": "unknown", "confidence": 0.0, "entities": {"symbol": "AAPL"}}
+
+Query: "Short interest from last month"
+Response: {"intent": "fees.query", "confidence": 0.94, "entities": {"feeType": "short_interest", "timePeriod": "last month", "dateFilter": {"type": "relative", "period": "last month", "description": "last month"}}}
+
+Query: "What is my short interest for this year?"
+Response: {"intent": "fees.query", "confidence": 0.93, "entities": {"feeType": "short_interest", "timePeriod": "this year", "dateFilter": {"type": "relative", "period": "this year", "description": "this year"}}}
+
+Query: "Show my short interest for MTEN"
+Response: {"intent": "fees.query", "confidence": 0.92, "entities": {"symbol": "MTEN", "feeType": "short_interest"}}`;
 }

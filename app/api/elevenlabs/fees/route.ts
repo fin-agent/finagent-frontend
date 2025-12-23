@@ -11,7 +11,7 @@ const supabase = createClient(
 
 const ACCOUNT_CODE = 'C40421';
 
-type FeeType = 'commission' | 'credit_interest' | 'debit_interest' | 'locate_fee';
+type FeeType = 'commission' | 'credit_interest' | 'debit_interest' | 'locate_fee' | 'short_interest';
 
 // UI data structure for FeesSummary component
 interface FeesUIData {
@@ -160,6 +160,7 @@ export async function POST(req: NextRequest) {
       'credit_interest': 'CreditInt',
       'debit_interest': 'DebitInt',
       'locate_fee': 'LocateFee',
+      'short_interest': 'LocateFee', // Short interest = locate/borrow fees for short positions
     };
 
     const dbFeeType = feeTypeMap[feeType];
@@ -175,8 +176,8 @@ export async function POST(req: NextRequest) {
       feesQuery = feesQuery.gte('Date', startDate).lte('Date', endDate);
     }
 
-    // For locate fees, filter by symbol if provided
-    if (feeType === 'locate_fee' && symbol) {
+    // For locate fees / short interest, filter by symbol if provided
+    if ((feeType === 'locate_fee' || feeType === 'short_interest') && symbol) {
       const normalizedSymbol = normalizeSymbol(symbol);
       feesQuery = feesQuery.eq('Symbol', normalizedSymbol);
     }
@@ -261,6 +262,11 @@ export async function POST(req: NextRequest) {
       case 'locate_fee': {
         const symbolText = symbol ? ` for stock ${normalizedSymbol}` : '';
         response = `The total Locate fees you paid${symbolText} for ${description} is ${formatCurrency(Math.abs(totalAmount))}${txCountText}`;
+        break;
+      }
+      case 'short_interest': {
+        const symbolText = symbol ? ` for ${normalizedSymbol}` : '';
+        response = `Your total short interest${symbolText} for ${description} is ${formatCurrency(Math.abs(totalAmount))}${txCountText}`;
         break;
       }
     }

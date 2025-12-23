@@ -113,6 +113,7 @@ export async function POST(req: NextRequest) {
       'credit_interest': 'CreditInt',
       'debit_interest': 'DebitInt',
       'locate_fee': 'LocateFee',
+      'short_interest': 'LocateFee', // Short interest = locate/borrow fees for short positions
     };
 
     const dbFeeType = feeTypeMap[feeType];
@@ -128,7 +129,7 @@ export async function POST(req: NextRequest) {
       feesQuery = feesQuery.gte('Date', startDate).lte('Date', endDate);
     }
 
-    if (feeType === 'locate_fee' && symbol) {
+    if ((feeType === 'locate_fee' || feeType === 'short_interest') && symbol) {
       const normalizedSymbol = normalizeSymbol(symbol);
       feesQuery = feesQuery.eq('Symbol', normalizedSymbol);
     }

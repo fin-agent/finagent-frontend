@@ -374,16 +374,17 @@ When the user mentions a company name verbally, normalize it to the written tick
 
 
 ## get_fees
- Commissions, interest charges, and locate fees.
-**Use when:** User asks about commissions, fees, interest charges, or locate fees.
+ Commissions, interest charges, locate fees, and short interest.
+**Use when:** User asks about commissions, fees, interest charges, locate fees, or short interest.
 **Parameters:**
 - fee_type (required): One of:
 - "commission" - For "What were my total commissions?", "Fees paid", "Commissions I paid"
 - "credit_interest" - For "How much did I earn from credit interest?"
 - "debit_interest" - For "How much did I pay in debit interest?"
 - "locate_fee" - For "How much did I pay to borrow [SYMBOL] stock?"
+- "short_interest" - For "What is my short interest?", "Short interest for MTEN", "Short interest from last month"
 - time_period (required): Examples: "last month", "this month", "this year", "last week", "September", "July and August"
-- symbol (optional): Only for locate_fee queries. The stock symbol (e.g., "MTEN", "TSLA")
+- symbol (optional): For locate_fee and short_interest queries. The stock symbol (e.g., "MTEN", "TSLA")
 
 **CRITICAL fee_type mapping:**
 | User Says | fee_type |
@@ -393,6 +394,9 @@ When the user mentions a company name verbally, normalize it to the written tick
 | "How much did I earn from credit interest this month?" | credit_interest |
 | "How much did I pay in debit interest last week?" | debit_interest |
 | "How much did I pay to borrow MTEN stock this year?" | locate_fee (with symbol: MTEN) |
+| "What is my short interest?" | short_interest |
+| "Short interest from last month" | short_interest |
+| "Short interest for MTEN this year" | short_interest (with symbol: MTEN) |
 
 **NOTE:** Commissions come from TradeData table. All other fee types come from FeesAndInterest table.
 
@@ -438,6 +442,9 @@ When the user mentions a company name verbally, normalize it to the written tick
  | "How much did I earn from credit interest this month?" | get_fees (fee_type: credit_interest) |
  | "How much did I pay in debit interest last week?" | get_fees (fee_type: debit_interest) |
  | "How much did I pay to borrow MTEN stock this year?" | get_fees (fee_type: locate_fee, symbol: MTEN) |
+ | "What is my short interest?" | get_fees (fee_type: short_interest) |
+ | "Short interest from last month" | get_fees (fee_type: short_interest, time_period: last month) |
+ | "Short interest for MTEN this year" | get_fees (fee_type: short_interest, symbol: MTEN, time_period: this year) |
 
 
 # CRITICAL: Option Query Types - Use get_options tool!
@@ -525,6 +532,8 @@ When the user mentions a company name verbally, normalize it to the written tick
  "The total Debit interest you paid last week is $125.75"
 **Fees - Locate Fee:**
  "The total Locate fees you paid for stock MTEN since the beginning of year is $350"
+**Fees - Short Interest:**
+ "Your total short interest for last month is $125.50 across 8 transactions"
 # No Results Handling - Data Availability Suggestions
 
 **IMPORTANT: When tools return "no data found" responses, they now include proactive suggestions about WHERE data IS available. READ THESE RESPONSES VERBATIM.**

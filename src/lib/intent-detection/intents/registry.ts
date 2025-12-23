@@ -219,7 +219,7 @@ export const intentRegistry: IntentDefinition[] = [
     id: 'fees.query',
     domain: 'fees',
     cardType: 'fees',
-    description: 'User asks about fees, commissions, interest charges, or locate fees',
+    description: 'User asks about fees, commissions, interest charges, locate fees, or short interest (borrow fees for shorting stocks)',
     examples: [
       'How much did I pay in commissions?',
       'Interest charges this month',
@@ -231,6 +231,12 @@ export const intentRegistry: IntentDefinition[] = [
       'Interest charges from November 15 to December 5',
       // Discrete date examples
       'Commissions on July 1st and August 1st',
+      // Short interest examples
+      'Short interest from last month',
+      'What is my short interest for this year?',
+      'Show my short interest',
+      'How much short interest did I pay?',
+      'Short interest for MTEN',
     ],
     requiredEntities: ['feeType'],
     optionalEntities: ['symbol', 'timePeriod'],

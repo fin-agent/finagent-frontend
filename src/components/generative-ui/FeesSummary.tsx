@@ -3,7 +3,7 @@
 import React from 'react';
 import { formatCalendarDate } from '@/src/lib/date-utils';
 
-export type FeeType = 'commission' | 'credit_interest' | 'debit_interest' | 'locate_fee';
+export type FeeType = 'commission' | 'credit_interest' | 'debit_interest' | 'locate_fee' | 'short_interest';
 
 export interface DataSuggestion {
   period: string;
@@ -93,6 +93,14 @@ const feeConfig: Record<FeeType, {
     icon: '🔍',
     accentColor: colors.purple,
     gradientFrom: '#150f1a',
+    isCredit: false,
+  },
+  short_interest: {
+    title: 'Short Interest',
+    description: 'Interest paid on short positions',
+    icon: '📉',
+    accentColor: colors.red,
+    gradientFrom: '#1a0f0f',
     isCredit: false,
   },
 };

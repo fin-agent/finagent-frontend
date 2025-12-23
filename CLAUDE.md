@@ -350,9 +350,12 @@ This displays two cards side-by-side: stock price statistics (PRICE STATS) and o
 - `commission` - Trading commissions (from TradeData table)
 - `credit_interest` - Interest earned on credit balance
 - `debit_interest` - Interest charged on margin
-- `locate_fee` - Short locate fees
+- `locate_fee` - Short locate fees (borrow fees for specific symbols)
+- `short_interest` - Short interest charges (borrow fees for shorting stocks, maps to `LocateFee` in DB)
 
 Both support time period parameters: "today", "this week", "last month", "this year", specific months, etc.
+
+**IMPORTANT:** In regex detection, `short_interest` must be checked BEFORE `debit_interest` because "short interest" contains "interest" which would otherwise match `debit_interest`.
 
 ### UI Component Styling
 
@@ -515,6 +518,44 @@ with an affirmative, you MUST call the tool again with the SUGGESTED time period
 ```
 
 **DO NOT repeat suggestion from memory - MUST call tool again for full breakdown.**
+
+### Voice/UI Drift Prevention: Double Date Offset Fix
+
+**Problem:** When user says "Yes" to a data suggestion, the UI would show different amounts than the voice agent spoke.
+
+**Root Cause:** Suggestion follow-ups pass `dateFilter` with explicit `startDate`/`endDate` from `suggestDataPeriod()`. These dates are ALREADY demo-adjusted. If the UI endpoint calls `resolveDateFilter()`, it applies the date offset AGAIN, causing drift.
+
+**Example:**
+```
+User: "What was my short interest for October?"
+Voice: "$39 short interest for October" (correct)
+User: "Yes" (to see suggested data for different period)
+Without fix: UI shows $19 (wrong dates from double offset)
+With fix: UI shows $39 (matches voice)
+```
+
+**Solution:** UI endpoints check for explicit `startDate`/`endDate` and use them directly:
+
+```typescript
+// For dateFilter with explicit startDate/endDate (e.g., from suggestion follow-up),
+// use those dates DIRECTLY without applying offset again.
+if (dateFilter && dateFilter.startDate && dateFilter.endDate) {
+  resolved = {
+    type: dateFilter.type === 'discrete' ? 'discrete' : 'range',
+    startDate: dateFilter.startDate,
+    endDate: dateFilter.endDate,
+    description: dateFilter.description || timePeriod || 'selected period',
+  };
+} else if (timePeriod) {
+  // Primary path: parse time period string (applies offset)
+  resolved = parseTimePeriodToResolvedDates(timePeriod);
+}
+```
+
+**Files with this fix:**
+- `app/api/fees-ui/route.ts`
+- `app/api/time-trades-ui/route.ts`
+- `app/api/account-balance-ui/route.ts`
 
 ## Environment Variables
 

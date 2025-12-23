@@ -38,3 +38,31 @@ The ElevenLabs agent prompt lives in `prompts/finagent-neo.md`. When updating, c
 - Follow-up query handling (same tool with new parameters)
 - "Yes" response handling (re-call tool with suggested period)
 - Transaction detail queries (call same tool for breakdown)
+
+### Voice/UI Drift Prevention
+
+**Key Principle:** Voice is the source of truth. UI must always match what the voice agent says.
+
+**Common drift causes and fixes:**
+
+1. **Double Date Offset in Suggestion Follow-ups:**
+   - When user says "Yes" to a data suggestion, `dateFilter` contains pre-adjusted dates
+   - UI endpoints must use these dates DIRECTLY without calling `resolveDateFilter()`
+   - Files: `fees-ui`, `time-trades-ui`, `account-balance-ui`
+
+2. **Regex Detection Order:**
+   - `short_interest` must be checked BEFORE `debit_interest` (both contain "interest")
+   - Bulk options must be checked BEFORE "last option" (both contain "last")
+
+3. **Fee Type Mapping:**
+   - User query detection (`UnifiedAssistant.tsx` line ~871)
+   - Agent response detection (`detectFeesQuery` line ~1818)
+   - Both must recognize all fee types: `commission`, `credit_interest`, `debit_interest`, `locate_fee`, `short_interest`
+
+### Short Interest Support
+
+`short_interest` is a fee type for borrow fees on short positions:
+- Maps to `LocateFee` type in FeesAndInterest database table
+- Can optionally filter by symbol (e.g., "short interest for MTEN")
+- Regex pattern: `/short\s+interest/i`
+- Must be checked before `debit_interest` in detection order

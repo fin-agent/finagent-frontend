@@ -153,9 +153,10 @@ The ElevenLabs agent has access to webhook tools that query trade data:
 | `get_trade_stats` | `/api/elevenlabs/trade-stats` | Get highest/lowest prices, averages for a symbol |
 | `get_profitable_trades` | `/api/elevenlabs/profitable-trades` | Calculate profitable trades using FIFO matching |
 | `get_time_based_trades` | `/api/elevenlabs/time-trades` | Get trades for a time period (last week, yesterday, Nov 18th) |
-| `advanced_query` | `/api/elevenlabs/advanced-query` | Flexible option queries (short/long calls/puts, by date/expiration/strike) |
-| `get_account_balance` | `/api/elevenlabs/account-balance` | Get account balance, equity, buying power, margin info |
-| `get_fees` | `/api/elevenlabs/fees` | Get commissions, interest charges, and locate fees |
+| `get_options` | `/api/elevenlabs/options` | **Dedicated options tool** with 5 query types (see below) |
+| `get_account_balance` | `/api/elevenlabs/account-balance` | Account balance, equity, buying power, margin info |
+| `get_fees` | `/api/elevenlabs/fees` | Commissions, interest charges, locate fees, short interest |
+| `advanced_query` | `/api/elevenlabs/advanced-query` | Legacy flexible queries (use `get_options` for options) |
 
 #### Tool Usage Guidelines (from System Prompt)
 
@@ -169,6 +170,65 @@ The ElevenLabs agent has access to webhook tools that query trade data:
 | `advanced_query` | Option-specific queries | "Show all short calls on Tesla last month", "What's my highest strike put?" |
 
 **Important**: The agent is instructed to always pass ticker symbols (AAPL, GOOGL) not company names to tools.
+
+#### `get_options` Tool (Dedicated Options Queries)
+
+The preferred tool for ALL option-related queries. Has 5 query types:
+
+| Query Type | Use Case | Example |
+|------------|----------|---------|
+| `bulk` | Multiple option trades | "Show all short calls on TSLA last month" |
+| `last` | Single most recent trade | "Show the last call option I bought on AAPL" |
+| `expiring` | Options by expiration date | "Options expiring tomorrow" |
+| `highest_strike` | Single trade with highest/lowest strike | "Highest strike call I sold on AAPL this year" |
+| `total_premium` | Aggregated premium sum | "Total premium paid for SPY options last 12 months" |
+
+**Parameters:**
+- `query_type` (required): One of `bulk`, `last`, `expiring`, `highest_strike`, `total_premium`
+- `symbol` (optional): Stock ticker (e.g., "TSLA", "AAPL")
+- `trade_type` (optional): "buy" or "sell"
+- `call_put` (optional): "call" or "put"
+- `time_period` (optional): Natural language time period
+- `expiration` (optional): "tomorrow", "this week", "this month"
+
+#### `get_account_balance` Tool (Account Queries)
+
+Returns account balance, equity, buying power, and margin information.
+
+| Query Type | Use Case | Example Query |
+|------------|----------|---------------|
+| `cash_balance` | Cash available | "How much can I withdraw?" |
+| `cash_and_equity` | Cash + account equity | "How much money do I have?" |
+| `buying_power` | Day trading BP | "What is my buying power?" |
+| `account_summary` | Full overview (default) | "Show my account summary" |
+| `nlv` | Net liquidation value | "What is my NLV?" |
+| `overnight_margin` | Margin status | "What's my overnight margin?" |
+| `market_value` | Position market values | "Market value of my positions" |
+| `debit_balances` | Debit balance trends | "Debit balances for September" |
+| `credit_balances` | Credit balance trends | "Credit balances for the month" |
+
+**Parameters:**
+- `query_type` (required): One of the types above
+- `time_period` (required for `debit_balances`/`credit_balances`): Time period for trends
+
+#### `get_fees` Tool (Fees & Interest Queries)
+
+Returns commissions, interest charges, and locate fees.
+
+| Fee Type | Source Table | Use Case | Example Query |
+|----------|--------------|----------|---------------|
+| `commission` | TradeData | Trading commissions | "What were my fees paid last month?" |
+| `credit_interest` | FeesAndInterest | Interest earned | "How much credit interest this month?" |
+| `debit_interest` | FeesAndInterest | Margin interest charged | "How much debit interest last week?" |
+| `locate_fee` | FeesAndInterest | Short locate fees (with symbol) | "How much to borrow MTEN stock this year?" |
+| `short_interest` | FeesAndInterest | Short interest charges | "What is my short interest for October?" |
+
+**Parameters:**
+- `fee_type` (required): One of `commission`, `credit_interest`, `debit_interest`, `locate_fee`, `short_interest`
+- `time_period` (required): Natural language time period
+- `symbol` (optional): For `locate_fee` and `short_interest` queries
+
+**Note:** `short_interest` maps to `LocateFee` type in the database. Both represent borrow fees for shorting stocks.
 
 ### Connection Stability
 
@@ -687,6 +747,42 @@ Agent: "The total debit interest for the last six months is $402 across 13 trans
 
 **This ensures the UI card appears with full transaction breakdown.**
 
+### Voice/UI Drift Prevention
+
+**Key Principle:** The voice agent is the source of truth. The UI must always display exactly what the voice says.
+
+#### Common Drift Causes and Solutions
+
+| Cause | Solution |
+|-------|----------|
+| Double date offset in suggestion follow-ups | Use explicit `startDate`/`endDate` directly, don't call `resolveDateFilter()` |
+| Regex detection order | Check `short_interest` before `debit_interest`, bulk options before "last option" |
+| Different data sources | Voice webhooks return `uiData` for UI to use directly |
+| Symbol extraction failures | Wait for LLM classification before fetching UI data |
+
+#### Double Date Offset Fix
+
+When user says "Yes" to a data suggestion, the `dateFilter` contains pre-adjusted demo dates from `suggestDataPeriod()`. UI endpoints must use these directly:
+
+```typescript
+// CORRECT: Use explicit dates directly
+if (dateFilter?.startDate && dateFilter?.endDate) {
+  resolved = {
+    startDate: dateFilter.startDate,
+    endDate: dateFilter.endDate,
+    description: dateFilter.description,
+  };
+}
+
+// WRONG: This applies offset twice
+resolved = resolveDateFilter(dateFilter); // Don't do this!
+```
+
+**Files with this pattern:**
+- `app/api/fees-ui/route.ts`
+- `app/api/time-trades-ui/route.ts`
+- `app/api/account-balance-ui/route.ts`
+
 ---
 
 ## Database Schema
@@ -695,6 +791,7 @@ Agent: "The total debit interest for the last six months is $402 across 13 trans
 erDiagram
     AccountInfo ||--o{ TradeData : has
     AccountInfo ||--o{ AccountBalance : has
+    AccountInfo ||--o{ FeesAndInterest : has
     AccountInfo ||--o{ conversations : has
     conversations ||--o{ messages : contains
 
@@ -732,6 +829,15 @@ erDiagram
         numeric StockLMV
         numeric AccountEquity
         numeric DayTradingBP
+    }
+
+    FeesAndInterest {
+        bigint id PK
+        varchar AccountCode FK
+        date Date
+        varchar Type "CreditInt, DebitInt, LocateFee"
+        varchar Symbol "For locate/short fees"
+        numeric Amount
     }
 
     conversations {
@@ -927,6 +1033,81 @@ Called by ElevenLabs agent to get trades for a specific time period.
 #### `POST /api/time-trades-ui`
 
 Returns structured data for the TimeBasedTrades UI component.
+
+#### `POST /api/elevenlabs/fees`
+
+Called by ElevenLabs agent to get fees and interest charges.
+
+**Request:**
+```json
+{
+  "fee_type": "short_interest",
+  "time_period": "October",
+  "symbol": "MTEN"
+}
+```
+
+**Response:**
+```json
+{
+  "response": "Your total short interest for October is $39.00 across 4 transactions",
+  "uiData": {
+    "feeType": "short_interest",
+    "totalAmount": 39.00,
+    "transactionCount": 4,
+    "timePeriod": "October",
+    "symbol": "MTEN",
+    "breakdown": [
+      { "date": "2025-10-15", "amount": 12.50, "symbol": "MTEN" },
+      { "date": "2025-10-08", "amount": 10.25, "symbol": "MTEN" }
+    ]
+  }
+}
+```
+
+**Fee Type to Database Type Mapping:**
+| Fee Type | DB Type | Source |
+|----------|---------|--------|
+| `commission` | Commission field | TradeData table |
+| `credit_interest` | CreditInt | FeesAndInterest table |
+| `debit_interest` | DebitInt | FeesAndInterest table |
+| `locate_fee` | LocateFee | FeesAndInterest table |
+| `short_interest` | LocateFee | FeesAndInterest table |
+
+#### `POST /api/fees-ui`
+
+Returns structured data for the FeesSummary UI component.
+
+#### `POST /api/elevenlabs/account-balance`
+
+Called by ElevenLabs agent to get account balance information.
+
+**Request:**
+```json
+{
+  "query_type": "debit_balances",
+  "time_period": "September"
+}
+```
+
+**Response:**
+```json
+{
+  "response": "Your average debit balance for the month of September is $15250. The highest debit balance was on September 15th in the amount of $18500. The lowest debit balance was on September 28th in the amount of $12100",
+  "uiData": {
+    "queryType": "debit_balances",
+    "date": "2025-09-30",
+    "balanceTrend": {
+      "average": 15250,
+      "highest": 18500,
+      "highestDate": "2025-09-15",
+      "lowest": 12100,
+      "lowestDate": "2025-09-28",
+      "period": "September"
+    }
+  }
+}
+```
 
 ---
 
@@ -1221,6 +1402,9 @@ curl -X POST http://localhost:3000/api/elevenlabs/detailed-trades \
 | "What are my margin requirements?" | get_account_balance | AccountSummary |
 | "How much commission did I pay last month?" | get_fees | FeesSummary |
 | "Show my interest charges" | get_fees | FeesSummary |
+| "What was my short interest for October?" | get_fees | FeesSummary |
+| "Short interest for MTEN this year" | get_fees | FeesSummary |
+| "How much did I pay to borrow MTEN stock?" | get_fees | FeesSummary |
 
 ---
 

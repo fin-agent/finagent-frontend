@@ -13,7 +13,7 @@ export async function OPTIONS() {
   return new NextResponse(null, { status: 200, headers: corsHeaders });
 }
 import { createClient } from '@supabase/supabase-js';
-import { normalizeSymbol } from '@/src/lib/symbol-utils';
+import { normalizeSymbol, symbolToCompanyName } from '@/src/lib/symbol-utils';
 import { parseTimePeriodToResolvedDates } from '@/src/lib/date-parser';
 import { suggestDataPeriod } from '@/src/lib/data-availability';
 import { formatCalendarDate } from '@/src/lib/date-utils';
@@ -69,13 +69,28 @@ const supabase = createClient(
 
 const ACCOUNT_CODE = 'C40421';
 
-// Helper to format currency for voice
+// Helper to format currency for voice/TTS
+// CRITICAL: Commas break TTS - format as "24094 dollars and 50 cents" for natural speech
 function formatCurrency(value: number): string {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-  }).format(value);
+  const absValue = Math.abs(value);
+  const dollars = Math.floor(absValue);
+  const cents = Math.round((absValue - dollars) * 100);
+  const isNegative = value < 0;
+
+  let result = '';
+  if (isNegative) {
+    result = 'negative ';
+  }
+
+  // Format dollars without commas
+  result += `${dollars} dollar${dollars !== 1 ? 's' : ''}`;
+
+  // Add cents if present
+  if (cents > 0) {
+    result += ` and ${cents} cent${cents !== 1 ? 's' : ''}`;
+  }
+
+  return result;
 }
 
 // Strip markdown from response for clean TTS output
@@ -190,12 +205,14 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
       const stockTrades = data?.filter(t => t.SecurityType === 'S').length || 0;
       const optionTrades = data?.filter(t => t.SecurityType === 'O').length || 0;
 
+      // Use company name for natural voice output (e.g., "Tesla" instead of "T S L A")
+      const companyName = symbolToCompanyName(normalizedSymbol);
       return JSON.stringify({
         symbol: normalizedSymbol,
         stockTrades,
         optionTrades,
         totalTrades: stockTrades + optionTrades,
-        response: `You have ${stockTrades + optionTrades} total trades for ${normalizedSymbol}: ${stockTrades} stock trades and ${optionTrades} option trades.`,
+        response: `You have ${stockTrades + optionTrades} total trades for ${companyName}: ${stockTrades} stock trades and ${optionTrades} option trades.`,
       });
     }
 
@@ -291,7 +308,9 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
           symbol: normalizedSymbol,
         });
         const feeTypeName = fee_type.replace('_', ' ');
-        const symbolText = symbol ? ` for ${normalizedSymbol}` : '';
+        // Use company name for natural voice output
+        const companyName = normalizedSymbol ? symbolToCompanyName(normalizedSymbol) : '';
+        const symbolText = companyName ? ` for ${companyName}` : '';
 
         return JSON.stringify({
           feeType: fee_type,
@@ -308,7 +327,9 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
         'locate_fee': 'locate fees you paid',
         'short_interest': 'short interest',
       };
-      const symbolText = normalizedSymbol ? ` for ${normalizedSymbol}` : '';
+      // Use company name for natural voice output
+      const companyName = normalizedSymbol ? symbolToCompanyName(normalizedSymbol) : '';
+      const symbolText = companyName ? ` for ${companyName}` : '';
 
       return JSON.stringify({
         feeType: fee_type,
@@ -385,9 +406,12 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
 
       if (error) return JSON.stringify({ error: error.message, timePeriod: description });
 
+      // Use company name for natural voice output
+      const companyName = normalizedSymbol ? symbolToCompanyName(normalizedSymbol) : '';
+
       if (!data || data.length === 0) {
         const suggestion = await suggestDataPeriod('TradeData', description);
-        const symbolText = normalizedSymbol ? ` for ${normalizedSymbol}` : '';
+        const symbolText = companyName ? ` for ${companyName}` : '';
         return JSON.stringify({
           timePeriod: description,
           totalTrades: 0,
@@ -400,7 +424,7 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
       const stockTrades = data.filter(t => t.SecurityType === 'S');
       const optionTrades = data.filter(t => t.SecurityType === 'O');
       const totalValue = data.reduce((sum, t) => sum + Math.abs(parseFloat(t.NetAmount || '0')), 0);
-      const symbolText = normalizedSymbol ? ` for ${normalizedSymbol}` : '';
+      const symbolText = companyName ? ` for ${companyName}` : '';
 
       return JSON.stringify({
         timePeriod: description,

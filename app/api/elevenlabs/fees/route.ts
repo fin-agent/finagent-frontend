@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import { parseTimePeriodToResolvedDates } from '@/src/lib/date-parser';
-import { normalizeSymbol, parseOptionSymbol } from '@/src/lib/symbol-utils';
+import { normalizeSymbol, parseOptionSymbol, symbolToCompanyName } from '@/src/lib/symbol-utils';
 import { suggestDataPeriod } from '@/src/lib/data-availability';
 
 const supabase = createClient(
@@ -34,12 +34,25 @@ interface FeesUIData {
   } | null;
 }
 
+// Format currency for voice/TTS - no commas, natural speech format
 function formatCurrency(value: number): string {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-  }).format(value);
+  const absValue = Math.abs(value);
+  const dollars = Math.floor(absValue);
+  const cents = Math.round((absValue - dollars) * 100);
+  const isNegative = value < 0;
+
+  let result = '';
+  if (isNegative) {
+    result = 'negative ';
+  }
+
+  result += `${dollars} dollar${dollars !== 1 ? 's' : ''}`;
+
+  if (cents > 0) {
+    result += ` and ${cents} cent${cents !== 1 ? 's' : ''}`;
+  }
+
+  return result;
 }
 
 export async function POST(req: NextRequest) {
@@ -211,7 +224,9 @@ export async function POST(req: NextRequest) {
       });
 
       const feeTypeName = feeType.replace('_', ' ');
-      const symbolText = symbol ? ` for ${normalizedSymbol}` : '';
+      // Use company name for natural voice output (e.g., "Tesla" instead of "T S L A")
+      const companyName = normalizedSymbol ? symbolToCompanyName(normalizedSymbol) : '';
+      const symbolText = companyName ? ` for ${companyName}` : '';
 
       if (suggestion && suggestion.amount > 0) {
         const uiData: FeesUIData = {
@@ -260,12 +275,16 @@ export async function POST(req: NextRequest) {
         response = `The total Debit interest you paid for ${description} is ${formatCurrency(Math.abs(totalAmount))}${txCountText}`;
         break;
       case 'locate_fee': {
-        const symbolText = symbol ? ` for stock ${normalizedSymbol}` : '';
+        // Use company name for natural voice output (e.g., "Tesla" instead of "T S L A")
+        const companyName = normalizedSymbol ? symbolToCompanyName(normalizedSymbol) : '';
+        const symbolText = companyName ? ` for ${companyName}` : '';
         response = `The total Locate fees you paid${symbolText} for ${description} is ${formatCurrency(Math.abs(totalAmount))}${txCountText}`;
         break;
       }
       case 'short_interest': {
-        const symbolText = symbol ? ` for ${normalizedSymbol}` : '';
+        // Use company name for natural voice output (e.g., "Tesla" instead of "T S L A")
+        const companyName = normalizedSymbol ? symbolToCompanyName(normalizedSymbol) : '';
+        const symbolText = companyName ? ` for ${companyName}` : '';
         response = `Your total short interest${symbolText} for ${description} is ${formatCurrency(Math.abs(totalAmount))}${txCountText}`;
         break;
       }

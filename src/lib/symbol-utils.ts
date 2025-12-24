@@ -73,6 +73,76 @@ export const SYMBOL_MAP: Record<string, string> = {
   'chevron': 'CVX',
 };
 
+// Reverse map: ticker symbols to company names for voice output
+// TTS reads "TSLA" as "T S L A" which sounds unnatural
+// This map converts tickers to speakable company names
+export const TICKER_TO_COMPANY: Record<string, string> = {
+  'AAPL': 'Apple',
+  'GOOGL': 'Google',
+  'GOOG': 'Google',
+  'AMZN': 'Amazon',
+  'MSFT': 'Microsoft',
+  'TSLA': 'Tesla',
+  'NVDA': 'Nvidia',
+  'META': 'Meta',
+  'NFLX': 'Netflix',
+  'AMD': 'AMD',
+  'INTC': 'Intel',
+  'IBM': 'IBM',
+  'CRM': 'Salesforce',
+  'ADBE': 'Adobe',
+  'PYPL': 'PayPal',
+  'SHOP': 'Shopify',
+  'UBER': 'Uber',
+  'LYFT': 'Lyft',
+  'SNAP': 'Snap',
+  'X': 'X',
+  'SPOT': 'Spotify',
+  'ZM': 'Zoom',
+  'PLTR': 'Palantir',
+  'COIN': 'Coinbase',
+  'HOOD': 'Robinhood',
+  'DIS': 'Disney',
+  'BA': 'Boeing',
+  'JPM': 'JP Morgan',
+  'GS': 'Goldman Sachs',
+  'MS': 'Morgan Stanley',
+  'BAC': 'Bank of America',
+  'WFC': 'Wells Fargo',
+  'V': 'Visa',
+  'MA': 'Mastercard',
+  'AXP': 'American Express',
+  'KO': 'Coca-Cola',
+  'PEP': 'Pepsi',
+  'WMT': 'Walmart',
+  'TGT': 'Target',
+  'COST': 'Costco',
+  'HD': 'Home Depot',
+  'LOW': 'Lowes',
+  'SBUX': 'Starbucks',
+  'MCD': 'McDonalds',
+  'NKE': 'Nike',
+  'XOM': 'Exxon',
+  'CVX': 'Chevron',
+  'SPY': 'S&P 500 ETF',
+  'QQQ': 'Nasdaq ETF',
+  'IWM': 'Russell 2000 ETF',
+};
+
+/**
+ * Convert a ticker symbol to a speakable company name for TTS
+ * If no mapping exists, returns the original ticker (TTS will spell it out)
+ *
+ * e.g., "TSLA" -> "Tesla"
+ *       "AAPL" -> "Apple"
+ *       "MTEN" -> "MTEN" (unknown, kept as-is)
+ */
+export function symbolToCompanyName(ticker: string): string {
+  if (!ticker) return ticker;
+  const upper = ticker.toUpperCase();
+  return TICKER_TO_COMPANY[upper] || ticker;
+}
+
 /**
  * Normalize a company name or symbol to its ticker
  * Handles: Speech corrections, OCC option symbols, company names, and raw tickers

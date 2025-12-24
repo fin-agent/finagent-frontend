@@ -2,7 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import { parseTimePeriodToResolvedDates } from '@/src/lib/date-parser';
 import { formatDisplayDate, formatDateRange } from '@/src/lib/date-utils';
-import { normalizeSymbol } from '@/src/lib/symbol-utils';
+import { normalizeSymbol, symbolToCompanyName } from '@/src/lib/symbol-utils';
 import { suggestDataPeriod } from '@/src/lib/data-availability';
 
 // Format date in PACIFIC TIMEZONE to match UI display
@@ -104,8 +104,11 @@ export async function POST(req: NextRequest) {
     const trades = data || [];
     const tradeCount = trades.length;
 
+    // Use company name for natural voice output (e.g., "Tesla" instead of "T S L A")
+    const companyName = normalizedSymbol ? symbolToCompanyName(normalizedSymbol) : '';
+
     // Build response based on results
-    const symbolText = normalizedSymbol ? ` for ${normalizedSymbol}` : '';
+    const symbolText = companyName ? ` for ${companyName}` : '';
 
     if (tradeCount === 0) {
       // Use LLM-based suggestion for a natural time period with actual count

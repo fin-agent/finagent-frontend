@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
-import { normalizeSymbol, parseOptionSymbol } from '@/src/lib/symbol-utils';
+import { normalizeSymbol, parseOptionSymbol, symbolToCompanyName } from '@/src/lib/symbol-utils';
 import { formatCalendarDate } from '@/src/lib/date-utils';
 
 const supabase = createClient(
@@ -41,9 +41,25 @@ function formatNumber(num: number): string {
   return Math.round(num).toString();
 }
 
-// Format currency for TTS
-function formatCurrency(amount: number): string {
-  return `$${Math.abs(amount).toFixed(2)}`;
+// Format currency for voice/TTS - no commas or $ symbol, natural speech format
+function formatCurrency(value: number): string {
+  const absValue = Math.abs(value);
+  const dollars = Math.floor(absValue);
+  const cents = Math.round((absValue - dollars) * 100);
+  const isNegative = value < 0;
+
+  let result = '';
+  if (isNegative) {
+    result = 'negative ';
+  }
+
+  result += `${dollars} dollar${dollars !== 1 ? 's' : ''}`;
+
+  if (cents > 0) {
+    result += ` and ${cents} cent${cents !== 1 ? 's' : ''}`;
+  }
+
+  return result;
 }
 
 export async function POST(req: NextRequest) {
@@ -133,8 +149,11 @@ export async function POST(req: NextRequest) {
     // Calculate average value per trade
     const avgValue = data.length > 0 ? totalValue / data.length : 0;
 
+    // Use company name for natural voice output (e.g., "Tesla" instead of "T S L A")
+    const companyName = symbolToCompanyName(normalizedSymbol);
+
     // Build response for TTS - matches UI display
-    let response = `For ${normalizedSymbol}, you have ${data.length} total trades: `;
+    let response = `For ${companyName}, you have ${data.length} total trades: `;
     response += `${stockTrades.length} stock trades and ${optionTrades.length} option trades. `;
     response += `${buyCount} buys and ${sellCount} sells. `;
     response += `Total quantity: ${formatNumber(totalQuantity)}`;

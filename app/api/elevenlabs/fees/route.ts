@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { parseTimePeriodToResolvedDates } from '@/src/lib/date-parser';
 import { normalizeSymbol, parseOptionSymbol, symbolToCompanyName } from '@/src/lib/symbol-utils';
 import { suggestDataPeriod } from '@/src/lib/data-availability';
+import { formatCurrencyForTTS } from '@/src/lib/tts-utils';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -34,26 +35,6 @@ interface FeesUIData {
   } | null;
 }
 
-// Format currency for voice/TTS - no commas, natural speech format
-function formatCurrency(value: number): string {
-  const absValue = Math.abs(value);
-  const dollars = Math.floor(absValue);
-  const cents = Math.round((absValue - dollars) * 100);
-  const isNegative = value < 0;
-
-  let result = '';
-  if (isNegative) {
-    result = 'negative ';
-  }
-
-  result += `${dollars} dollar${dollars !== 1 ? 's' : ''}`;
-
-  if (cents > 0) {
-    result += ` and ${cents} cent${cents !== 1 ? 's' : ''}`;
-  }
-
-  return result;
-}
 
 export async function POST(req: NextRequest) {
   try {
@@ -133,7 +114,7 @@ export async function POST(req: NextRequest) {
             },
           };
           return NextResponse.json({
-            response: `No commission data found for ${description}. However, I found ${formatCurrency(suggestion.amount)} in commissions for ${suggestion.suggestedPeriod}. Would you like to know more about that?`,
+            response: `No commission data found for ${description}. However, I found ${formatCurrencyForTTS(suggestion.amount)} in commissions for ${suggestion.suggestedPeriod}. Would you like to know more about that?`,
             uiData,
           });
         }
@@ -150,7 +131,7 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      const amount = formatCurrency(Math.abs(totalCommission));
+      const amount = formatCurrencyForTTS(Math.abs(totalCommission));
       const uiData: FeesUIData = {
         feeType: 'commission',
         totalAmount: Math.abs(totalCommission),
@@ -244,7 +225,7 @@ export async function POST(req: NextRequest) {
           },
         };
         return NextResponse.json({
-          response: `No ${feeTypeName} found${symbolText} for ${description}. However, I found ${formatCurrency(suggestion.amount)} in ${feeTypeName} for ${suggestion.suggestedPeriod}. Would you like to know more about that?`,
+          response: `No ${feeTypeName} found${symbolText} for ${description}. However, I found ${formatCurrencyForTTS(suggestion.amount)} in ${feeTypeName} for ${suggestion.suggestedPeriod}. Would you like to know more about that?`,
           uiData,
         });
       }
@@ -269,23 +250,23 @@ export async function POST(req: NextRequest) {
     let response = '';
     switch (feeType) {
       case 'credit_interest':
-        response = `The total credit interest you received for ${description} is ${formatCurrency(Math.abs(totalAmount))}${txCountText}`;
+        response = `The total credit interest you received for ${description} is ${formatCurrencyForTTS(Math.abs(totalAmount))}${txCountText}`;
         break;
       case 'debit_interest':
-        response = `The total Debit interest you paid for ${description} is ${formatCurrency(Math.abs(totalAmount))}${txCountText}`;
+        response = `The total Debit interest you paid for ${description} is ${formatCurrencyForTTS(Math.abs(totalAmount))}${txCountText}`;
         break;
       case 'locate_fee': {
         // Use company name for natural voice output (e.g., "Tesla" instead of "T S L A")
         const companyName = normalizedSymbol ? symbolToCompanyName(normalizedSymbol) : '';
         const symbolText = companyName ? ` for ${companyName}` : '';
-        response = `The total Locate fees you paid${symbolText} for ${description} is ${formatCurrency(Math.abs(totalAmount))}${txCountText}`;
+        response = `The total Locate fees you paid${symbolText} for ${description} is ${formatCurrencyForTTS(Math.abs(totalAmount))}${txCountText}`;
         break;
       }
       case 'short_interest': {
         // Use company name for natural voice output (e.g., "Tesla" instead of "T S L A")
         const companyName = normalizedSymbol ? symbolToCompanyName(normalizedSymbol) : '';
         const symbolText = companyName ? ` for ${companyName}` : '';
-        response = `Your total short interest${symbolText} for ${description} is ${formatCurrency(Math.abs(totalAmount))}${txCountText}`;
+        response = `Your total short interest${symbolText} for ${description} is ${formatCurrencyForTTS(Math.abs(totalAmount))}${txCountText}`;
         break;
       }
     }
@@ -294,7 +275,7 @@ export async function POST(req: NextRequest) {
     if (txCount > 3) {
       const topTransactions = data.slice(0, 3).map(f => {
         const date = new Date(f.Date).toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
-        return `${formatCurrency(Math.abs(f.Amount || 0))} on ${date}`;
+        return `${formatCurrencyForTTS(Math.abs(f.Amount || 0))} on ${date}`;
       });
       response += `. The most recent charges were ${topTransactions.join(', ')}`;
     }

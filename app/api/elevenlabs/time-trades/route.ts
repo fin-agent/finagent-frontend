@@ -4,6 +4,7 @@ import { parseTimePeriodToResolvedDates } from '@/src/lib/date-parser';
 import { formatDisplayDate, formatDateRange } from '@/src/lib/date-utils';
 import { normalizeSymbol, symbolToCompanyName } from '@/src/lib/symbol-utils';
 import { suggestDataPeriod } from '@/src/lib/data-availability';
+import { formatCurrencyForTTS, formatNumberForTTS } from '@/src/lib/tts-utils';
 
 // Format date in PACIFIC TIMEZONE to match UI display
 // The UI renders dates in the user's browser (typically Pacific time)
@@ -163,7 +164,7 @@ export async function POST(req: NextRequest) {
         const totalShares = validTrades.reduce((sum, t) => sum + t.shares, 0);
         const totalNotional = validTrades.reduce((sum, t) => sum + t.price * t.shares, 0);
         const avgPrice = totalShares > 0 ? totalNotional / totalShares : 0;
-        statsText = ` The average price was $${avgPrice.toFixed(2)}.`;
+        statsText = ` The average price was ${formatCurrencyForTTS(avgPrice)}.`;
       }
     }
 
@@ -189,17 +190,19 @@ export async function POST(req: NextRequest) {
     }
 
     // Build response message with explicit counts
-    // TTS requires no commas in numbers - commas break speech synthesis
-    const totalValueStr = `$${totalValue.toFixed(2)}`;
+    // TTS requires numbers spelled out as words for proper pronunciation
+    const totalValueStr = formatCurrencyForTTS(totalValue);
 
-    // Always state the exact counts clearly
-    const summaryLine = `You executed ${tradeCount} total trades${symbolText} for ${description}: ${stockCount} stock trade${stockCount !== 1 ? 's' : ''} and ${optionCount} option trade${optionCount !== 1 ? 's' : ''} with a total value of ${totalValueStr}.`;
+    // Always state the exact counts clearly - use words for natural TTS
+    const summaryLine = `You executed ${formatNumberForTTS(tradeCount)} total trades${symbolText} for ${description}: ${formatNumberForTTS(stockCount)} stock trade${stockCount !== 1 ? 's' : ''} and ${formatNumberForTTS(optionCount)} option trade${optionCount !== 1 ? 's' : ''} with a total value of ${totalValueStr}.`;
 
     const stockHighlights = stockTrades.slice(0, 2).map(t => {
       const action = t.TradeType === 'B' ? 'buying' : 'selling';
       const shares = parseInt(t.StockShareQty || '0');
       const price = parseFloat(t.StockTradePrice || '0');
-      return `${action} ${shares} shares of ${t.Symbol} at $${price.toFixed(2)}`;
+      // Use company name and TTS-friendly currency format
+      const stockName = symbolToCompanyName(t.Symbol || '');
+      return `${action} ${formatNumberForTTS(shares)} shares of ${stockName} at ${formatCurrencyForTTS(price)}`;
     });
 
     const optionHighlights = optionTrades.slice(0, 2).map(t => {
@@ -210,9 +213,11 @@ export async function POST(req: NextRequest) {
       const rawSymbol = String(t.Symbol || '');
       const parsedUnderlying = rawSymbol.match(/^[A-Z]{1,6}/)?.[0];
       const underlying = t.UnderlyingSymbol || parsedUnderlying || rawSymbol;
-      const strike = t.Strike ? `$${t.Strike}` : null;
-      const instrumentText = strike ? `${underlying} ${strike}` : underlying;
-      return `${action} ${contracts} ${instrumentText} ${callPut} contracts at $${premium.toFixed(2)} premium`;
+      // Use company name and TTS-friendly formats
+      const underlyingName = symbolToCompanyName(underlying);
+      const strike = t.Strike ? `${formatCurrencyForTTS(parseFloat(t.Strike))}` : null;
+      const instrumentText = strike ? `${underlyingName} ${strike}` : underlyingName;
+      return `${action} ${formatNumberForTTS(contracts)} ${instrumentText} ${callPut} contracts at ${formatCurrencyForTTS(premium)} premium`;
     });
 
     let highlightsText = '';

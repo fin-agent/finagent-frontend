@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import { normalizeSymbol, parseOptionSymbol, symbolToCompanyName } from '@/src/lib/symbol-utils';
 import { formatCalendarDate } from '@/src/lib/date-utils';
+import { formatCurrencyForTTS, formatNumberForTTS } from '@/src/lib/tts-utils';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -36,31 +37,6 @@ interface DetailedTradesUIData {
   }>;
 }
 
-// Format number for TTS (no commas)
-function formatNumber(num: number): string {
-  return Math.round(num).toString();
-}
-
-// Format currency for voice/TTS - no commas or $ symbol, natural speech format
-function formatCurrency(value: number): string {
-  const absValue = Math.abs(value);
-  const dollars = Math.floor(absValue);
-  const cents = Math.round((absValue - dollars) * 100);
-  const isNegative = value < 0;
-
-  let result = '';
-  if (isNegative) {
-    result = 'negative ';
-  }
-
-  result += `${dollars} dollar${dollars !== 1 ? 's' : ''}`;
-
-  if (cents > 0) {
-    result += ` and ${cents} cent${cents !== 1 ? 's' : ''}`;
-  }
-
-  return result;
-}
 
 export async function POST(req: NextRequest) {
   try {
@@ -156,13 +132,13 @@ export async function POST(req: NextRequest) {
     let response = `For ${companyName}, you have ${data.length} total trades: `;
     response += `${stockTrades.length} stock trades and ${optionTrades.length} option trades. `;
     response += `${buyCount} buys and ${sellCount} sells. `;
-    response += `Total quantity: ${formatNumber(totalQuantity)}`;
+    response += `Total quantity: ${formatNumberForTTS(totalQuantity)}`;
 
     if (stockTrades.length > 0 && optionTrades.length > 0) {
-      response += ` (${formatNumber(totalShares)} shares and ${formatNumber(totalContracts)} contracts)`;
+      response += ` (${formatNumberForTTS(totalShares)} shares and ${formatNumberForTTS(totalContracts)} contracts)`;
     }
 
-    response += `. Total value: ${formatCurrency(totalValue)} with an average of ${formatCurrency(avgValue)} per trade.`;
+    response += `. Total value: ${formatCurrencyForTTS(totalValue)} with an average of ${formatCurrencyForTTS(avgValue)} per trade.`;
 
     // Build UI data with all trade details
     const uiData: DetailedTradesUIData = {

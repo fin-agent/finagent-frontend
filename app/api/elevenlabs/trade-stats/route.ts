@@ -2,7 +2,8 @@ import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import { getDateOffset } from '@/src/lib/date-utils';
 import { parseTimeExpression } from '@/src/lib/date-parser';
-import { normalizeSymbol } from '@/src/lib/symbol-utils';
+import { normalizeSymbol, symbolToCompanyName } from '@/src/lib/symbol-utils';
+import { formatCurrencyForTTS, formatNumberForTTS } from '@/src/lib/tts-utils';
 
 // Format date for voice - shows raw database dates (no offset)
 // For "this year" queries, database dates are already 2025 dates
@@ -31,15 +32,6 @@ const supabase = createClient(
 
 const ACCOUNT_CODE = 'C40421';
 
-// Format price as currency - keep in numeric form
-function formatPrice(price: number): string {
-  return `$${price.toFixed(2)}`;
-}
-
-// Format number without commas (TTS requires no commas - commas break speech synthesis)
-function formatNumber(num: number): string {
-  return Math.round(num).toString();
-}
 
 export async function POST(req: NextRequest) {
   try {
@@ -112,10 +104,13 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    // Use company name for natural voice output (e.g., "Tesla" instead of "T S L A")
+    const companyName = symbolToCompanyName(normalizedSymbol);
+
     if (!data || data.length === 0) {
       const typeLabel = tradeType ? (tradeType.toLowerCase().startsWith('s') ? 'sell' : 'buy') : '';
       return NextResponse.json({
-        response: `No ${typeLabel} trades found for ${normalizedSymbol} ${periodDescription}.`,
+        response: `No ${typeLabel} trades found for ${companyName} ${periodDescription}.`,
       });
     }
 
@@ -149,11 +144,11 @@ export async function POST(req: NextRequest) {
     const highDate = highestTrade?.Date ? formatDateForVoice(highestTrade.Date) : 'N/A';
     const lowDate = lowestTrade?.Date ? formatDateForVoice(lowestTrade.Date) : 'N/A';
 
-    let response = `${normalizedSymbol} trade statistics for ${periodDescription}: `;
-    response += `Highest price ${typeLabel}: ${formatPrice(highestPrice)} on ${highDate} for ${formatNumber(highShareQty)} shares. `;
-    response += `Lowest price ${typeLabel}: ${formatPrice(lowestPrice)} on ${lowDate} for ${formatNumber(lowShareQty)} shares. `;
-    response += `Average price: ${formatPrice(avgPrice)}. `;
-    response += `Total: ${formatNumber(data.length)} trades, ${formatNumber(totalShares)} shares, ${formatPrice(totalValue)} total value.`;
+    let response = `${companyName} trade statistics for ${periodDescription}: `;
+    response += `Highest price ${typeLabel}: ${formatCurrencyForTTS(highestPrice)} on ${highDate} for ${formatNumberForTTS(highShareQty)} shares. `;
+    response += `Lowest price ${typeLabel}: ${formatCurrencyForTTS(lowestPrice)} on ${lowDate} for ${formatNumberForTTS(lowShareQty)} shares. `;
+    response += `Average price: ${formatCurrencyForTTS(avgPrice)}. `;
+    response += `Total: ${formatNumberForTTS(data.length)} trades, ${formatNumberForTTS(totalShares)} shares, ${formatCurrencyForTTS(totalValue)} total value.`;
 
     return NextResponse.json({ response });
   } catch (error) {

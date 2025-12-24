@@ -17,6 +17,7 @@ import { normalizeSymbol, symbolToCompanyName } from '@/src/lib/symbol-utils';
 import { parseTimePeriodToResolvedDates } from '@/src/lib/date-parser';
 import { suggestDataPeriod } from '@/src/lib/data-availability';
 import { formatCalendarDate } from '@/src/lib/date-utils';
+import { formatCurrencyForTTS } from '@/src/lib/tts-utils';
 import * as dotenv from 'dotenv';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -69,29 +70,6 @@ const supabase = createClient(
 
 const ACCOUNT_CODE = 'C40421';
 
-// Helper to format currency for voice/TTS
-// CRITICAL: Commas break TTS - format as "24094 dollars and 50 cents" for natural speech
-function formatCurrency(value: number): string {
-  const absValue = Math.abs(value);
-  const dollars = Math.floor(absValue);
-  const cents = Math.round((absValue - dollars) * 100);
-  const isNegative = value < 0;
-
-  let result = '';
-  if (isNegative) {
-    result = 'negative ';
-  }
-
-  // Format dollars without commas
-  result += `${dollars} dollar${dollars !== 1 ? 's' : ''}`;
-
-  // Add cents if present
-  if (cents > 0) {
-    result += ` and ${cents} cent${cents !== 1 ? 's' : ''}`;
-  }
-
-  return result;
-}
 
 // Strip markdown from response for clean TTS output
 function stripMarkdown(text: string): string {
@@ -257,7 +235,7 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
             feeType: 'commission',
             totalAmount: 0,
             response: suggestion && suggestion.amount > 0
-              ? `No commission data found for ${description}. However, I found ${formatCurrency(suggestion.amount)} in commissions for ${suggestion.suggestedPeriod}. Would you like to know more about that?`
+              ? `No commission data found for ${description}. However, I found ${formatCurrencyForTTS(suggestion.amount)} in commissions for ${suggestion.suggestedPeriod}. Would you like to know more about that?`
               : `No commission data found for ${description}.`,
           });
         }
@@ -267,7 +245,7 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
           totalAmount: totalCommission,
           transactionCount: data.length,
           timePeriod: description,
-          response: `The total commission you paid in ${description} is ${formatCurrency(totalCommission)}`,
+          response: `The total commission you paid in ${description} is ${formatCurrencyForTTS(totalCommission)}`,
         });
       }
 
@@ -316,7 +294,7 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
           feeType: fee_type,
           totalAmount: 0,
           response: suggestion && suggestion.amount > 0
-            ? `No ${feeTypeName} found${symbolText} for ${description}. However, I found ${formatCurrency(suggestion.amount)} in ${feeTypeName} for ${suggestion.suggestedPeriod}. Would you like to know more about that?`
+            ? `No ${feeTypeName} found${symbolText} for ${description}. However, I found ${formatCurrencyForTTS(suggestion.amount)} in ${feeTypeName} for ${suggestion.suggestedPeriod}. Would you like to know more about that?`
             : `No ${feeTypeName} data found${symbolText} for ${description}.`,
         });
       }
@@ -337,7 +315,7 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
         transactionCount: data.length,
         timePeriod: description,
         symbol: normalizedSymbol,
-        response: `The total ${feeTypeNames[fee_type] || fee_type}${symbolText} for ${description} is ${formatCurrency(totalAmount)}`,
+        response: `The total ${feeTypeNames[fee_type] || fee_type}${symbolText} for ${description} is ${formatCurrencyForTTS(totalAmount)}`,
       });
     }
 
@@ -356,13 +334,13 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
       const balanceDate = formatCalendarDate(data.Date);
 
       const responses: Record<string, string> = {
-        'cash_balance': `Your account cash balance as of ${balanceDate} is ${formatCurrency(data.CashBalance)}`,
-        'cash_and_equity': `Your account cash balance as of ${balanceDate} is ${formatCurrency(data.CashBalance)} and account equity is ${formatCurrency(data['Account Equity'])}`,
-        'buying_power': `Your Day Trade Buying power as of ${balanceDate} is ${formatCurrency(data.DayTradingBP)}`,
-        'nlv': `Your account Net Liquidation value as of ${balanceDate} is ${formatCurrency(data['Account Equity'])}`,
-        'overnight_margin': `Your account House requirement as of ${balanceDate} is ${formatCurrency(data.HouseRequirment)}`,
-        'market_value': `The market value of your long stock positions is ${formatCurrency(data['Stock LMV'] || 0)}, long options is ${formatCurrency(data['Options LMV'] || 0)}`,
-        'account_summary': `Your account summary as of ${balanceDate}: Cash Balance is ${formatCurrency(data.CashBalance)}, Account Equity is ${formatCurrency(data['Account Equity'])}, Day Trading BP is ${formatCurrency(data.DayTradingBP)}`,
+        'cash_balance': `Your account cash balance as of ${balanceDate} is ${formatCurrencyForTTS(data.CashBalance)}`,
+        'cash_and_equity': `Your account cash balance as of ${balanceDate} is ${formatCurrencyForTTS(data.CashBalance)} and account equity is ${formatCurrencyForTTS(data['Account Equity'])}`,
+        'buying_power': `Your Day Trade Buying power as of ${balanceDate} is ${formatCurrencyForTTS(data.DayTradingBP)}`,
+        'nlv': `Your account Net Liquidation value as of ${balanceDate} is ${formatCurrencyForTTS(data['Account Equity'])}`,
+        'overnight_margin': `Your account House requirement as of ${balanceDate} is ${formatCurrencyForTTS(data.HouseRequirment)}`,
+        'market_value': `The market value of your long stock positions is ${formatCurrencyForTTS(data['Stock LMV'] || 0)}, long options is ${formatCurrencyForTTS(data['Options LMV'] || 0)}`,
+        'account_summary': `Your account summary as of ${balanceDate}: Cash Balance is ${formatCurrencyForTTS(data.CashBalance)}, Account Equity is ${formatCurrencyForTTS(data['Account Equity'])}, Day Trading BP is ${formatCurrencyForTTS(data.DayTradingBP)}`,
       };
 
       return JSON.stringify({
@@ -433,7 +411,7 @@ async function executeTool(name: string, args: Record<string, unknown>): Promise
         stockCount: stockTrades.length,
         optionCount: optionTrades.length,
         totalValue,
-        response: `You executed ${data.length} trades${symbolText} ${description}: ${stockTrades.length} stock trades and ${optionTrades.length} option trades with a total value of ${formatCurrency(totalValue)}.`,
+        response: `You executed ${data.length} trades${symbolText} ${description}: ${stockTrades.length} stock trades and ${optionTrades.length} option trades with a total value of ${formatCurrencyForTTS(totalValue)}.`,
       });
     }
 

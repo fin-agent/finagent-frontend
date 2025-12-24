@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { formatCalendarDate } from '@/src/lib/date-utils';
 import { parseTimePeriodToResolvedDates } from '@/src/lib/date-parser';
 import { suggestDataPeriod } from '@/src/lib/data-availability';
+import { formatCurrencyForTTS } from '@/src/lib/tts-utils';
 
 // Use formatCalendarDate from date-utils to apply demo date offset
 // This ensures voice and UI show the same dates
@@ -65,13 +66,6 @@ interface AccountBalanceUIData {
   } | null;
 }
 
-function formatCurrency(value: number): string {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-  }).format(value);
-}
 
 // Use formatDateForVoice for consistent date display WITHOUT offset
 const formatDate = formatDateForVoice;
@@ -177,7 +171,7 @@ export async function POST(req: NextRequest) {
       };
 
       return NextResponse.json({
-        response: `Your Average ${balanceType} balance for ${periodLabel} is ${formatCurrency(avg)}. The Highest ${balanceType} balance was on ${highestDate} in the amount of ${formatCurrency(max)}. The Lowest ${balanceType} balance was on ${lowestDate} in the amount of ${formatCurrency(min)}`,
+        response: `Your Average ${balanceType} balance for ${periodLabel} is ${formatCurrencyForTTS(avg)}. The Highest ${balanceType} balance was on ${highestDate} in the amount of ${formatCurrencyForTTS(max)}. The Lowest ${balanceType} balance was on ${lowestDate} in the amount of ${formatCurrencyForTTS(min)}`,
         uiData,
       });
     }
@@ -236,25 +230,25 @@ export async function POST(req: NextRequest) {
     switch (queryType) {
       case 'cash_balance':
         return NextResponse.json({
-          response: `Your account cash balance as of ${balanceDate} is ${formatCurrency(balance.CashBalance)}`,
+          response: `Your account cash balance as of ${balanceDate} is ${formatCurrencyForTTS(balance.CashBalance)}`,
           uiData: baseUIData,
         });
 
       case 'cash_and_equity':
         return NextResponse.json({
-          response: `Your account cash balance as of ${balanceDate} is ${formatCurrency(balance.CashBalance)} and account equity is ${formatCurrency(balance['Account Equity'])}`,
+          response: `Your account cash balance as of ${balanceDate} is ${formatCurrencyForTTS(balance.CashBalance)} and account equity is ${formatCurrencyForTTS(balance['Account Equity'])}`,
           uiData: baseUIData,
         });
 
       case 'buying_power':
         return NextResponse.json({
-          response: `Your Day Trade Buying power as of ${balanceDate} is ${formatCurrency(balance.DayTradingBP)}`,
+          response: `Your Day Trade Buying power as of ${balanceDate} is ${formatCurrencyForTTS(balance.DayTradingBP)}`,
           uiData: baseUIData,
         });
 
       case 'nlv':
         return NextResponse.json({
-          response: `Your account Net Liquidation value as of ${balanceDate} is ${formatCurrency(balance['Account Equity'])}`,
+          response: `Your account Net Liquidation value as of ${balanceDate} is ${formatCurrencyForTTS(balance['Account Equity'])}`,
           uiData: baseUIData,
         });
 
@@ -262,9 +256,9 @@ export async function POST(req: NextRequest) {
         {
           const excessDeficit = balance.HouseExcessDeficit || 0;
           const label = excessDeficit >= 0 ? 'House Excess' : 'House Deficit';
-          const amount = formatCurrency(Math.abs(excessDeficit));
+          const amount = formatCurrencyForTTS(Math.abs(excessDeficit));
           return NextResponse.json({
-            response: `Your account House requirement as of ${balanceDate} is ${formatCurrency(balance.HouseRequirment)} and ${label} is ${amount}`,
+            response: `Your account House requirement as of ${balanceDate} is ${formatCurrencyForTTS(balance.HouseRequirment)} and ${label} is ${amount}`,
             uiData: baseUIData,
           });
         }
@@ -275,7 +269,7 @@ export async function POST(req: NextRequest) {
         const optionsLong = balance['Options LMV'] || 0;
         const optionsShort = balance['Optons SMV'] || 0; // DB typo
         return NextResponse.json({
-          response: `The market value of your long stock positions is ${formatCurrency(stockLong)}, your long options positions is ${formatCurrency(optionsLong)}, your short stock positions is ${formatCurrency(stockShort)}, your short options positions is ${formatCurrency(optionsShort)}`,
+          response: `The market value of your long stock positions is ${formatCurrencyForTTS(stockLong)}, your long options positions is ${formatCurrencyForTTS(optionsLong)}, your short stock positions is ${formatCurrencyForTTS(stockShort)}, your short options positions is ${formatCurrencyForTTS(optionsShort)}`,
           uiData: baseUIData,
         });
       }
@@ -283,7 +277,7 @@ export async function POST(req: NextRequest) {
       case 'account_summary':
       default:
         return NextResponse.json({
-          response: `Your account summary as of ${balanceDate}: Cash Balance is ${formatCurrency(balance.CashBalance)}, Account Equity is ${formatCurrency(balance['Account Equity'])}, Day Trading BP is ${formatCurrency(balance.DayTradingBP)}, Stock Long Market value is ${formatCurrency(balance['Stock LMV'] || 0)}, Stock Short Market value is ${formatCurrency(balance['Stock SMV'] || 0)}, Options Long Market value is ${formatCurrency(balance['Options LMV'] || 0)}, Options Short Market value is ${formatCurrency(balance['Optons SMV'] || 0)}`,
+          response: `Your account summary as of ${balanceDate}: Cash Balance is ${formatCurrencyForTTS(balance.CashBalance)}, Account Equity is ${formatCurrencyForTTS(balance['Account Equity'])}, Day Trading BP is ${formatCurrencyForTTS(balance.DayTradingBP)}, Stock Long Market value is ${formatCurrencyForTTS(balance['Stock LMV'] || 0)}, Stock Short Market value is ${formatCurrencyForTTS(balance['Stock SMV'] || 0)}, Options Long Market value is ${formatCurrencyForTTS(balance['Options LMV'] || 0)}, Options Short Market value is ${formatCurrencyForTTS(balance['Optons SMV'] || 0)}`,
           uiData: baseUIData,
         });
     }

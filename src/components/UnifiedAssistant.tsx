@@ -2053,11 +2053,21 @@ const UnifiedAssistant: React.FC = () => {
 
     const get_trade_summary = async (parameters: Record<string, unknown>) => {
       const symbol = getToolSymbol(parameters);
-      const payload = await postJson('/api/elevenlabs/trade-summary', { symbol });
-      // Store UI data for rendering
-      toolUIDataRef.current = { type: 'summary', symbol: symbol || '', data: payload };
-      console.log('📊 [Trade Summary Tool] Set toolUIDataRef:', toolUIDataRef.current);
-      return unwrapResponse(payload);
+
+      // SINGLE FETCH: Voice endpoint returns BOTH response AND uiData
+      const voicePayload = await postJson('/api/elevenlabs/trade-summary', { symbol });
+
+      // Store UI data from voice response (guaranteed sync)
+      if (voicePayload && typeof voicePayload === 'object' && 'uiData' in voicePayload) {
+        toolUIDataRef.current = {
+          type: 'summary',
+          symbol: symbol || '',
+          data: (voicePayload as { uiData: unknown }).uiData,
+        };
+        console.log('📊 [Trade Summary Tool] Set toolUIDataRef from webhook uiData:', toolUIDataRef.current);
+      }
+
+      return unwrapResponse(voicePayload);
     };
 
     const get_detailed_trades = async (parameters: Record<string, unknown>) => {
@@ -2090,29 +2100,45 @@ const UnifiedAssistant: React.FC = () => {
       const symbol = getToolSymbol(parameters);
       const tradeType = getString(parameters, 'trade_type');
       const timePeriod = getString(parameters, 'time_period');
-      // Fetch both stock and option stats for UI
-      const [stockData, optionData] = await Promise.all([
-        postJson('/api/trade-stats', { symbol, tradeType: tradeType || 'all', timePeriod }),
-        postJson('/api/option-stats', { symbol, tradeType: tradeType || 'all', timePeriod }),
-      ]);
-      // Store UI data for rendering
-      toolUIDataRef.current = { type: 'stats', symbol: symbol || '', tradeType: tradeType as 'buy' | 'sell' | undefined, timePeriod, data: stockData, optionData };
-      console.log('📊 [Trade Stats Tool] Set toolUIDataRef:', toolUIDataRef.current);
-      // Get voice response
+
+      // SINGLE FETCH: Voice endpoint returns BOTH response AND uiData (stats + optionStats)
       const voicePayload = await postJson('/api/elevenlabs/trade-stats', { symbol, trade_type: tradeType, time_period: timePeriod });
+
+      // Store UI data from voice response (guaranteed sync)
+      if (voicePayload && typeof voicePayload === 'object' && 'uiData' in voicePayload) {
+        const uiData = (voicePayload as { uiData: { stats: unknown; optionStats: unknown } }).uiData;
+        toolUIDataRef.current = {
+          type: 'stats',
+          symbol: symbol || '',
+          tradeType: tradeType as 'buy' | 'sell' | undefined,
+          timePeriod,
+          data: { stats: uiData.stats },
+          optionData: { optionStats: uiData.optionStats },
+        };
+        console.log('📊 [Trade Stats Tool] Set toolUIDataRef from webhook uiData:', toolUIDataRef.current);
+      }
+
       return unwrapResponse(voicePayload);
     };
 
     const get_profitable_trades = async (parameters: Record<string, unknown>) => {
       const symbol = getToolSymbol(parameters);
       const timePeriod = getString(parameters, 'time_period');
-      // Fetch UI data
-      const uiPayload = await postJson('/api/profitable-trades-ui', { symbol, timePeriod });
-      // Store UI data for rendering
-      toolUIDataRef.current = { type: 'profitable', symbol: symbol || '', timePeriod, data: uiPayload };
-      console.log('📊 [Profitable Trades Tool] Set toolUIDataRef:', toolUIDataRef.current);
-      // Get voice response
+
+      // SINGLE FETCH: Voice endpoint returns BOTH response AND uiData
       const voicePayload = await postJson('/api/elevenlabs/profitable-trades', { symbol, time_period: timePeriod });
+
+      // Store UI data from voice response (guaranteed sync)
+      if (voicePayload && typeof voicePayload === 'object' && 'uiData' in voicePayload) {
+        toolUIDataRef.current = {
+          type: 'profitable',
+          symbol: symbol || '',
+          timePeriod,
+          data: (voicePayload as { uiData: unknown }).uiData,
+        };
+        console.log('📊 [Profitable Trades Tool] Set toolUIDataRef from webhook uiData:', toolUIDataRef.current);
+      }
+
       return unwrapResponse(voicePayload);
     };
 
@@ -2154,33 +2180,28 @@ const UnifiedAssistant: React.FC = () => {
       const fromDate = getString(parameters, 'from_date');
       const toDate = getString(parameters, 'to_date');
       const expiration = getString(parameters, 'expiration');
-      // Fetch UI data
-      const uiPayload = await postJson('/api/advanced-query-ui', {
-        symbol: symbol || undefined,
-        securityType: securityType === 'option' ? 'O' : securityType === 'stock' ? 'S' : undefined,
-        tradeType: tradeType === 'buy' ? 'B' : tradeType === 'sell' ? 'S' : undefined,
-        callPut: callPut === 'call' ? 'C' : callPut === 'put' ? 'P' : undefined,
-        fromDate,
-        toDate,
-        expiration,
-      });
-      // Store UI data for rendering
-      toolUIDataRef.current = {
-        type: 'advanced-options',
-        symbol: symbol || '',
-        tradeType: tradeType as 'buy' | 'sell' | undefined,
-        callPut: callPut as 'call' | 'put' | undefined,
-        expiration,
-        data: uiPayload
-      };
-      console.log('📊 [Advanced Trades Tool] Set toolUIDataRef:', toolUIDataRef.current);
-      // Get voice response
+
+      // SINGLE FETCH: Voice endpoint returns BOTH response AND uiData
       const voicePayload = await postJson('/api/elevenlabs/advanced-query', {
         symbol, security_type: securityType, trade_type: tradeType, call_put: callPut,
         from_date: fromDate, to_date: toDate, expiration,
         strike: parameters['strike'], aggregation: getString(parameters, 'aggregation'),
         limit: parameters['limit'], order_by: getString(parameters, 'order_by'),
       });
+
+      // Store UI data from voice response (guaranteed sync)
+      if (voicePayload && typeof voicePayload === 'object' && 'uiData' in voicePayload) {
+        toolUIDataRef.current = {
+          type: 'advanced-options',
+          symbol: symbol || '',
+          tradeType: tradeType as 'buy' | 'sell' | undefined,
+          callPut: callPut as 'call' | 'put' | undefined,
+          expiration,
+          data: (voicePayload as { uiData: unknown }).uiData,
+        };
+        console.log('📊 [Advanced Trades Tool] Set toolUIDataRef from webhook uiData:', toolUIDataRef.current);
+      }
+
       return unwrapResponse(voicePayload);
     };
 

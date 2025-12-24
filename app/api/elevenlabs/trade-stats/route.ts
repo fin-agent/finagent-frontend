@@ -98,6 +98,23 @@ export async function POST(req: NextRequest) {
 
     const { data, error } = await query.order('Date', { ascending: false });
 
+    // Also fetch option trades for UI sync (shows both stock and option stats)
+    let optionQuery = supabase
+      .from('TradeData')
+      .select('*')
+      .eq('AccountCode', ACCOUNT_CODE)
+      .eq('SecurityType', 'O')
+      .or(`Symbol.eq.${normalizedSymbol},UnderlyingSymbol.eq.${normalizedSymbol}`)
+      .gte('Date', dateStart)
+      .lte('Date', dateEnd);
+
+    if (tradeType) {
+      const normalizedType = tradeType.toLowerCase().startsWith('s') ? 'S' : 'B';
+      optionQuery = optionQuery.eq('TradeType', normalizedType);
+    }
+
+    const { data: optionData } = await optionQuery.order('Date', { ascending: false });
+
     if (error) {
       return NextResponse.json({
         response: `Error getting trade stats: ${error.message}`,
@@ -107,7 +124,7 @@ export async function POST(req: NextRequest) {
     // Use company name for natural voice output (e.g., "Tesla" instead of "T S L A")
     const companyName = symbolToCompanyName(normalizedSymbol);
 
-    if (!data || data.length === 0) {
+    if ((!data || data.length === 0) && (!optionData || optionData.length === 0)) {
       const typeLabel = tradeType ? (tradeType.toLowerCase().startsWith('s') ? 'sell' : 'buy') : '';
       return NextResponse.json({
         response: `No ${typeLabel} trades found for ${companyName} ${periodDescription}.`,
@@ -150,7 +167,70 @@ export async function POST(req: NextRequest) {
     response += `Average price: ${formatCurrencyForTTS(avgPrice)}. `;
     response += `Total: ${formatNumberForTTS(data.length)} trades, ${formatNumberForTTS(totalShares)} shares, ${formatCurrencyForTTS(totalValue)} total value.`;
 
-    return NextResponse.json({ response });
+    // Calculate option stats for UI sync
+    let optionStats = null;
+    if (optionData && optionData.length > 0) {
+      const premiums = optionData.map(t => parseFloat(t.OptionTradePremium || '0')).filter(p => p > 0);
+      const contracts = optionData.map(t => parseFloat(t.OptionContracts || '0'));
+      const totalContracts = contracts.reduce((a, b) => a + b, 0);
+      const optionTotalValue = optionData.reduce((sum, t) => sum + Math.abs(parseFloat(t.NetAmount || '0')), 0);
+
+      const highestPremium = premiums.length > 0 ? Math.max(...premiums) : 0;
+      const lowestPremium = premiums.length > 0 ? Math.min(...premiums) : 0;
+      const avgPremium = premiums.length > 0 ? premiums.reduce((a, b) => a + b, 0) / premiums.length : 0;
+
+      const highestOptionTrade = optionData.find(t => parseFloat(t.OptionTradePremium || '0') === highestPremium);
+      const lowestOptionTrade = optionData.find(t => parseFloat(t.OptionTradePremium || '0') === lowestPremium);
+
+      const callCount = optionData.filter(t => t['Call/Put'] === 'C').length;
+      const putCount = optionData.filter(t => t['Call/Put'] === 'P').length;
+
+      optionStats = {
+        symbol: normalizedSymbol,
+        year: userYear,
+        tradeType: typeLabel,
+        highestPremium,
+        highestPremiumDate: highestOptionTrade?.Date ? formatDateForVoice(highestOptionTrade.Date) : null,
+        highestPremiumContracts: highestOptionTrade ? parseFloat(highestOptionTrade.OptionContracts || '0') : 0,
+        highestPremiumStrike: highestOptionTrade ? parseFloat(highestOptionTrade.Strike || '0') : 0,
+        highestPremiumCallPut: highestOptionTrade?.['Call/Put'] === 'C' ? 'Call' : 'Put',
+        lowestPremium,
+        lowestPremiumDate: lowestOptionTrade?.Date ? formatDateForVoice(lowestOptionTrade.Date) : null,
+        lowestPremiumContracts: lowestOptionTrade ? parseFloat(lowestOptionTrade.OptionContracts || '0') : 0,
+        lowestPremiumStrike: lowestOptionTrade ? parseFloat(lowestOptionTrade.Strike || '0') : 0,
+        lowestPremiumCallPut: lowestOptionTrade?.['Call/Put'] === 'C' ? 'Call' : 'Put',
+        averagePremium: avgPremium,
+        totalTrades: optionData.length,
+        totalContracts,
+        totalValue: optionTotalValue,
+        callCount,
+        putCount,
+      };
+    }
+
+    // Return both response AND uiData for single-fetch sync pattern
+    return NextResponse.json({
+      response,
+      uiData: {
+        stats: data && data.length > 0 ? {
+          symbol: normalizedSymbol,
+          year: userYear,
+          tradeType: typeLabel,
+          timePeriod: timePeriod ? periodDescription : null,
+          highestPrice,
+          highestPriceDate: highDate,
+          highestPriceShares: highShareQty,
+          lowestPrice,
+          lowestPriceDate: lowDate,
+          lowestPriceShares: lowShareQty,
+          averagePrice: avgPrice,
+          totalTrades: data.length,
+          totalShares,
+          totalValue,
+        } : null,
+        optionStats,
+      },
+    });
   } catch (error) {
     console.error('Trade stats error:', error);
     return NextResponse.json({

@@ -44,11 +44,24 @@ export async function POST(req: NextRequest) {
     if (totalTrades === 0) {
       return NextResponse.json({
         response: `No trades found for ${normalizedSymbol}.`,
+        uiData: {
+          symbol: normalizedSymbol,
+          stockTrades: 0,
+          optionTrades: 0,
+          totalTrades: 0,
+        },
       });
     }
 
+    // Return both response AND uiData for single-fetch sync pattern
     return NextResponse.json({
       response: `For ${normalizedSymbol}: Found ${stockTrades} stock trades and ${optionTrades} option trades. Total: ${totalTrades} trades.`,
+      uiData: {
+        symbol: normalizedSymbol,
+        stockTrades,
+        optionTrades,
+        totalTrades,
+      },
     });
   } catch (error) {
     console.error('Trade summary error:', error);

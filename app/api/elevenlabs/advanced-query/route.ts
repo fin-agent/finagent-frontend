@@ -490,17 +490,28 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Return both response AND uiData for single-fetch sync pattern
     return NextResponse.json({
       response,
-      // Include metadata for UI rendering with correct calculations
-      _meta: {
-        tradeCount,
-        totalContracts,
-        totalShares,
-        sharesCovered,  // contracts * 100 for options
-        totalNetAmount,  // Actual amount received/paid (after fees)
-        totalGrossPremium,  // premium * contracts * 100
-        avgPremiumPerShare,  // Average premium per share
+      uiData: {
+        trades: data,
+        aggregations: {
+          tradeCount,
+          totalTrades: tradeCount,
+          totalPremium: totalNetAmount,
+          totalNetAmount,
+          avgPremium: avgPremiumPerShare,
+          totalQuantity: totalContracts + totalShares,
+          totalContracts,
+          totalShares,
+          sharesCovered,
+          buyCount: data.filter(t => t.TradeType === 'B').length,
+          sellCount: data.filter(t => t.TradeType === 'S').length,
+          stockCount: data.filter(t => t.SecurityType === 'S').length,
+          optionCount: data.filter(t => t.SecurityType === 'O').length,
+          callCount: data.filter(t => t['Call/Put'] === 'C').length,
+          putCount: data.filter(t => t['Call/Put'] === 'P').length,
+        },
         filters: {
           symbol: normalizedSymbol || undefined,
           securityType,
@@ -510,8 +521,8 @@ export async function POST(req: NextRequest) {
           toDate,
           expiration,
           strike,
-        }
-      }
+        },
+      },
     });
   } catch (error) {
     console.error('Advanced query error:', error);

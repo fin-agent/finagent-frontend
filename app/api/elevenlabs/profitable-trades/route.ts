@@ -52,6 +52,12 @@ export async function POST(req: NextRequest) {
     if (profitableTrades.length === 0) {
       return NextResponse.json({
         response: `No completed profitable trades found for ${normalizedSymbol}. Your positions may still be open.`,
+        uiData: {
+          symbol: normalizedSymbol,
+          totalProfitableTrades: 0,
+          totalProfit: 0,
+          trades: [],
+        },
       });
     }
 
@@ -60,7 +66,16 @@ export async function POST(req: NextRequest) {
       ? `For ${normalizedSymbol}, you have ${profitableTrades.length} profitable trades with total realized profit $${totalProfit.toFixed(2)}. Your top profit was $${top.profitLoss.toFixed(2)} from ${top.buyDate} to ${top.sellDate}.`
       : `For ${normalizedSymbol}, you have ${profitableTrades.length} profitable trades with total realized profit $${totalProfit.toFixed(2)}.`;
 
-    return NextResponse.json({ response });
+    // Return both response AND uiData for single-fetch sync pattern
+    return NextResponse.json({
+      response,
+      uiData: {
+        symbol: normalizedSymbol,
+        totalProfitableTrades: profitableTrades.length,
+        totalProfit,
+        trades: profitableTrades,
+      },
+    });
   } catch (error) {
     console.error('Profitable trades error:', error);
     return NextResponse.json({

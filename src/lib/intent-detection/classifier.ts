@@ -1,6 +1,7 @@
 // Intent Classifier
-// Uses Azure OpenAI GPT for intent classification via direct fetch
+// Uses Azure OpenAI GPT for intent classification via OpenAI SDK
 
+import OpenAI from 'openai';
 import { buildDeveloperPrompt } from './prompt';
 import { intentRegistry } from './intents/registry';
 import type { ClassificationResult, ExtractedEntities, GPTClassificationResponse } from './types';
@@ -40,28 +41,28 @@ function getDeploymentName(): string {
   return getEnvVar('AZURE_OPENAI_MODEL', 'gpt-5.2');
 }
 
-function getApiVersion(): string {
-  return getEnvVar('AZURE_OPENAI_API_VERSION', '2024-10-21');
-}
-
 function getApiKey(): string {
   return getEnvVar('AZURE_OPENAI_API_KEY');
 }
 
-// Cache the Azure config
-let cachedConfig: { baseURL: string; rawEndpoint: string; deploymentName: string } | null = null;
+// Cache the OpenAI client instance
+let cachedClient: OpenAI | null = null;
+let cachedDeploymentName: string | null = null;
 
-function getAzureConfig(): { baseURL: string; rawEndpoint: string; deploymentName: string } {
-  if (cachedConfig) return cachedConfig;
+function getOpenAIClient(): { client: OpenAI; deploymentName: string } {
+  if (cachedClient && cachedDeploymentName) {
+    return { client: cachedClient, deploymentName: cachedDeploymentName };
+  }
 
   const deploymentName = getDeploymentName();
 
   // Prioritize AZURE_EXISTING_AIPROJECT_ENDPOINT (openai.azure.com) which works with the API key
-  const rawEndpoint =
+  // Endpoint should be in format: https://<resource>.openai.azure.com/openai/v1/
+  const baseURL =
     getEnvVar('AZURE_EXISTING_AIPROJECT_ENDPOINT') ||
     getEnvVar('AZURE_OPENAI_ENDPOINT');
 
-  if (!rawEndpoint) {
+  if (!baseURL) {
     throw new Error('Missing AZURE_OPENAI_ENDPOINT or AZURE_EXISTING_AIPROJECT_ENDPOINT');
   }
 
@@ -70,15 +71,17 @@ function getAzureConfig(): { baseURL: string; rawEndpoint: string; deploymentNam
     throw new Error('Missing AZURE_OPENAI_API_KEY (required for intent classification)');
   }
 
-  try {
-    const url = new URL(rawEndpoint);
-    // Azure OpenAI URL format: https://<resource>.openai.azure.com/openai/deployments/<deployment>
-    const baseURL = `${url.origin}/openai/deployments/${deploymentName}`;
-    cachedConfig = { baseURL, rawEndpoint, deploymentName };
-    return cachedConfig;
-  } catch {
-    throw new Error(`Invalid endpoint URL: "${rawEndpoint}"`);
-  }
+  // Create OpenAI client with Azure endpoint
+  // The baseURL should be: https://<resource>.openai.azure.com/openai/v1/
+  cachedClient = new OpenAI({
+    baseURL: baseURL,
+    apiKey: apiKey,
+  });
+
+  cachedDeploymentName = deploymentName;
+  console.log('🤖 [LLM Classifier] OpenAI client initialized with baseURL:', baseURL);
+
+  return { client: cachedClient, deploymentName: cachedDeploymentName };
 }
 
 // Cache the developer prompt since it doesn't change
@@ -125,19 +128,12 @@ function formatDateContext(options?: ClassifyOptions): string {
 
 export async function classifyIntent(userQuery: string, options?: ClassifyOptions): Promise<ClassificationResult | null> {
   try {
-    const { rawEndpoint, baseURL, deploymentName } = getAzureConfig();
-    const apiKey = getApiKey();
-    const apiVersion = getApiVersion();
+    const { client, deploymentName } = getOpenAIClient();
 
     console.log('🤖 [LLM Classifier] ================================');
     console.log('🤖 [LLM Classifier] Query:', userQuery);
-    console.log('🤖 [LLM Classifier] Raw endpoint (from .env.local):', rawEndpoint || '(not set)');
-    console.log('🤖 [LLM Classifier] Base URL:', baseURL);
     console.log('🤖 [LLM Classifier] Model/Deployment:', deploymentName);
-    console.log('🤖 [LLM Classifier] API Version:', apiVersion);
-    console.log('🤖 [LLM Classifier] API Key present:', !!apiKey, '| Key length:', apiKey?.length || 0);
-    console.log('🤖 [LLM Classifier] API Key preview:', apiKey ? `${apiKey.slice(0, 8)}...${apiKey.slice(-8)}` : 'N/A');
-    console.log('🤖 [LLM Classifier] Making API call...');
+    console.log('🤖 [LLM Classifier] Making API call via OpenAI SDK...');
     const startTime = Date.now();
     const developerPrompt = getDeveloperPrompt();
 
@@ -145,38 +141,20 @@ export async function classifyIntent(userQuery: string, options?: ClassifyOption
     const dateContext = formatDateContext(options);
     console.log('🤖 [LLM Classifier] Date context:', dateContext);
 
-    // Use direct fetch to ensure exact URL format for Azure OpenAI
-    const requestUrl = `${baseURL}/chat/completions?api-version=${apiVersion}`;
-    console.log('🤖 [LLM Classifier] Request URL:', requestUrl);
-
-    const fetchResponse = await fetch(requestUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'api-key': apiKey,
-      },
-      body: JSON.stringify({
-        messages: [
-          { role: 'developer', content: developerPrompt },
-          { role: 'user', content: `${dateContext}\n\nUser query: ${userQuery}` },
-        ],
-        temperature: 0.1,
-        max_completion_tokens: 200,
-        response_format: { type: 'json_object' },
-      }),
+    // Use OpenAI SDK for Azure OpenAI
+    const completion = await client.chat.completions.create({
+      model: deploymentName,
+      messages: [
+        { role: 'developer', content: developerPrompt },
+        { role: 'user', content: `${dateContext}\n\nUser query: ${userQuery}` },
+      ],
+      temperature: 0.1,
+      max_completion_tokens: 200,
+      response_format: { type: 'json_object' },
     });
 
-    if (!fetchResponse.ok) {
-      const errorBody = await fetchResponse.text();
-      throw new Error(`${fetchResponse.status} ${errorBody}`);
-    }
-
-    const response = await fetchResponse.json() as {
-      choices: Array<{ message: { content: string } }>;
-    };
-
     const elapsed = Date.now() - startTime;
-    const content = response.choices[0]?.message?.content;
+    const content = completion.choices[0]?.message?.content;
 
     if (!content) {
       console.warn('[Intent Classifier] Empty response from GPT');

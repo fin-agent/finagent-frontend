@@ -123,6 +123,76 @@ function formatUSDNoCommas(value: unknown): string {
   return `$${num.toFixed(2)}`;
 }
 
+/**
+ * Parse tool metadata from custom LLM response
+ * Format: [FINAGENT_TOOL:{"tool":"tool_name","args":{...}}]actual content
+ * Returns the parsed metadata and the clean content without the prefix
+ */
+interface ToolMetadata {
+  tool: string;
+  args: Record<string, unknown>;
+}
+
+function parseToolMetadata(content: string): { metadata: ToolMetadata | null; cleanContent: string } {
+  const match = content.match(/^\[FINAGENT_TOOL:(\{.*?\})\]/);
+  if (!match) {
+    return { metadata: null, cleanContent: content };
+  }
+  try {
+    const metadata = JSON.parse(match[1]) as ToolMetadata;
+    const cleanContent = content.slice(match[0].length);
+    return { metadata, cleanContent };
+  } catch {
+    return { metadata: null, cleanContent: content };
+  }
+}
+
+/**
+ * Map tool names from custom LLM to card types
+ */
+function toolNameToCardType(toolName: string): TradeUIData['type'] | null {
+  const mapping: Record<string, TradeUIData['type']> = {
+    'get_trade_summary': 'summary',
+    'get_detailed_trades': 'detailed',
+    'get_fees': 'fees',
+    'get_account_balance': 'account-balance',
+    'get_time_based_trades': 'time-based',
+    'get_options': 'advanced-options',
+    // These are less common but included for completeness
+    'get_profitable_trades': 'profitable',
+    'get_trade_stats': 'stats',
+  };
+  return mapping[toolName] || null;
+}
+
+/**
+ * Map tool args to fee type for get_fees tool
+ */
+function toolArgsToFeeType(args: Record<string, unknown>): FeeType | undefined {
+  const feeType = args.fee_type;
+  if (typeof feeType === 'string') {
+    const validTypes: FeeType[] = ['commission', 'credit_interest', 'debit_interest', 'locate_fee', 'short_interest'];
+    if (validTypes.includes(feeType as FeeType)) {
+      return feeType as FeeType;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Map tool args to account query type for get_account_balance tool
+ */
+function toolArgsToAccountQueryType(args: Record<string, unknown>): AccountQueryType | undefined {
+  const queryType = args.query_type;
+  if (typeof queryType === 'string') {
+    const validTypes: AccountQueryType[] = ['cash_balance', 'cash_and_equity', 'buying_power', 'account_summary', 'nlv', 'overnight_margin', 'market_value', 'debit_balances', 'credit_balances'];
+    if (validTypes.includes(queryType as AccountQueryType)) {
+      return queryType as AccountQueryType;
+    }
+  }
+  return undefined;
+}
+
 function formatUSDCurrency(value: unknown): string {
   const num = typeof value === 'number' ? value : Number(value);
   const safe = Number.isFinite(num) ? num : 0;
@@ -951,6 +1021,12 @@ function detectUserQueryIntent(query: string): QueryIntent | null {
     return { cardType: 'summary', symbol };
   }
 
+  // 12b. Share quantity queries (how many shares do I have/own)
+  // These should show detailed trades since that tool returns share counts
+  if (/\bhow\s+many\s+shares\b/i.test(lowerQuery) && symbol) {
+    return { cardType: 'detailed', symbol };
+  }
+
   // 13. Detailed trades (show trades, list trades, what did I trade)
   // Updated to handle "show my Apple trades" pattern (symbol between "my" and "trades")
   if (/\b(show|list|get|display|what)\s+(my\s+|did\s+I\s+)?(\w+\s+)*(all\s+)?trades?\b/i.test(lowerQuery) ||
@@ -1635,7 +1711,15 @@ function detectBulkOptionsQuery(text: string): { tradeType?: 'buy' | 'sell'; cal
                              /includes?\s+\d+\s+stock\s+trades?\s+and\s+\d+\s+option\s+trades?/i.test(text) ||
                              /executed\s+\d+\s+trades?\s+(?:yesterday|today|last\s+week|this\s+week|last\s+month)/i.test(text);
 
-  const hasBulkTrades = !isPortfolioSummary && (
+  // Check if this is a stock-focused response that mentions option trades as a side note
+  // Patterns: "purchased N shares...total cost...current value...also have N option trades"
+  // This is from get_detailed_trades tool - the main focus is stock shares, not options
+  const isStockSharesResponse = (
+    (/purchased\s+\d+\s+shares/i.test(text) || /bought\s+\d+\s+shares/i.test(text)) &&
+    (/total\s+cost/i.test(text) || /current\s+value/i.test(text) || /resulting\s+in/i.test(text))
+  );
+
+  const hasBulkTrades = !isPortfolioSummary && !isStockSharesResponse && (
                         /across\s+\d+\s+trades/i.test(text) ||
                         /covering\s+[\d,]+\s+shares\s+across/i.test(text) ||
                         /you\s+(?:bought|sold)\s+\d+\s+(?:call|put)\s+option\s+contracts/i.test(text) ||
@@ -1647,6 +1731,7 @@ function detectBulkOptionsQuery(text: string): { tradeType?: 'buy' | 'sell'; cal
   console.log('🔍 detectBulkOptionsQuery checking:', text.substring(0, 150));
   console.log('🔍 hasBulkTrades patterns:', {
     isPortfolioSummary,
+    isStockSharesResponse,
     acrossNTrades: /across\s+\d+\s+trades/i.test(text),
     coveringShares: /covering\s+[\d,]+\s+shares\s+across/i.test(text),
     youSoldContracts: /you\s+(?:bought|sold)\s+\d+\s+(?:call|put)\s+option\s+contracts/i.test(text),
@@ -2728,6 +2813,18 @@ const UnifiedAssistant: React.FC = () => {
           }
         }
 
+        // Parse tool metadata from custom LLM response BEFORE displaying
+        // Format: [FINAGENT_TOOL:{"tool":"get_detailed_trades","args":{...}}]actual content
+        let toolMeta: ToolMetadata | null = null;
+        if (role === 'assistant') {
+          const parsed = parseToolMetadata(assistantContent);
+          toolMeta = parsed.metadata;
+          if (toolMeta) {
+            console.log('🎯 [Tool Metadata] Parsed from response:', toolMeta.tool, toolMeta.args);
+            assistantContent = parsed.cleanContent;
+          }
+        }
+
         // Deduplicate: Skip if this is the same message we just processed (within 2 seconds)
         const now = Date.now();
         const lastMsg = lastProcessedVoiceMessageRef.current;
@@ -2741,7 +2838,7 @@ const UnifiedAssistant: React.FC = () => {
         const newMessage: TranscriptMessage = {
           id: newMessageId,
           role,
-          content: assistantContent,
+          content: assistantContent, // Clean content without metadata prefix
           timestamp: new Date(),
         };
         setTranscript(prev => [...prev, newMessage]);
@@ -2955,8 +3052,33 @@ const UnifiedAssistant: React.FC = () => {
             }
             let tradeUI: TradeUIData | undefined;
 
-            // HIGHEST PRIORITY: Use UI data set directly by client tools (single source of truth)
-            if (toolUIDataRef.current) {
+            // HIGHEST PRIORITY: Tool metadata from custom LLM (single source of truth)
+            if (toolMeta) {
+              const cardType = toolNameToCardType(toolMeta.tool);
+              if (cardType) {
+                const toolSymbol = typeof toolMeta.args.symbol === 'string' ? toolMeta.args.symbol : symbol || '';
+                const timePeriod = typeof toolMeta.args.time_period === 'string' ? toolMeta.args.time_period : undefined;
+                const feeType = toolArgsToFeeType(toolMeta.args);
+                const accountQueryType = toolArgsToAccountQueryType(toolMeta.args);
+
+                console.log('🎯 [Tool Metadata] Fetching card:', cardType, 'symbol:', toolSymbol, 'timePeriod:', timePeriod);
+
+                const data = await fetchTradeData(
+                  toolSymbol,
+                  cardType,
+                  undefined,
+                  timePeriod,
+                  { feeType, accountQueryType }
+                );
+                if (data) {
+                  tradeUI = data;
+                  console.log('🎯 [Tool Metadata] Successfully rendered card:', cardType);
+                }
+              }
+            }
+
+            // SECONDARY: Use UI data set directly by client tools
+            if (!tradeUI && toolUIDataRef.current) {
               tradeUI = toolUIDataRef.current;
               toolUIDataRef.current = null; // Clear after use
               console.log('🎯 [Voice Tool Direct] Using UI data from client tool:', tradeUI.type);

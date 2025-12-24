@@ -64,7 +64,8 @@ After making voice endpoint changes, remind the user: "This change affects the v
 
 - `app/api/elevenlabs/` - Webhook endpoints called by ElevenLabs agent (tools, profitable-trades, trade-summary, detailed-trades, advanced-query, options, account-balance, fees)
 - `app/api/` - UI data endpoints (profitable-trades-ui, trade-stats, trades-ui, advanced-query-ui, account-balance-ui, fees-ui, conversations, messages, resolve-symbol)
-- `src/lib/symbol-utils.ts` - Centralized symbol parsing and normalization utilities
+- `src/lib/symbol-utils.ts` - Centralized symbol parsing, normalization, and company name conversion
+- `src/lib/tts-utils.ts` - TTS formatting utilities (numbers to words, currency formatting)
 - `src/components/generative-ui/` - Dynamic UI cards (ProfitableTrades, TradeStats, TradesTable, TradeSummary, AdvancedOptionsTable, TradeQueryCard, AccountSummary, FeesSummary, etc.)
 - `src/components/UnifiedAssistant.tsx` - Main chat/voice interface
 - `src/components/QueryBuilder.tsx` - Manual advanced query builder UI
@@ -131,6 +132,59 @@ const SYMBOL_MAP = {
   'bank of america': 'BAC', 'jpmorgan': 'JPM', ...
 };
 ```
+
+**Ticker to Company Name (for TTS):**
+
+The `symbolToCompanyName()` function converts tickers to speakable company names:
+```typescript
+symbolToCompanyName("TSLA")  // → "Tesla" (instead of "T S L A")
+symbolToCompanyName("AAPL")  // → "Apple"
+symbolToCompanyName("NVDA")  // → "Nvidia"
+symbolToCompanyName("XYZ")   // → "XYZ" (passthrough if not mapped)
+```
+
+### TTS Utilities (`src/lib/tts-utils.ts`)
+
+Centralized text-to-speech formatting utilities following ElevenLabs best practices. Uses the `number-to-words` library to convert numbers to spoken words for natural voice output.
+
+**Key Functions:**
+
+| Function | Purpose |
+|----------|---------|
+| `formatCurrencyForTTS(value)` | Convert currency to spoken words |
+| `formatNumberForTTS(num)` | Convert numbers to spoken words |
+
+**Currency Formatting:**
+```typescript
+formatCurrencyForTTS(24094.50)
+// → "twenty-four thousand ninety-four dollars and fifty cents"
+
+formatCurrencyForTTS(1500)
+// → "one thousand five hundred dollars"
+
+formatCurrencyForTTS(-250.75)
+// → "negative two hundred fifty dollars and seventy-five cents"
+```
+
+**Number Formatting:**
+```typescript
+formatNumberForTTS(1500)     // → "one thousand five hundred"
+formatNumberForTTS(42)       // → "forty-two"
+formatNumberForTTS(1000000)  // → "one million"
+```
+
+**Why This Matters:**
+- ElevenLabs TTS pronounces "$24,094.50" inconsistently (may say "dollar sign two four...")
+- Numbers as words ensures consistent, natural pronunciation
+- Company names prevent TTS from spelling out tickers letter by letter
+
+**Voice Endpoints Using TTS Utils:**
+- `app/api/elevenlabs/fees/route.ts`
+- `app/api/elevenlabs/detailed-trades/route.ts`
+- `app/api/elevenlabs/time-trades/route.ts`
+- `app/api/elevenlabs/trade-stats/route.ts`
+- `app/api/elevenlabs/account-balance/route.ts`
+- `app/api/elevenlabs/llm/chat/completions/route.ts`
 
 ### FIFO Trade Matching
 

@@ -24,6 +24,40 @@ This project uses ElevenLabs Conversational AI for voice interactions. Key archi
 ### Single-Fetch Pattern
 Voice webhooks (`app/api/elevenlabs/*`) return **both** `response` (for TTS) and `uiData` (for UI rendering) in a single call. This prevents voice/UI drift where the voice says one thing but UI shows different data.
 
+### TTS Formatting Utilities (`src/lib/tts-utils.ts`)
+
+Voice responses use centralized TTS formatting utilities for natural text-to-speech pronunciation:
+
+```typescript
+// Currency: converts numbers to spoken words
+formatCurrencyForTTS(24094.50)
+// → "twenty-four thousand ninety-four dollars and fifty cents"
+
+// Numbers: converts to words for natural pronunciation
+formatNumberForTTS(1500)
+// → "one thousand five hundred"
+```
+
+**Why:** ElevenLabs TTS can inconsistently pronounce numeric formats like "$24,094.50" (may say "dollar sign two four..."). Spelling out numbers as words ensures consistent, natural voice output.
+
+### Company Name Conversion (`src/lib/symbol-utils.ts`)
+
+Voice responses use company names instead of ticker symbols to avoid letter-by-letter pronunciation:
+
+```typescript
+symbolToCompanyName("TSLA")  // → "Tesla" (not "T S L A")
+symbolToCompanyName("AAPL")  // → "Apple"
+symbolToCompanyName("NVDA")  // → "Nvidia"
+```
+
+**Key files using TTS utils:**
+- `app/api/elevenlabs/fees/route.ts`
+- `app/api/elevenlabs/detailed-trades/route.ts`
+- `app/api/elevenlabs/time-trades/route.ts`
+- `app/api/elevenlabs/trade-stats/route.ts`
+- `app/api/elevenlabs/account-balance/route.ts`
+- `app/api/elevenlabs/llm/chat/completions/route.ts`
+
 ### Parseable Period Suggestions
 When no data is found, the system suggests available data periods. These suggestions must be parseable by `src/lib/date-parser.ts`. The `src/lib/data-availability.ts` module validates and falls back to deterministic periods if LLM suggests non-parseable dates.
 

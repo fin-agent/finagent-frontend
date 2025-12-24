@@ -94,16 +94,22 @@ understand their trading portfolio and answer questions about their stock
 and option trades.
 ```
 
-#### Number Formatting Rule (Critical for TTS)
-```
-# CRITICAL: NUMBER FORMATTING
-NEVER spell out numbers. Always use numeric format exactly as received from tools:
-- "$195.80" NOT "one hundred ninety five dollars and eighty cents"
-- "227 shares" NOT "two hundred twenty seven shares"
-- "August 13, 2025" NOT "August thirteenth, two thousand twenty five"
+#### TTS-Optimized Output (Voice Formatting)
+
+Voice endpoints use the `number-to-words` library to format numbers and currency for natural text-to-speech pronunciation:
+
+```typescript
+// Currency: "$24,094.50" → "twenty-four thousand ninety-four dollars and fifty cents"
+formatCurrencyForTTS(24094.50)
+
+// Numbers: "1500 shares" → "one thousand five hundred shares"
+formatNumberForTTS(1500)
+
+// Company names: "TSLA" → "Tesla" (instead of "T S L A")
+symbolToCompanyName("TSLA")
 ```
 
-This ensures the text-to-speech engine receives clean numeric data for natural pronunciation.
+This ensures ElevenLabs TTS pronounces values naturally instead of reading digits or spelling out ticker symbols letter by letter.
 
 #### Agent-Level Symbol Normalization
 The agent converts company names to ticker symbols before calling tools:
@@ -1276,7 +1282,9 @@ finagent-frontend/
 │   │   │   ├── types.ts              # TypeScript interfaces
 │   │   │   └── intents/registry.ts   # Intent definitions
 │   │   ├── date-utils.ts             # Date offset utilities for demo data
-│   │   └── date-parser.ts            # Natural language date parsing
+│   │   ├── date-parser.ts            # Natural language date parsing
+│   │   ├── symbol-utils.ts           # Symbol normalization & company name conversion
+│   │   └── tts-utils.ts              # TTS formatting (numbers to words, currency)
 │   └── components/
 │       ├── UnifiedAssistant.tsx      # Main chat/voice interface
 │       ├── QueryBuilder.tsx          # Manual query builder modal
@@ -1417,6 +1425,7 @@ curl -X POST http://localhost:3000/api/elevenlabs/detailed-trades \
 | **Backend** | Next.js API Routes |
 | **Database** | Supabase PostgreSQL |
 | **Voice AI** | ElevenLabs Conversational AI |
+| **TTS Formatting** | number-to-words (converts numbers to spoken words) |
 | **LLM Intent Detection** | Azure OpenAI GPT-5.2 |
 | **State** | React useState/useRef |
 

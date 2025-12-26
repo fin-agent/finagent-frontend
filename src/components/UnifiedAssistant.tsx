@@ -301,8 +301,13 @@ function buildAnswerOverride(intent: QueryIntent | null, tradeUI: TradeUIData | 
 
   if (tradeUI.type === 'time-based') {
     const d = tradeUI.data as {
-      timePeriod?: { description?: string; displayRange?: string };
-      summary?: { totalTrades?: number; stockCount?: number; optionCount?: number; totalValue?: number };
+      // Webhook returns flat structure (tradeCount, stockCount, etc. at top level)
+      tradeCount?: number;
+      stockCount?: number;
+      optionCount?: number;
+      totalValue?: number;
+      timePeriod?: string;
+      displayRange?: string;
       trades?: Array<{
         SecurityType: string;
         TradeType: string;
@@ -313,12 +318,13 @@ function buildAnswerOverride(intent: QueryIntent | null, tradeUI: TradeUIData | 
         OptionTradePremium?: string;
       }>;
     };
-    const totalTrades = d.summary?.totalTrades ?? 0;
-    const stockCount = d.summary?.stockCount ?? 0;
-    const optionCount = d.summary?.optionCount ?? 0;
-    const totalValue = d.summary?.totalValue ?? 0;
-    const desc = d.timePeriod?.description || tradeUI.timePeriod || intent.timePeriod || '';
-    const range = d.timePeriod?.displayRange ? ` from ${d.timePeriod.displayRange}` : '';
+    // Read from flat structure (webhook returns tradeCount not totalTrades)
+    const totalTrades = d.tradeCount ?? 0;
+    const stockCount = d.stockCount ?? 0;
+    const optionCount = d.optionCount ?? 0;
+    const totalValue = d.totalValue ?? 0;
+    const desc = d.timePeriod || tradeUI.timePeriod || intent.timePeriod || '';
+    const range = d.displayRange ? ` from ${d.displayRange}` : '';
     const symbolText = tradeUI.symbol ? ` for ${tradeUI.symbol}` : '';
 
     const summaryText = `You executed ${totalTrades} total ${pluralize(totalTrades, 'trade')}${symbolText} ${desc}${range}: ${stockCount} ${pluralize(stockCount, 'stock trade')} and ${optionCount} ${pluralize(optionCount, 'option trade')} with a total value of ${formatUSDNoCommas(totalValue)}.`;

@@ -170,10 +170,14 @@ export async function POST(req: NextRequest) {
       return sum + netAmount;
     }, 0);
 
-    // Format dates for display - handle both discrete and range
-    const displayRange = resolved.type === 'discrete' && dates
-      ? dates.map(d => formatDisplayDate(d)).join(', ')
-      : formatDateRange(startDate || '', endDate || '');
+    // Format dates for display - use description for absolute months (e.g., "September")
+    // formatDateRange applies offset which is wrong for absolute month queries
+    const isAbsoluteMonth = /^(January|February|March|April|May|June|July|August|September|October|November|December)$/i.test(description);
+    const displayRange = isAbsoluteMonth
+      ? description
+      : resolved.type === 'discrete' && dates
+        ? dates.map(d => formatDisplayDate(d)).join(', ')
+        : formatDateRange(startDate || '', endDate || '');
 
     // Calculate trading days
     let tradingDays = 1;

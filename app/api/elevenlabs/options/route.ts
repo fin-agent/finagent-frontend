@@ -144,6 +144,7 @@ export async function POST(req: NextRequest) {
       console.error('Supabase error:', error);
       return NextResponse.json({
         response: `Error executing query: ${error.message}`,
+        uiData: null,
       });
     }
 
@@ -156,7 +157,16 @@ export async function POST(req: NextRequest) {
 
       return NextResponse.json({
         response: `No${filterDesc} found.`,
-        query_type: queryType,
+        uiData: {
+          queryType,
+          symbol: normalizedSymbol || null,
+          timePeriod: resolvedTime?.description || timePeriod || null,
+          expiration: expiration || null,
+          tradeType: tradeType || null,
+          callPut: callPut || null,
+          trades: [],
+          summary: null,
+        },
       });
     }
 
@@ -237,37 +247,55 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Calculate metadata for UI
+    // Calculate metadata for UI - SINGLE SOURCE OF TRUTH
     const totalContracts = data.reduce((sum, t) => sum + parseFloat(t.OptionContracts || '0'), 0);
     const totalPremium = data.reduce((sum, t) => sum + Math.abs(parseFloat(t.NetAmount || '0')), 0);
     const callCount = data.filter(t => t['Call/Put'] === 'C').length;
     const putCount = data.filter(t => t['Call/Put'] === 'P').length;
 
-    return NextResponse.json({
-      response,
-      query_type: queryType,
-      trades: data,
-      _meta: {
+    // Build uiData with all information needed for UI rendering
+    const uiData = {
+      queryType,
+      symbol: normalizedSymbol || null,
+      timePeriod: resolvedTime?.description || timePeriod || null,
+      expiration: expiration || null,
+      tradeType: tradeType || null,
+      callPut: callPut || null,
+      trades: data.map(t => ({
+        id: t.id,
+        date: t.Date,
+        symbol: t.Symbol,
+        underlyingSymbol: t.UnderlyingSymbol,
+        tradeType: t.TradeType,
+        callPut: t['Call/Put'],
+        strike: parseFloat(t.Strike || '0'),
+        expiration: t.Expiration,
+        contracts: parseFloat(t.OptionContracts || '0'),
+        premium: Math.abs(parseFloat(t.NetAmount || '0')),
+        premiumPerContract: parseFloat(t.OptionContracts || '0') > 0
+          ? Math.abs(parseFloat(t.NetAmount || '0')) / parseFloat(t.OptionContracts || '0')
+          : 0,
+      })),
+      summary: {
         tradeCount: data.length,
         totalContracts,
         totalPremium,
-        avgPremium: totalContracts > 0 ? totalPremium / totalContracts / 100 : 0,
+        avgPremiumPerShare: totalContracts > 0 ? totalPremium / totalContracts / 100 : 0,
         sharesCovered: totalContracts * 100,
         callCount,
         putCount,
-        filters: {
-          symbol: normalizedSymbol,
-          tradeType,
-          callPut,
-          timePeriod,
-          expiration,
-        },
       },
+    };
+
+    return NextResponse.json({
+      response,
+      uiData,
     });
   } catch (error) {
     console.error('Options webhook error:', error);
     return NextResponse.json({
       response: 'Sorry, there was an error processing your options query.',
+      uiData: null,
     });
   }
 }

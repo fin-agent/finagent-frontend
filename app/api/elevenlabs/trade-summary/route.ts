@@ -20,6 +20,7 @@ export async function POST(req: NextRequest) {
     if (!symbol) {
       return NextResponse.json({
         response: 'Please specify a stock symbol or company name.',
+        uiData: null,
       });
     }
 
@@ -34,6 +35,7 @@ export async function POST(req: NextRequest) {
     if (error) {
       return NextResponse.json({
         response: `Error looking up trades for ${normalizedSymbol}: ${error.message}`,
+        uiData: null,
       });
     }
 
@@ -41,19 +43,36 @@ export async function POST(req: NextRequest) {
     const optionTrades = data?.filter(t => t.SecurityType === 'O').length || 0;
     const totalTrades = stockTrades + optionTrades;
 
+    // Calculate buy/sell breakdown
+    const buyTrades = data?.filter(t => t.TradeType === 'B').length || 0;
+    const sellTrades = data?.filter(t => t.TradeType === 'S').length || 0;
+
+    // Build uiData - SINGLE SOURCE OF TRUTH
+    const uiData = {
+      symbol: normalizedSymbol,
+      totalTrades,
+      stockTrades,
+      optionTrades,
+      buyTrades,
+      sellTrades,
+    };
+
     if (totalTrades === 0) {
       return NextResponse.json({
         response: `No trades found for ${normalizedSymbol}.`,
+        uiData,
       });
     }
 
     return NextResponse.json({
       response: `For ${normalizedSymbol}: Found ${stockTrades} stock trades and ${optionTrades} option trades. Total: ${totalTrades} trades.`,
+      uiData,
     });
   } catch (error) {
     console.error('Trade summary error:', error);
     return NextResponse.json({
       response: 'Sorry, there was an error looking up the trade summary.',
+      uiData: null,
     });
   }
 }

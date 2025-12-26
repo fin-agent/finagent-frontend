@@ -109,6 +109,7 @@ export async function POST(req: NextRequest) {
     if (error) {
       return NextResponse.json({
         response: `Error getting trade stats: ${error.message}`,
+        uiData: null,
       });
     }
 
@@ -116,6 +117,12 @@ export async function POST(req: NextRequest) {
       const typeLabel = tradeType ? (tradeType.toLowerCase().startsWith('s') ? 'sell' : 'buy') : '';
       return NextResponse.json({
         response: `No ${typeLabel} trades found for ${normalizedSymbol} ${periodDescription}.`,
+        uiData: {
+          symbol: normalizedSymbol,
+          timePeriod: periodDescription,
+          tradeType: tradeType || null,
+          stockStats: null,
+        },
       });
     }
 
@@ -155,11 +162,31 @@ export async function POST(req: NextRequest) {
     response += `Average price: ${formatPrice(avgPrice)}. `;
     response += `Total: ${formatNumber(data.length)} trades, ${formatNumber(totalShares)} shares, ${formatPrice(totalValue)} total value.`;
 
-    return NextResponse.json({ response });
+    // Build uiData for UI card rendering - SINGLE SOURCE OF TRUTH
+    const uiData = {
+      symbol: normalizedSymbol,
+      timePeriod: periodDescription,
+      tradeType: tradeType || null,
+      stockStats: {
+        highestPrice,
+        lowestPrice,
+        avgPrice,
+        highestDate: highestTrade?.Date || null,
+        lowestDate: lowestTrade?.Date || null,
+        highestShares: highShareQty,
+        lowestShares: lowShareQty,
+        tradeCount: data.length,
+        totalShares,
+        totalValue,
+      },
+    };
+
+    return NextResponse.json({ response, uiData });
   } catch (error) {
     console.error('Trade stats error:', error);
     return NextResponse.json({
       response: 'Sorry, there was an error getting the trade statistics.',
+      uiData: null,
     });
   }
 }

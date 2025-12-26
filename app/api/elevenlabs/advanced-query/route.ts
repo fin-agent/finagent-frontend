@@ -351,16 +351,36 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    const normalizedSymbol = symbol ? normalizeSymbol(symbol) : '';
+
     if (!data || data.length === 0) {
       let filterDesc = '';
-      if (symbol) filterDesc += ` for ${normalizeSymbol(symbol)}`;
+      if (symbol) filterDesc += ` for ${normalizedSymbol}`;
       if (securityType) filterDesc += ` (${securityType}s)`;
       if (tradeType) filterDesc += ` ${tradeType} trades`;
       if (callPut) filterDesc += ` ${callPut} options`;
       if (expiration) filterDesc += ` expiring ${expiration}`;
 
+      // Return empty uiData for UI card rendering - SINGLE SOURCE OF TRUTH
+      const uiData = {
+        filters: {
+          symbol: normalizedSymbol || null,
+          securityType: securityType || null,
+          tradeType: tradeType || null,
+          callPut: callPut || null,
+          fromDate: fromDate || null,
+          toDate: toDate || null,
+          expiration: expiration || null,
+          strike: strike || null,
+          aggregation: aggregation || null,
+        },
+        trades: [],
+        summary: null,
+      };
+
       return NextResponse.json({
         response: `No trades found${filterDesc || ' matching your criteria'}.`,
+        uiData,
       });
     }
 
@@ -403,7 +423,6 @@ export async function POST(req: NextRequest) {
 
     // Build response based on aggregation type
     let response = '';
-    const normalizedSymbol = symbol ? normalizeSymbol(symbol) : '';
 
     // Special handling for single-trade queries (limit: 1) - "last/most recent" queries
     if (limit === 1 && data.length === 1 && data[0].SecurityType === 'O') {
@@ -490,10 +509,39 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({
-      response,
-      // Include metadata for UI rendering with correct calculations
-      _meta: {
+    // Build uiData with all information needed for UI rendering - SINGLE SOURCE OF TRUTH
+    const uiData = {
+      filters: {
+        symbol: normalizedSymbol || null,
+        securityType: securityType || null,
+        tradeType: tradeType || null,
+        callPut: callPut || null,
+        fromDate: fromDate || null,
+        toDate: toDate || null,
+        expiration: expiration || null,
+        strike: strike || null,
+        aggregation: aggregation || null,
+      },
+      trades: data.map(t => ({
+        id: t.id,
+        date: t.Date,
+        symbol: t.Symbol,
+        underlyingSymbol: t.UnderlyingSymbol,
+        securityType: t.SecurityType,
+        tradeType: t.TradeType,
+        callPut: t['Call/Put'] || null,
+        strike: t.Strike ? parseFloat(t.Strike) : null,
+        expiration: t.Expiration || null,
+        contracts: t.SecurityType === 'O' ? parseFloat(t.OptionContracts || '0') : null,
+        shares: t.SecurityType === 'S' ? parseFloat(t.StockShareQty || '0') : null,
+        premium: t.SecurityType === 'O' ? Math.abs(parseFloat(t.NetAmount || '0')) : null,
+        premiumPerContract: t.SecurityType === 'O' && parseFloat(t.OptionContracts || '0') > 0
+          ? Math.abs(parseFloat(t.NetAmount || '0')) / parseFloat(t.OptionContracts || '0')
+          : null,
+        stockPrice: t.SecurityType === 'S' ? parseFloat(t.StockTradePrice || '0') : null,
+        netAmount: Math.abs(parseFloat(t.NetAmount || '0')),
+      })),
+      summary: {
         tradeCount,
         totalContracts,
         totalShares,
@@ -501,22 +549,21 @@ export async function POST(req: NextRequest) {
         totalNetAmount,  // Actual amount received/paid (after fees)
         totalGrossPremium,  // premium * contracts * 100
         avgPremiumPerShare,  // Average premium per share
-        filters: {
-          symbol: normalizedSymbol || undefined,
-          securityType,
-          tradeType,
-          callPut,
-          fromDate,
-          toDate,
-          expiration,
-          strike,
-        }
-      }
-    });
+        stockTradeCount: data.filter(t => t.SecurityType === 'S').length,
+        optionTradeCount: data.filter(t => t.SecurityType === 'O').length,
+        buyCount: data.filter(t => t.TradeType === 'B').length,
+        sellCount: data.filter(t => t.TradeType === 'S').length,
+        callCount: data.filter(t => t['Call/Put'] === 'C').length,
+        putCount: data.filter(t => t['Call/Put'] === 'P').length,
+      },
+    };
+
+    return NextResponse.json({ response, uiData });
   } catch (error) {
     console.error('Advanced query error:', error);
     return NextResponse.json({
       response: 'Sorry, there was an error processing your query.',
+      uiData: null,
     });
   }
 }

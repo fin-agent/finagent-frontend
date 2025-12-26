@@ -20,6 +20,7 @@ export async function POST(req: NextRequest) {
     if (!symbol) {
       return NextResponse.json({
         response: 'Please specify a stock symbol or company name.',
+        uiData: null,
       });
     }
 
@@ -36,6 +37,7 @@ export async function POST(req: NextRequest) {
     if (error) {
       return NextResponse.json({
         response: `Error fetching trades: ${error.message}`,
+        uiData: null,
       });
     }
 
@@ -43,6 +45,12 @@ export async function POST(req: NextRequest) {
     if (allTrades.length === 0) {
       return NextResponse.json({
         response: `No trades found for ${normalizedSymbol}.`,
+        uiData: {
+          symbol: normalizedSymbol,
+          profitableTrades: [],
+          totalProfit: 0,
+          tradeCount: 0,
+        },
       });
     }
 
@@ -52,6 +60,12 @@ export async function POST(req: NextRequest) {
     if (profitableTrades.length === 0) {
       return NextResponse.json({
         response: `No completed profitable trades found for ${normalizedSymbol}. Your positions may still be open.`,
+        uiData: {
+          symbol: normalizedSymbol,
+          profitableTrades: [],
+          totalProfit: 0,
+          tradeCount: 0,
+        },
       });
     }
 
@@ -60,11 +74,36 @@ export async function POST(req: NextRequest) {
       ? `For ${normalizedSymbol}, you have ${profitableTrades.length} profitable trades with total realized profit $${totalProfit.toFixed(2)}. Your top profit was $${top.profitLoss.toFixed(2)} from ${top.buyDate} to ${top.sellDate}.`
       : `For ${normalizedSymbol}, you have ${profitableTrades.length} profitable trades with total realized profit $${totalProfit.toFixed(2)}.`;
 
-    return NextResponse.json({ response });
+    // Build uiData with all information needed for UI rendering - SINGLE SOURCE OF TRUTH
+    const uiData = {
+      symbol: normalizedSymbol,
+      totalProfit,
+      tradeCount: profitableTrades.length,
+      topTrade: top ? {
+        profitLoss: top.profitLoss,
+        buyDate: top.buyDate,
+        sellDate: top.sellDate,
+        quantity: top.quantity,
+        buyPrice: top.buyPrice,
+        sellPrice: top.sellPrice,
+      } : null,
+      profitableTrades: profitableTrades.map(t => ({
+        profitLoss: t.profitLoss,
+        buyDate: t.buyDate,
+        sellDate: t.sellDate,
+        quantity: t.quantity,
+        buyPrice: t.buyPrice,
+        sellPrice: t.sellPrice,
+        securityType: t.securityType,
+      })),
+    };
+
+    return NextResponse.json({ response, uiData });
   } catch (error) {
     console.error('Profitable trades error:', error);
     return NextResponse.json({
       response: 'Sorry, there was an error getting the profitable trades.',
+      uiData: null,
     });
   }
 }

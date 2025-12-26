@@ -34,12 +34,13 @@ interface Conversation {
 }
 
 interface TradeUIData {
-  type: 'summary' | 'detailed' | 'stats' | 'profitable' | 'time-based' | 'option-stats' | 'average-price' | 'advanced-options' | 'highest-strike' | 'total-premium' | 'expiring-options' | 'last-option' | 'account-balance' | 'fees';
+  type: 'summary' | 'detailed' | 'stats' | 'profitable' | 'time-based' | 'option-stats' | 'average-price' | 'advanced-options' | 'highest-strike' | 'total-premium' | 'expiring-options' | 'last-option' | 'account-balance' | 'fees' | 'options';
   symbol: string;
   tradeType?: 'buy' | 'sell' | 'all';
   timePeriod?: string;
   callPut?: 'call' | 'put';
   expiration?: string;
+  queryType?: string; // For options queries
   data: unknown;
   optionData?: unknown; // For combined stock + option stats
   accountQueryType?: AccountQueryType; // For account balance queries
@@ -1967,12 +1968,22 @@ const UnifiedAssistant: React.FC = () => {
     };
 
     const get_trade_summary = async (parameters: Record<string, unknown>) => {
+      console.log('📊 [Trade Summary Tool] ================================');
+      console.log('📊 [Trade Summary Tool] Parameters:', JSON.stringify(parameters, null, 2));
+
       const symbol = getToolSymbol(parameters);
-      const payload = await postJson('/api/elevenlabs/trade-summary', { symbol });
-      // Store UI data for rendering
-      toolUIDataRef.current = { type: 'summary', symbol: symbol || '', data: payload };
-      console.log('📊 [Trade Summary Tool] Set toolUIDataRef:', toolUIDataRef.current);
-      return unwrapResponse(payload);
+
+      // SINGLE FETCH: Voice endpoint returns BOTH response AND uiData
+      const voicePayload = await postJson('/api/elevenlabs/trade-summary', { symbol });
+
+      // Store UI data from voice response (guaranteed sync)
+      if (voicePayload && typeof voicePayload === 'object' && 'uiData' in voicePayload) {
+        toolUIDataRef.current = { type: 'summary', symbol: symbol || '', data: voicePayload.uiData };
+        console.log('📊 [Trade Summary Tool] Set toolUIDataRef from voice response:', toolUIDataRef.current);
+      }
+
+      console.log('📊 [Trade Summary Tool] ================================');
+      return unwrapResponse(voicePayload);
     };
 
     const get_detailed_trades = async (parameters: Record<string, unknown>) => {
@@ -2002,32 +2013,50 @@ const UnifiedAssistant: React.FC = () => {
     };
 
     const get_trade_stats = async (parameters: Record<string, unknown>) => {
+      console.log('📊 [Trade Stats Tool] ================================');
+      console.log('📊 [Trade Stats Tool] Parameters:', JSON.stringify(parameters, null, 2));
+
       const symbol = getToolSymbol(parameters);
       const tradeType = getString(parameters, 'trade_type');
       const timePeriod = getString(parameters, 'time_period');
-      // Fetch both stock and option stats for UI
-      const [stockData, optionData] = await Promise.all([
-        postJson('/api/trade-stats', { symbol, tradeType: tradeType || 'all', timePeriod }),
-        postJson('/api/option-stats', { symbol, tradeType: tradeType || 'all', timePeriod }),
-      ]);
-      // Store UI data for rendering
-      toolUIDataRef.current = { type: 'stats', symbol: symbol || '', tradeType: tradeType as 'buy' | 'sell' | undefined, timePeriod, data: stockData, optionData };
-      console.log('📊 [Trade Stats Tool] Set toolUIDataRef:', toolUIDataRef.current);
-      // Get voice response
+
+      // SINGLE FETCH: Voice endpoint returns BOTH response AND uiData
       const voicePayload = await postJson('/api/elevenlabs/trade-stats', { symbol, trade_type: tradeType, time_period: timePeriod });
+
+      // Store UI data from voice response (guaranteed sync)
+      if (voicePayload && typeof voicePayload === 'object' && 'uiData' in voicePayload) {
+        toolUIDataRef.current = {
+          type: 'stats',
+          symbol: symbol || '',
+          tradeType: tradeType as 'buy' | 'sell' | undefined,
+          timePeriod,
+          data: voicePayload.uiData.stockStats,  // Matches expected format for TradeStats card
+          optionData: null  // Voice endpoint focuses on stock stats (options handled by options tool)
+        };
+        console.log('📊 [Trade Stats Tool] Set toolUIDataRef from voice response:', toolUIDataRef.current);
+      }
+
+      console.log('📊 [Trade Stats Tool] ================================');
       return unwrapResponse(voicePayload);
     };
 
     const get_profitable_trades = async (parameters: Record<string, unknown>) => {
+      console.log('📊 [Profitable Trades Tool] ================================');
+      console.log('📊 [Profitable Trades Tool] Parameters:', JSON.stringify(parameters, null, 2));
+
       const symbol = getToolSymbol(parameters);
       const timePeriod = getString(parameters, 'time_period');
-      // Fetch UI data
-      const uiPayload = await postJson('/api/profitable-trades-ui', { symbol, timePeriod });
-      // Store UI data for rendering
-      toolUIDataRef.current = { type: 'profitable', symbol: symbol || '', timePeriod, data: uiPayload };
-      console.log('📊 [Profitable Trades Tool] Set toolUIDataRef:', toolUIDataRef.current);
-      // Get voice response
+
+      // SINGLE FETCH: Voice endpoint returns BOTH response AND uiData
       const voicePayload = await postJson('/api/elevenlabs/profitable-trades', { symbol, time_period: timePeriod });
+
+      // Store UI data from voice response (guaranteed sync)
+      if (voicePayload && typeof voicePayload === 'object' && 'uiData' in voicePayload) {
+        toolUIDataRef.current = { type: 'profitable', symbol: symbol || '', timePeriod, data: voicePayload.uiData };
+        console.log('📊 [Profitable Trades Tool] Set toolUIDataRef from voice response:', toolUIDataRef.current);
+      }
+
+      console.log('📊 [Profitable Trades Tool] ================================');
       return unwrapResponse(voicePayload);
     };
 
@@ -2062,6 +2091,9 @@ const UnifiedAssistant: React.FC = () => {
     };
 
     const get_advanced_trades = async (parameters: Record<string, unknown>) => {
+      console.log('📊 [Advanced Trades Tool] ================================');
+      console.log('📊 [Advanced Trades Tool] Parameters:', JSON.stringify(parameters, null, 2));
+
       const symbol = getToolSymbol(parameters);
       const securityType = getString(parameters, 'security_type');
       const tradeType = getString(parameters, 'trade_type');
@@ -2069,33 +2101,29 @@ const UnifiedAssistant: React.FC = () => {
       const fromDate = getString(parameters, 'from_date');
       const toDate = getString(parameters, 'to_date');
       const expiration = getString(parameters, 'expiration');
-      // Fetch UI data
-      const uiPayload = await postJson('/api/advanced-query-ui', {
-        symbol: symbol || undefined,
-        securityType: securityType === 'option' ? 'O' : securityType === 'stock' ? 'S' : undefined,
-        tradeType: tradeType === 'buy' ? 'B' : tradeType === 'sell' ? 'S' : undefined,
-        callPut: callPut === 'call' ? 'C' : callPut === 'put' ? 'P' : undefined,
-        fromDate,
-        toDate,
-        expiration,
-      });
-      // Store UI data for rendering
-      toolUIDataRef.current = {
-        type: 'advanced-options',
-        symbol: symbol || '',
-        tradeType: tradeType as 'buy' | 'sell' | undefined,
-        callPut: callPut as 'call' | 'put' | undefined,
-        expiration,
-        data: uiPayload
-      };
-      console.log('📊 [Advanced Trades Tool] Set toolUIDataRef:', toolUIDataRef.current);
-      // Get voice response
+
+      // SINGLE FETCH: Voice endpoint returns BOTH response AND uiData
       const voicePayload = await postJson('/api/elevenlabs/advanced-query', {
         symbol, security_type: securityType, trade_type: tradeType, call_put: callPut,
         from_date: fromDate, to_date: toDate, expiration,
         strike: parameters['strike'], aggregation: getString(parameters, 'aggregation'),
         limit: parameters['limit'], order_by: getString(parameters, 'order_by'),
       });
+
+      // Store UI data from voice response (guaranteed sync)
+      if (voicePayload && typeof voicePayload === 'object' && 'uiData' in voicePayload) {
+        toolUIDataRef.current = {
+          type: 'advanced-options',
+          symbol: symbol || '',
+          tradeType: tradeType as 'buy' | 'sell' | undefined,
+          callPut: callPut as 'call' | 'put' | undefined,
+          expiration,
+          data: voicePayload.uiData
+        };
+        console.log('📊 [Advanced Trades Tool] Set toolUIDataRef from voice response:', toolUIDataRef.current);
+      }
+
+      console.log('📊 [Advanced Trades Tool] ================================');
       return unwrapResponse(voicePayload);
     };
 
@@ -2162,6 +2190,48 @@ const UnifiedAssistant: React.FC = () => {
       return result;
     };
 
+    // Dedicated Options tool for all options queries
+    // Query types: bulk, last, expiring, highest_strike, total_premium
+    const get_options = async (parameters: Record<string, unknown>) => {
+      console.log('📈 [Options Tool] ================================');
+      console.log('📈 [Options Tool] Parameters:', JSON.stringify(parameters, null, 2));
+
+      const queryType = getString(parameters, 'query_type') || 'bulk';
+      const symbol = getToolSymbol(parameters);
+      const callPut = getString(parameters, 'call_put');
+      const tradeType = getString(parameters, 'trade_type');
+      const timePeriod = getString(parameters, 'time_period');
+      const expiration = getString(parameters, 'expiration');
+
+      // SINGLE FETCH: Voice endpoint returns BOTH response AND uiData
+      const voicePayload = await postJson('/api/elevenlabs/options', {
+        query_type: queryType,
+        symbol,
+        call_put: callPut,
+        trade_type: tradeType,
+        time_period: timePeriod,
+        expiration,
+      });
+
+      // Store UI data from voice response (guaranteed sync)
+      if (voicePayload && typeof voicePayload === 'object' && 'uiData' in voicePayload) {
+        toolUIDataRef.current = {
+          type: 'options',
+          queryType,
+          symbol: symbol || '',
+          callPut: callPut as 'call' | 'put' | undefined,
+          tradeType: tradeType as 'buy' | 'sell' | undefined,
+          timePeriod,
+          expiration,
+          data: voicePayload.uiData,
+        };
+        console.log('📈 [Options Tool] Set toolUIDataRef from voice response:', toolUIDataRef.current);
+      }
+
+      console.log('📈 [Options Tool] ================================');
+      return unwrapResponse(voicePayload);
+    };
+
     return {
       get_trade_summary,
       get_detailed_trades,
@@ -2169,6 +2239,7 @@ const UnifiedAssistant: React.FC = () => {
       get_profitable_trades,
       get_time_based_trades,
       get_advanced_trades,
+      get_options,
       get_account_balance,
       get_fees,
 
@@ -2179,6 +2250,7 @@ const UnifiedAssistant: React.FC = () => {
       getProfitableTrades: get_profitable_trades,
       getTimeBasedTrades: get_time_based_trades,
       getAdvancedTrades: get_advanced_trades,
+      getOptions: get_options,
       getAccountBalance: get_account_balance,
       getFees: get_fees,
     };
@@ -2477,41 +2549,43 @@ const UnifiedAssistant: React.FC = () => {
   // Fetch trade data for UI rendering
   const fetchTradeData = useCallback(async (
     symbol: string,
-    type: 'summary' | 'detailed' | 'stats' | 'profitable' | 'time-based' | 'option-stats' | 'average-price' | 'advanced-options' | 'highest-strike' | 'total-premium' | 'expiring-options' | 'last-option' | 'account-balance' | 'fees',
+    type: 'summary' | 'detailed' | 'stats' | 'profitable' | 'time-based' | 'option-stats' | 'average-price' | 'advanced-options' | 'highest-strike' | 'total-premium' | 'expiring-options' | 'last-option' | 'account-balance' | 'fees' | 'options',
     tradeType?: 'buy' | 'sell' | 'all',
     timePeriod?: string,
-    extraParams?: { callPut?: 'call' | 'put'; expiration?: string; aggregation?: string; accountQueryType?: AccountQueryType; feeType?: FeeType; includeTrades?: boolean; dateFilter?: { type: string; startDate?: string; endDate?: string; description: string } }
+    extraParams?: { callPut?: 'call' | 'put'; expiration?: string; aggregation?: string; accountQueryType?: AccountQueryType; feeType?: FeeType; includeTrades?: boolean; dateFilter?: { type: string; startDate?: string; endDate?: string; description: string }; queryType?: string }
   ): Promise<TradeUIData | null> => {
     try {
       let endpoint: string;
       let body: Record<string, unknown> = { symbol };
 
       if (type === 'account-balance') {
-        endpoint = '/api/account-balance-ui';
-        body = { queryType: extraParams?.accountQueryType, timePeriod };
+        // SINGLE FETCH: Use voice endpoint with uiData
+        endpoint = '/api/elevenlabs/account-balance';
+        body = { query_type: extraParams?.accountQueryType, time_period: timePeriod };
         const res = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         });
-        const data = await res.json();
-        return { type, symbol: '', accountQueryType: extraParams?.accountQueryType, data };
+        const voicePayload = await res.json();
+        const uiData = voicePayload?.uiData || voicePayload;
+        return { type, symbol: '', accountQueryType: extraParams?.accountQueryType, data: uiData };
       } else if (type === 'fees') {
-        endpoint = '/api/fees-ui';
-        // If dateFilter provided (e.g., from suggestion follow-up), use it instead of timePeriod
+        // SINGLE FETCH: Use voice endpoint with uiData
+        endpoint = '/api/elevenlabs/fees';
         body = {
-          feeType: extraParams?.feeType,
-          timePeriod,
+          fee_type: extraParams?.feeType,
+          time_period: timePeriod,
           symbol: symbol || undefined,
-          dateFilter: extraParams?.dateFilter,
         };
         const res = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         });
-        const data = await res.json();
-        return { type, symbol, feeType: extraParams?.feeType, timePeriod, data };
+        const voicePayload = await res.json();
+        const uiData = voicePayload?.uiData || voicePayload;
+        return { type, symbol, feeType: extraParams?.feeType, timePeriod, data: uiData };
       } else if (type === 'average-price') {
         endpoint = '/api/average-price';
         const includeTrades = extraParams?.includeTrades ?? true;
@@ -2524,39 +2598,44 @@ const UnifiedAssistant: React.FC = () => {
         const data = await res.json();
         return { type, symbol, tradeType, timePeriod, data };
       } else if (type === 'last-option') {
-        // Fetch the most recent option trade matching the criteria
-        endpoint = '/api/advanced-query-ui';
+        // SINGLE FETCH: Use voice endpoint with uiData
+        endpoint = '/api/elevenlabs/options';
         body = {
+          query_type: 'last',
           symbol: symbol || undefined,
-          securityType: 'O', // Options only
-          tradeType: tradeType === 'buy' ? 'B' : tradeType === 'sell' ? 'S' : undefined,
-          callPut: extraParams?.callPut === 'call' ? 'C' : extraParams?.callPut === 'put' ? 'P' : undefined,
-          orderBy: 'date',
-          orderDir: 'desc',
-          limit: 1,
+          trade_type: tradeType,
+          call_put: extraParams?.callPut,
         };
         const res = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         });
-        const data = await res.json();
+        const voicePayload = await res.json();
+        const uiData = voicePayload?.uiData || voicePayload;
         return {
           type,
           symbol,
           tradeType,
           callPut: extraParams?.callPut,
-          data
+          data: uiData
         };
       } else if (type === 'advanced-options' || type === 'highest-strike' || type === 'total-premium' || type === 'expiring-options') {
-        // Use advanced query UI endpoint for all advanced option queries
-        endpoint = '/api/advanced-query-ui';
+        // SINGLE FETCH: Use voice endpoint with uiData
+        // Map type to query_type for options webhook
+        const queryTypeMap: Record<string, string> = {
+          'advanced-options': 'bulk',
+          'highest-strike': 'highest_strike',
+          'total-premium': 'total_premium',
+          'expiring-options': 'expiring',
+        };
+        endpoint = '/api/elevenlabs/options';
         body = {
+          query_type: queryTypeMap[type] || 'bulk',
           symbol: symbol || undefined,
-          securityType: 'O', // Options only
-          tradeType: tradeType === 'buy' ? 'B' : tradeType === 'sell' ? 'S' : undefined,
-          callPut: extraParams?.callPut === 'call' ? 'C' : extraParams?.callPut === 'put' ? 'P' : undefined,
-          fromDate: timePeriod || undefined,
+          trade_type: tradeType,
+          call_put: extraParams?.callPut,
+          time_period: timePeriod || undefined,
           expiration: extraParams?.expiration || undefined,
         };
         const res = await fetch(endpoint, {
@@ -2564,7 +2643,8 @@ const UnifiedAssistant: React.FC = () => {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         });
-        const data = await res.json();
+        const voicePayload = await res.json();
+        const uiData = voicePayload?.uiData || voicePayload;
         return {
           type,
           symbol,
@@ -2572,39 +2652,106 @@ const UnifiedAssistant: React.FC = () => {
           timePeriod,
           callPut: extraParams?.callPut,
           expiration: extraParams?.expiration,
-          data
+          data: uiData
         };
       } else if (type === 'summary') {
+        // SINGLE FETCH: Use voice endpoint with uiData
         endpoint = '/api/elevenlabs/trade-summary';
-      } else if (type === 'stats') {
-        // Fetch both stock stats and option stats
-        const [stockRes, optionRes] = await Promise.all([
-          fetch('/api/trade-stats', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ symbol, tradeType: tradeType || 'all', timePeriod }),
-          }),
-          fetch('/api/option-stats', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ symbol, tradeType: tradeType || 'all', timePeriod }),
-          }),
-        ]);
-        const stockData = await stockRes.json();
-        const optionData = await optionRes.json();
-        return { type, symbol, tradeType, timePeriod, data: stockData, optionData };
-      } else if (type === 'option-stats') {
-        endpoint = '/api/option-stats';
-        body = { symbol, tradeType: tradeType || 'all' };
-      } else if (type === 'profitable') {
-        endpoint = '/api/profitable-trades-ui';
-        body = { symbol, timePeriod };
-      } else if (type === 'time-based') {
-        endpoint = '/api/time-trades-ui';
-        body = { symbol: symbol || null, timePeriod };
-      } else if (type === 'detailed') {
-        endpoint = '/api/trades-ui';
         body = { symbol };
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const voicePayload = await res.json();
+        const uiData = voicePayload?.uiData || voicePayload;
+        return { type, symbol, data: uiData };
+      } else if (type === 'stats') {
+        // SINGLE FETCH: Use voice endpoint with uiData
+        const res = await fetch('/api/elevenlabs/trade-stats', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ symbol, trade_type: tradeType, time_period: timePeriod }),
+        });
+        const voicePayload = await res.json();
+        const uiData = voicePayload?.uiData || {};
+        return { type, symbol, tradeType, timePeriod, data: uiData.stockStats || uiData, optionData: null };
+      } else if (type === 'option-stats') {
+        // Use options endpoint for option stats
+        endpoint = '/api/elevenlabs/options';
+        body = { query_type: 'bulk', symbol, trade_type: tradeType };
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const voicePayload = await res.json();
+        const uiData = voicePayload?.uiData || voicePayload;
+        return { type, symbol, tradeType, data: uiData };
+      } else if (type === 'profitable') {
+        // SINGLE FETCH: Use voice endpoint with uiData
+        endpoint = '/api/elevenlabs/profitable-trades';
+        body = { symbol, time_period: timePeriod };
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const voicePayload = await res.json();
+        const uiData = voicePayload?.uiData || voicePayload;
+        return { type, symbol, timePeriod, data: uiData };
+      } else if (type === 'time-based') {
+        // SINGLE FETCH: Use voice endpoint with uiData
+        endpoint = '/api/elevenlabs/time-trades';
+        body = { symbol: symbol || null, time_period: timePeriod };
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const voicePayload = await res.json();
+        const uiData = voicePayload?.uiData || voicePayload;
+        return { type, symbol, timePeriod, data: uiData };
+      } else if (type === 'detailed') {
+        // SINGLE FETCH: Use voice endpoint with uiData
+        endpoint = '/api/elevenlabs/detailed-trades';
+        body = { symbol };
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const voicePayload = await res.json();
+        const uiData = voicePayload?.uiData || voicePayload;
+        return { type, symbol, data: uiData };
+      } else if (type === 'options') {
+        // SINGLE FETCH: Use voice endpoint with uiData
+        endpoint = '/api/elevenlabs/options';
+        body = {
+          query_type: extraParams?.queryType || 'bulk',
+          symbol: symbol || undefined,
+          trade_type: tradeType,
+          call_put: extraParams?.callPut,
+          time_period: timePeriod || undefined,
+          expiration: extraParams?.expiration || undefined,
+        };
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const voicePayload = await res.json();
+        const uiData = voicePayload?.uiData || voicePayload;
+        return {
+          type,
+          symbol,
+          tradeType,
+          timePeriod,
+          queryType: extraParams?.queryType,
+          callPut: extraParams?.callPut,
+          expiration: extraParams?.expiration,
+          data: uiData
+        };
       } else {
         endpoint = '/api/elevenlabs/detailed-trades';
       }
@@ -5352,14 +5499,16 @@ function DetailedTradesLoader({ symbol }: { symbol: string }) {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const res = await fetch('/api/trades-ui', {
+        // SINGLE FETCH: Use voice endpoint with uiData
+        const res = await fetch('/api/elevenlabs/detailed-trades', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ symbol }),
         });
-        const data = await res.json();
-        if (data.trades) {
-          setTradesData(data);
+        const voicePayload = await res.json();
+        const uiData = voicePayload?.uiData;
+        if (uiData?.trades) {
+          setTradesData(uiData);
         }
       } catch (error) {
         console.error('Error loading trades:', error);

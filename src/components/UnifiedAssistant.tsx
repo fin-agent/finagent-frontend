@@ -2650,7 +2650,40 @@ const UnifiedAssistant: React.FC = () => {
           body: JSON.stringify(body),
         });
         const voicePayload = await res.json();
-        const uiData = voicePayload?.uiData || voicePayload;
+        const rawUiData = voicePayload?.uiData || voicePayload;
+
+        // Transform webhook response to match BulkOptionsCard expected format
+        // Webhook returns lowercase fields (contracts, premium) but card expects uppercase (OptionContracts, NetAmount)
+        // Webhook returns 'summary' but card expects 'aggregations'
+        const uiData = {
+          ...rawUiData,
+          // Map trades from webhook format to BulkOptionsCard format
+          trades: rawUiData.trades?.map((t: { id?: number; date?: string; symbol?: string; underlyingSymbol?: string; tradeType?: string; callPut?: string; strike?: number; expiration?: string; contracts?: number; premium?: number; premiumPerContract?: number }) => ({
+            TradeID: t.id,
+            Date: t.date,
+            Symbol: t.symbol,
+            UnderlyingSymbol: t.underlyingSymbol,
+            TradeType: t.tradeType,
+            'Call/Put': t.callPut,
+            Strike: String(t.strike || 0),
+            Expiration: t.expiration,
+            OptionContracts: String(t.contracts || 0),
+            NetAmount: String(t.premium || 0),
+            OptionTradePremium: t.premiumPerContract ? String(t.premiumPerContract) : undefined,
+          })) || [],
+          // Map summary to aggregations
+          aggregations: rawUiData.summary ? {
+            tradeCount: rawUiData.summary.tradeCount,
+            totalTrades: rawUiData.summary.tradeCount,
+            totalContracts: rawUiData.summary.totalContracts,
+            totalPremium: rawUiData.summary.totalPremium,
+            avgPremium: rawUiData.summary.avgPremiumPerShare,
+            sharesCovered: rawUiData.summary.sharesCovered,
+            callCount: rawUiData.summary.callCount,
+            putCount: rawUiData.summary.putCount,
+          } : undefined,
+        };
+
         return {
           type,
           symbol,

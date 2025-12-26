@@ -38,7 +38,7 @@ When users ask about trades for a company:
 IMPORTANT: When tools return data, keep your text response brief - just acknowledge the data. The UI will automatically render beautiful components showing the trade details. Don't try to list all the trades in text format.
 
 Be professional, precise, and knowledgeable about financial instruments. Always use the tools to get accurate data.`,
-    messages: convertToModelMessages(messages),
+    messages: await convertToModelMessages(messages),
     tools: {
       getTradeSummary: {
         description: 'Get a summary count of trades for a stock symbol, separated by security type (stocks vs options)',

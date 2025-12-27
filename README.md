@@ -118,6 +118,21 @@ When users mention company names, convert them to the appropriate ticker symbol:
 - Meta/Facebook → META
 ```
 
+#### LLM-Based Company Name Output
+When **speaking aloud**, the agent uses its training knowledge to convert tickers back to company names:
+```
+# Speaking Company Names
+When speaking ticker symbols aloud, say the company name instead of the ticker.
+- AAPL → "Apple"
+- GOOGL → "Google"
+- TSLA → "Tesla"
+```
+
+**Key design decision:** Voice webhooks return raw ticker symbols (AAPL, TSLA). The LLM converts them to spoken company names using training data—no hardcoded map required. This approach:
+- Scales to thousands of tickers without code changes
+- Handles edge cases (e.g., subsidiary names, rebranded companies)
+- Falls back gracefully for unknown tickers (says "ticker XYZ")
+
 #### Tone & Communication Style
 - **Clear, professional, and informative**
 - **Friendly and approachable**, but concise

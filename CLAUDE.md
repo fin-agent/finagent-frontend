@@ -102,6 +102,34 @@ Centralized symbol parsing and normalization for all API routes and components.
 | `parseOptionSymbolFull(symbol)` | Parse OCC into ticker, expiry, type, strike |
 | `resolveSymbol(input)` | Async version with LLM fallback |
 
+### LLM-Based Ticker-to-Company-Name Conversion
+
+**Voice webhooks return raw ticker symbols** (AAPL, TSLA, GOOGL). The ElevenLabs LLM uses its training knowledge to convert these to company names when speaking aloud.
+
+**How it works:**
+1. Webhook returns: `"For AAPL, you have 5 profitable trades..."`
+2. LLM prompt instructs: "When speaking ticker symbols aloud, say the company name"
+3. Voice says: "For Apple, you have 5 profitable trades..."
+
+**Why this approach:**
+- No hardcoded map to maintain
+- LLM knows thousands of tickers from training data
+- Handles edge cases and new companies automatically
+- More flexible for unknown tickers (LLM can say "ticker XYZ" if truly unknown)
+
+**Prompt section** (`prompts/finagent-neo.md`):
+```markdown
+# Speaking Company Names
+
+**When speaking ticker symbols aloud, say the company name instead of the ticker.**
+
+You know all major company ticker mappings from your training data:
+- AAPL → "Apple"
+- GOOGL/GOOG → "Google"
+- TSLA → "Tesla"
+- etc.
+```
+
 **`normalizeSymbol()` handles multiple input types:**
 ```typescript
 normalizeSymbol("Apple")              // → "AAPL" (company name)

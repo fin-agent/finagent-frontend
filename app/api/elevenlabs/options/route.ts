@@ -1,7 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import { normalizeSymbol } from '@/src/lib/symbol-utils';
-import { getDateOffset } from '@/src/lib/date-utils';
+import { realDateToDemoDate, formatDateForDB } from '@/src/lib/date-utils';
+import { parseTimePeriodToResolvedDates } from '@/src/lib/date-parser';
 
 // LLM-resolved date filter
 interface DateFilter {
@@ -73,12 +74,6 @@ export async function POST(req: NextRequest) {
     const expiration = extractParam(body, 'expiration') as string | undefined;
     const dateFilter = extractParam(body, 'date_filter') as DateFilter | undefined;
 
-    // Get date offset for demo database
-    const offset = getDateOffset();
-    const offsetYears = Math.round(offset / 365);
-    const userYear = new Date().getFullYear();
-    const dbYear = userYear + offsetYears;
-
     if (!queryType) {
       return NextResponse.json({
         response: 'Please specify a query type: bulk, last, expiring, highest_strike, or total_premium.',
@@ -110,7 +105,7 @@ export async function POST(req: NextRequest) {
       query = query.filter('"Call/Put"', 'eq', cp);
     }
 
-    // Apply date range for trade date - prioritize LLM-resolved dateFilter
+    // Apply date range for trade date - prioritize LLM-resolved dateFilter, fall back to parsing timePeriod
     let startDate: string | undefined;
     let endDate: string | undefined;
     let dates: string[] | undefined;
@@ -118,28 +113,42 @@ export async function POST(req: NextRequest) {
     let resolvedType: 'range' | 'discrete' = 'range';
 
     if (dateFilter && dateFilter.type === 'range' && dateFilter.startDate && dateFilter.endDate) {
-      // LLM has already resolved the dates - apply year offset
-      const startParts = dateFilter.startDate.split('-').map(Number);
-      const endParts = dateFilter.endDate.split('-').map(Number);
-      startDate = `${startParts[0] + offsetYears}-${String(startParts[1]).padStart(2, '0')}-${String(startParts[2]).padStart(2, '0')}`;
-      endDate = `${endParts[0] + offsetYears}-${String(endParts[1]).padStart(2, '0')}-${String(endParts[2]).padStart(2, '0')}`;
+      // LLM has resolved the dates in real calendar time - convert to demo database dates
+      const [sy, sm, sd] = dateFilter.startDate.split('-').map(Number);
+      const [ey, em, ed] = dateFilter.endDate.split('-').map(Number);
+      const realStart = new Date(sy, sm - 1, sd);
+      const realEnd = new Date(ey, em - 1, ed);
+      startDate = formatDateForDB(realDateToDemoDate(realStart));
+      endDate = formatDateForDB(realDateToDemoDate(realEnd));
       description = dateFilter.description || timePeriod || 'selected period';
-      console.log(`Using LLM-resolved dateFilter: ${startDate} to ${endDate} (${description})`);
+      console.log(`Using LLM dateFilter: real ${dateFilter.startDate} to ${dateFilter.endDate} -> demo ${startDate} to ${endDate} (${description})`);
     } else if (dateFilter && dateFilter.type === 'discrete' && dateFilter.dates && dateFilter.dates.length > 0) {
-      // LLM provided discrete dates - apply year offset
+      // LLM provided discrete dates in real calendar time - convert each to demo dates
       dates = dateFilter.dates.map(d => {
-        const parts = d.split('-').map(Number);
-        return `${parts[0] + offsetYears}-${String(parts[1]).padStart(2, '0')}-${String(parts[2]).padStart(2, '0')}`;
+        const [y, m, day] = d.split('-').map(Number);
+        const realDate = new Date(y, m - 1, day);
+        return formatDateForDB(realDateToDemoDate(realDate));
       });
       resolvedType = 'discrete';
       description = dateFilter.description || timePeriod || 'selected dates';
-      console.log(`Using LLM-resolved discrete dates: ${dates.join(', ')} (${description})`);
+      console.log(`Using LLM discrete dates: ${dateFilter.dates.join(', ')} -> demo ${dates.join(', ')} (${description})`);
     } else if (timePeriod) {
-      // Default to full year when timePeriod is provided but no dateFilter
-      startDate = `${dbYear}-01-01`;
-      endDate = `${dbYear}-12-31`;
-      description = timePeriod;
-      console.log(`Using default year range for timePeriod "${timePeriod}": ${startDate} to ${endDate}`);
+      // Fall back to parsing timePeriod string when dateFilter not provided
+      const resolved = parseTimePeriodToResolvedDates(timePeriod);
+      if (resolved) {
+        if (resolved.type === 'discrete' && resolved.dates) {
+          dates = resolved.dates;
+          resolvedType = 'discrete';
+        } else if (resolved.startDate && resolved.endDate) {
+          startDate = resolved.startDate;
+          endDate = resolved.endDate;
+        }
+        description = resolved.description || timePeriod;
+        console.log(`Parsed timePeriod "${timePeriod}": ${resolved.type}, dates: ${dates || `${startDate} to ${endDate}`}`);
+      } else {
+        description = timePeriod;
+        console.log(`Could not parse timePeriod "${timePeriod}", querying all data`);
+      }
     }
 
     // Apply date filters to query
@@ -151,27 +160,30 @@ export async function POST(req: NextRequest) {
 
     // Apply expiration filter - use LLM dateFilter for expiration if provided
     if (expiration) {
-      // For expiration, we need to handle it separately
-      // The expiration should match dates in the database
-      // Apply the same year offset for consistency
       const expDateFilter = extractParam(body, 'expiration_date_filter') as DateFilter | undefined;
 
       if (expDateFilter && expDateFilter.type === 'range' && expDateFilter.startDate && expDateFilter.endDate) {
-        const expStartParts = expDateFilter.startDate.split('-').map(Number);
-        const expEndParts = expDateFilter.endDate.split('-').map(Number);
-        const expStartDate = `${expStartParts[0] + offsetYears}-${String(expStartParts[1]).padStart(2, '0')}-${String(expStartParts[2]).padStart(2, '0')}`;
-        const expEndDate = `${expEndParts[0] + offsetYears}-${String(expEndParts[1]).padStart(2, '0')}-${String(expEndParts[2]).padStart(2, '0')}`;
+        // Convert real calendar dates to demo database dates
+        const [sy, sm, sd] = expDateFilter.startDate.split('-').map(Number);
+        const [ey, em, ed] = expDateFilter.endDate.split('-').map(Number);
+        const expStartDate = formatDateForDB(realDateToDemoDate(new Date(sy, sm - 1, sd)));
+        const expEndDate = formatDateForDB(realDateToDemoDate(new Date(ey, em - 1, ed)));
         query = query.gte('Expiration', expStartDate).lte('Expiration', expEndDate);
       } else if (expDateFilter && expDateFilter.type === 'discrete' && expDateFilter.dates && expDateFilter.dates.length > 0) {
+        // Convert each discrete date to demo database date
         const expDates = expDateFilter.dates.map(d => {
-          const parts = d.split('-').map(Number);
-          return `${parts[0] + offsetYears}-${String(parts[1]).padStart(2, '0')}-${String(parts[2]).padStart(2, '0')}`;
+          const [y, m, day] = d.split('-').map(Number);
+          return formatDateForDB(realDateToDemoDate(new Date(y, m - 1, day)));
         });
         query = query.in('Expiration', expDates);
       } else {
-        // Default: just use the expiration string as-is for simple cases like "tomorrow"
-        // For demo database, apply offset to simple date references
-        console.log(`Expiration filter without dateFilter: "${expiration}" - using simple match`);
+        // Fall back to parsing expiration string
+        const expResolved = parseTimePeriodToResolvedDates(expiration);
+        if (expResolved && expResolved.startDate && expResolved.endDate) {
+          query = query.gte('Expiration', expResolved.startDate).lte('Expiration', expResolved.endDate);
+        } else {
+          console.log(`Could not parse expiration "${expiration}", skipping expiration filter`);
+        }
       }
     }
 

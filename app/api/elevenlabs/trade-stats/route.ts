@@ -1,7 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
-import { getDateOffset } from '@/src/lib/date-utils';
+import { realDateToDemoDate, formatDateForDB } from '@/src/lib/date-utils';
 import { normalizeSymbol } from '@/src/lib/symbol-utils';
+import { parseTimePeriodToResolvedDates } from '@/src/lib/date-parser';
 
 // LLM-resolved date filter
 interface DateFilter {
@@ -67,38 +68,38 @@ export async function POST(req: NextRequest) {
 
     const normalizedSymbol = normalizeSymbol(symbol);
 
-    // Get the date offset to map user's year to demo database year
-    const offset = getDateOffset();
     const userYear = new Date().getFullYear();
 
-    // Convert user's year to demo database year by adding the offset
-    const offsetYears = Math.round(offset / 365);
-    const dbYear = userYear + offsetYears;
-
-    let dateStart: string;
-    let dateEnd: string;
+    let dateStart: string | undefined;
+    let dateEnd: string | undefined;
     let periodDescription: string;
 
-    // Use LLM-resolved dateFilter with explicit dates (quarters, months, etc.)
+    // Resolve dates - prioritize LLM-resolved dateFilter, fall back to parsing timePeriod
     if (dateFilter && dateFilter.type === 'range' && dateFilter.startDate && dateFilter.endDate) {
-      // LLM has already resolved the dates - use them directly
-      // Apply date offset to convert from user's calendar to demo database dates
-      const startParts = dateFilter.startDate.split('-').map(Number);
-      const endParts = dateFilter.endDate.split('-').map(Number);
-
-      const adjustedStartYear = startParts[0] + offsetYears;
-      const adjustedEndYear = endParts[0] + offsetYears;
-
-      dateStart = `${adjustedStartYear}-${String(startParts[1]).padStart(2, '0')}-${String(startParts[2]).padStart(2, '0')}`;
-      dateEnd = `${adjustedEndYear}-${String(endParts[1]).padStart(2, '0')}-${String(endParts[2]).padStart(2, '0')}`;
+      // LLM has resolved the dates in real calendar time - convert to demo database dates
+      const [sy, sm, sd] = dateFilter.startDate.split('-').map(Number);
+      const [ey, em, ed] = dateFilter.endDate.split('-').map(Number);
+      const realStart = new Date(sy, sm - 1, sd);
+      const realEnd = new Date(ey, em - 1, ed);
+      dateStart = formatDateForDB(realDateToDemoDate(realStart));
+      dateEnd = formatDateForDB(realDateToDemoDate(realEnd));
       periodDescription = dateFilter.description || timePeriod || 'selected period';
-      console.log(`Using LLM-resolved dateFilter: ${dateStart} to ${dateEnd} (${periodDescription})`);
+      console.log(`Using LLM dateFilter: real ${dateFilter.startDate} to ${dateFilter.endDate} -> demo ${dateStart} to ${dateEnd} (${periodDescription})`);
+    } else if (timePeriod) {
+      // Fall back to parsing timePeriod string when dateFilter not provided
+      const resolved = parseTimePeriodToResolvedDates(timePeriod);
+      if (resolved && resolved.startDate && resolved.endDate) {
+        dateStart = resolved.startDate;
+        dateEnd = resolved.endDate;
+        periodDescription = resolved.description || timePeriod;
+        console.log(`Parsed timePeriod "${timePeriod}": ${dateStart} to ${dateEnd} (${periodDescription})`);
+      } else {
+        periodDescription = timePeriod;
+        console.log(`Could not parse timePeriod "${timePeriod}", querying all data`);
+      }
     } else {
-      // Default to full year when no dateFilter provided
-      dateStart = `${dbYear}-01-01`;
-      dateEnd = `${dbYear}-12-31`;
-      periodDescription = timePeriod || `${userYear}`;
-      console.log(`Using default year range: ${dateStart} to ${dateEnd} (${periodDescription})`);
+      periodDescription = `${userYear}`;
+      console.log('No dateFilter or timePeriod provided, querying all data');
     }
 
     let query = supabase
@@ -106,9 +107,12 @@ export async function POST(req: NextRequest) {
       .select('*')
       .eq('AccountCode', ACCOUNT_CODE)
       .eq('SecurityType', 'S')
-      .or(`Symbol.eq.${normalizedSymbol},UnderlyingSymbol.eq.${normalizedSymbol}`)
-      .gte('Date', dateStart)
-      .lte('Date', dateEnd);
+      .or(`Symbol.eq.${normalizedSymbol},UnderlyingSymbol.eq.${normalizedSymbol}`);
+
+    // Apply date filter only if dates were resolved
+    if (dateStart && dateEnd) {
+      query = query.gte('Date', dateStart).lte('Date', dateEnd);
+    }
 
     if (tradeType) {
       const normalizedType = tradeType.toLowerCase().startsWith('s') ? 'S' : 'B';

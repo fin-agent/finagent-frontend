@@ -1,7 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
-import { formatCalendarDate, getDateOffset } from '@/src/lib/date-utils';
+import { formatCalendarDate, realDateToDemoDate, formatDateForDB } from '@/src/lib/date-utils';
 import { suggestDataPeriod } from '@/src/lib/data-availability';
+import { parseTimePeriodToResolvedDates } from '@/src/lib/date-parser';
 
 // LLM-resolved date filter
 interface DateFilter {
@@ -98,13 +99,7 @@ export async function POST(req: NextRequest) {
     const dateFilter: DateFilter | undefined = body.date_filter || body.parameters?.date_filter ||
                        body.body?.date_filter || body.body?.parameters?.date_filter;
 
-    // Get date offset for demo database
-    const offset = getDateOffset();
-    const offsetYears = Math.round(offset / 365);
-    const userYear = new Date().getFullYear();
-    const dbYear = userYear + offsetYears;
-
-    // Resolve dates - prioritize LLM-resolved dateFilter
+    // Resolve dates - prioritize LLM-resolved dateFilter, fall back to parsing timePeriod
     let startDate: string | undefined;
     let endDate: string | undefined;
     let dates: string[] | undefined;
@@ -112,28 +107,42 @@ export async function POST(req: NextRequest) {
     let resolvedType: 'range' | 'discrete' = 'range';
 
     if (dateFilter && dateFilter.type === 'range' && dateFilter.startDate && dateFilter.endDate) {
-      // LLM has already resolved the dates - apply year offset
-      const startParts = dateFilter.startDate.split('-').map(Number);
-      const endParts = dateFilter.endDate.split('-').map(Number);
-      startDate = `${startParts[0] + offsetYears}-${String(startParts[1]).padStart(2, '0')}-${String(startParts[2]).padStart(2, '0')}`;
-      endDate = `${endParts[0] + offsetYears}-${String(endParts[1]).padStart(2, '0')}-${String(endParts[2]).padStart(2, '0')}`;
+      // LLM has resolved the dates in real calendar time - convert to demo database dates
+      const [sy, sm, sd] = dateFilter.startDate.split('-').map(Number);
+      const [ey, em, ed] = dateFilter.endDate.split('-').map(Number);
+      const realStart = new Date(sy, sm - 1, sd);
+      const realEnd = new Date(ey, em - 1, ed);
+      startDate = formatDateForDB(realDateToDemoDate(realStart));
+      endDate = formatDateForDB(realDateToDemoDate(realEnd));
       description = dateFilter.description || timePeriod || 'selected period';
-      console.log(`Using LLM-resolved dateFilter: ${startDate} to ${endDate} (${description})`);
+      console.log(`Using LLM dateFilter: real ${dateFilter.startDate} to ${dateFilter.endDate} -> demo ${startDate} to ${endDate} (${description})`);
     } else if (dateFilter && dateFilter.type === 'discrete' && dateFilter.dates && dateFilter.dates.length > 0) {
-      // LLM provided discrete dates - apply year offset
+      // LLM provided discrete dates in real calendar time - convert each to demo dates
       dates = dateFilter.dates.map(d => {
-        const parts = d.split('-').map(Number);
-        return `${parts[0] + offsetYears}-${String(parts[1]).padStart(2, '0')}-${String(parts[2]).padStart(2, '0')}`;
+        const [y, m, day] = d.split('-').map(Number);
+        const realDate = new Date(y, m - 1, day);
+        return formatDateForDB(realDateToDemoDate(realDate));
       });
       resolvedType = 'discrete';
       description = dateFilter.description || timePeriod || 'selected dates';
-      console.log(`Using LLM-resolved discrete dates: ${dates.join(', ')} (${description})`);
+      console.log(`Using LLM discrete dates: ${dateFilter.dates.join(', ')} -> demo ${dates.join(', ')} (${description})`);
     } else if (timePeriod) {
-      // Default to full year when timePeriod is provided but no dateFilter
-      startDate = `${dbYear}-01-01`;
-      endDate = `${dbYear}-12-31`;
-      description = timePeriod;
-      console.log(`Using default year range for timePeriod "${timePeriod}": ${startDate} to ${endDate}`);
+      // Fall back to parsing timePeriod string when dateFilter not provided
+      const resolved = parseTimePeriodToResolvedDates(timePeriod);
+      if (resolved) {
+        if (resolved.type === 'discrete' && resolved.dates) {
+          dates = resolved.dates;
+          resolvedType = 'discrete';
+        } else if (resolved.startDate && resolved.endDate) {
+          startDate = resolved.startDate;
+          endDate = resolved.endDate;
+        }
+        description = resolved.description || timePeriod;
+        console.log(`Parsed timePeriod "${timePeriod}": ${resolved.type}, dates: ${dates || `${startDate} to ${endDate}`}`);
+      } else {
+        description = timePeriod;
+        console.log(`Could not parse timePeriod "${timePeriod}", querying all data`);
+      }
     }
 
     // For balance trends (debit/credit balances), get multiple records

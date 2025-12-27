@@ -1,8 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
-import { getDateOffset } from '@/src/lib/date-utils';
+import { realDateToDemoDate, formatDateForDB } from '@/src/lib/date-utils';
 import { calculateRealizedMatchesFIFO, filterProfitableTrades } from '@/src/lib/profitable-trades';
 import { normalizeSymbol } from '@/src/lib/symbol-utils';
+import { parseTimePeriodToResolvedDates } from '@/src/lib/date-parser';
 
 // LLM-resolved date filter
 interface DateFilter {
@@ -74,28 +75,32 @@ async function getTradeSummary(symbol: string) {
 async function getTradeStats(symbol: string, tradeType?: string, year?: number, timePeriod?: string, dateFilter?: DateFilter) {
   const normalizedSymbol = normalizeSymbol(symbol);
 
-  // Get date offset for demo database
-  const offset = getDateOffset();
   const userYear = year || new Date().getFullYear();
-  const offsetYears = Math.round(offset / 365);
-  const dbYear = userYear + offsetYears;
 
-  let dateStart: string;
-  let dateEnd: string;
+  let dateStart: string | undefined;
+  let dateEnd: string | undefined;
   let timePeriodDescription: string | null = null;
 
-  // Prioritize LLM-resolved dateFilter
+  // Resolve dates - prioritize LLM-resolved dateFilter, fall back to parsing timePeriod
   if (dateFilter && dateFilter.type === 'range' && dateFilter.startDate && dateFilter.endDate) {
-    const startParts = dateFilter.startDate.split('-').map(Number);
-    const endParts = dateFilter.endDate.split('-').map(Number);
-    dateStart = `${startParts[0] + offsetYears}-${String(startParts[1]).padStart(2, '0')}-${String(startParts[2]).padStart(2, '0')}`;
-    dateEnd = `${endParts[0] + offsetYears}-${String(endParts[1]).padStart(2, '0')}-${String(endParts[2]).padStart(2, '0')}`;
+    // LLM has resolved the dates in real calendar time - convert to demo database dates
+    const [sy, sm, sd] = dateFilter.startDate.split('-').map(Number);
+    const [ey, em, ed] = dateFilter.endDate.split('-').map(Number);
+    const realStart = new Date(sy, sm - 1, sd);
+    const realEnd = new Date(ey, em - 1, ed);
+    dateStart = formatDateForDB(realDateToDemoDate(realStart));
+    dateEnd = formatDateForDB(realDateToDemoDate(realEnd));
     timePeriodDescription = dateFilter.description || timePeriod || null;
-  } else {
-    // Default to full year
-    dateStart = `${dbYear}-01-01`;
-    dateEnd = `${dbYear}-12-31`;
-    timePeriodDescription = timePeriod || null;
+  } else if (timePeriod) {
+    // Fall back to parsing timePeriod string when dateFilter not provided
+    const resolved = parseTimePeriodToResolvedDates(timePeriod);
+    if (resolved && resolved.startDate && resolved.endDate) {
+      dateStart = resolved.startDate;
+      dateEnd = resolved.endDate;
+      timePeriodDescription = resolved.description || timePeriod;
+    } else {
+      timePeriodDescription = timePeriod;
+    }
   }
 
   let query = supabase
@@ -103,9 +108,12 @@ async function getTradeStats(symbol: string, tradeType?: string, year?: number, 
     .select('*')
     .eq('AccountCode', ACCOUNT_CODE)
     .eq('SecurityType', 'S') // Stock trades only for price analysis
-    .or(`Symbol.eq.${normalizedSymbol},UnderlyingSymbol.eq.${normalizedSymbol}`)
-    .gte('Date', dateStart)
-    .lte('Date', dateEnd);
+    .or(`Symbol.eq.${normalizedSymbol},UnderlyingSymbol.eq.${normalizedSymbol}`);
+
+  // Apply date filter only if dates were resolved
+  if (dateStart && dateEnd) {
+    query = query.gte('Date', dateStart).lte('Date', dateEnd);
+  }
 
   // Filter by trade type if specified (B = Buy, S = Sell)
   if (tradeType) {
@@ -180,21 +188,28 @@ async function getTradeStats(symbol: string, tradeType?: string, year?: number, 
 async function getProfitableTrades(symbol: string, onlyProfitable: boolean = true, timePeriod?: string, dateFilter?: DateFilter) {
   const normalizedSymbol = normalizeSymbol(symbol);
 
-  // Get date offset for demo database
-  const offset = getDateOffset();
-  const offsetYears = Math.round(offset / 365);
-
   let dateStart: string | undefined;
   let dateEnd: string | undefined;
   let description: string | undefined = timePeriod;
 
-  // Prioritize LLM-resolved dateFilter
+  // Resolve dates - prioritize LLM-resolved dateFilter, fall back to parsing timePeriod
   if (dateFilter && dateFilter.type === 'range' && dateFilter.startDate && dateFilter.endDate) {
-    const startParts = dateFilter.startDate.split('-').map(Number);
-    const endParts = dateFilter.endDate.split('-').map(Number);
-    dateStart = `${startParts[0] + offsetYears}-${String(startParts[1]).padStart(2, '0')}-${String(startParts[2]).padStart(2, '0')}`;
-    dateEnd = `${endParts[0] + offsetYears}-${String(endParts[1]).padStart(2, '0')}-${String(endParts[2]).padStart(2, '0')}`;
+    // LLM has resolved the dates in real calendar time - convert to demo database dates
+    const [sy, sm, sd] = dateFilter.startDate.split('-').map(Number);
+    const [ey, em, ed] = dateFilter.endDate.split('-').map(Number);
+    const realStart = new Date(sy, sm - 1, sd);
+    const realEnd = new Date(ey, em - 1, ed);
+    dateStart = formatDateForDB(realDateToDemoDate(realStart));
+    dateEnd = formatDateForDB(realDateToDemoDate(realEnd));
     description = dateFilter.description || timePeriod;
+  } else if (timePeriod) {
+    // Fall back to parsing timePeriod string when dateFilter not provided
+    const resolved = parseTimePeriodToResolvedDates(timePeriod);
+    if (resolved && resolved.startDate && resolved.endDate) {
+      dateStart = resolved.startDate;
+      dateEnd = resolved.endDate;
+      description = resolved.description || timePeriod;
+    }
   }
 
   let query = supabase

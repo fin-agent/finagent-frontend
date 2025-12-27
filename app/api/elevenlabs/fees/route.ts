@@ -1,8 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
-import { parseTimePeriodToResolvedDates } from '@/src/lib/date-parser';
 import { normalizeSymbol, parseOptionSymbol } from '@/src/lib/symbol-utils';
 import { suggestDataPeriod } from '@/src/lib/data-availability';
+import { getDateOffset } from '@/src/lib/date-utils';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -12,6 +12,15 @@ const supabase = createClient(
 const ACCOUNT_CODE = 'C40421';
 
 type FeeType = 'commission' | 'credit_interest' | 'debit_interest' | 'locate_fee' | 'short_interest';
+
+// LLM-resolved date filter
+interface DateFilter {
+  type: 'range' | 'discrete' | 'relative';
+  startDate?: string;
+  endDate?: string;
+  dates?: string[];
+  description: string;
+}
 
 // UI data structure for FeesSummary component
 interface FeesUIData {
@@ -51,9 +60,10 @@ export async function POST(req: NextRequest) {
     const feeType: FeeType = body.fee_type || body.parameters?.fee_type ||
                              body.body?.fee_type || body.body?.parameters?.fee_type;
     const timePeriod = body.time_period || body.parameters?.time_period ||
-                       body.body?.time_period || body.body?.parameters?.time_period || 'this month';
+                       body.body?.time_period || body.body?.parameters?.time_period || 'this year';
     const symbol = body.symbol || body.parameters?.symbol ||
                    body.body?.symbol || body.body?.parameters?.symbol;
+    const dateFilter: DateFilter | undefined = body.date_filter || body.parameters?.date_filter;
 
     if (!feeType) {
       return NextResponse.json({
@@ -61,15 +71,45 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Resolve dates using centralized parser
-    const resolved = parseTimePeriodToResolvedDates(timePeriod);
-    if (!resolved) {
-      return NextResponse.json({
-        response: `I couldn't understand the time period "${timePeriod}". Please try something like "last month", "this year", or "June 1st to the 7th".`,
-      });
-    }
+    // Get date offset for demo database
+    const offset = getDateOffset();
+    const offsetYears = Math.round(offset / 365);
+    const userYear = new Date().getFullYear();
+    const dbYear = userYear + offsetYears;
 
-    const { startDate, endDate, dates, description } = resolved;
+    // Resolve dates - prioritize LLM-resolved dateFilter
+    let startDate: string;
+    let endDate: string;
+    let dates: string[] | undefined;
+    let description: string;
+    let resolvedType: 'range' | 'discrete' = 'range';
+
+    if (dateFilter && dateFilter.type === 'range' && dateFilter.startDate && dateFilter.endDate) {
+      // LLM has already resolved the dates - apply year offset
+      const startParts = dateFilter.startDate.split('-').map(Number);
+      const endParts = dateFilter.endDate.split('-').map(Number);
+      startDate = `${startParts[0] + offsetYears}-${String(startParts[1]).padStart(2, '0')}-${String(startParts[2]).padStart(2, '0')}`;
+      endDate = `${endParts[0] + offsetYears}-${String(endParts[1]).padStart(2, '0')}-${String(endParts[2]).padStart(2, '0')}`;
+      description = dateFilter.description || timePeriod;
+      console.log(`Using LLM-resolved dateFilter: ${startDate} to ${endDate} (${description})`);
+    } else if (dateFilter && dateFilter.type === 'discrete' && dateFilter.dates && dateFilter.dates.length > 0) {
+      // LLM provided discrete dates - apply year offset
+      dates = dateFilter.dates.map(d => {
+        const parts = d.split('-').map(Number);
+        return `${parts[0] + offsetYears}-${String(parts[1]).padStart(2, '0')}-${String(parts[2]).padStart(2, '0')}`;
+      });
+      startDate = dates[0];
+      endDate = dates[dates.length - 1];
+      description = dateFilter.description || timePeriod;
+      resolvedType = 'discrete';
+      console.log(`Using LLM-resolved discrete dates: ${dates.join(', ')} (${description})`);
+    } else {
+      // Default to full year when no dateFilter provided
+      startDate = `${dbYear}-01-01`;
+      endDate = `${dbYear}-12-31`;
+      description = timePeriod || `${userYear}`;
+      console.log(`Using default year range: ${startDate} to ${endDate} (${description})`);
+    }
 
     // Handle commissions from TradeData table
     if (feeType === 'commission') {
@@ -78,7 +118,7 @@ export async function POST(req: NextRequest) {
         .select('Commission, Date, Symbol')
         .eq('AccountCode', ACCOUNT_CODE);
 
-      if (resolved.type === 'discrete' && dates && dates.length > 0) {
+      if (resolvedType === 'discrete' && dates && dates.length > 0) {
         query = query.in('Date', dates);
       } else if (startDate && endDate) {
         query = query.gte('Date', startDate).lte('Date', endDate);
@@ -170,7 +210,7 @@ export async function POST(req: NextRequest) {
       .select('*')
       .eq('Type', dbFeeType);
 
-    if (resolved.type === 'discrete' && dates && dates.length > 0) {
+    if (resolvedType === 'discrete' && dates && dates.length > 0) {
       feesQuery = feesQuery.in('Date', dates);
     } else if (startDate && endDate) {
       feesQuery = feesQuery.gte('Date', startDate).lte('Date', endDate);

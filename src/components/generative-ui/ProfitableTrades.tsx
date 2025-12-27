@@ -65,8 +65,15 @@ export function ProfitableTrades({
 
   const avgProfit = totalProfitableTrades > 0 ? totalProfit / totalProfitableTrades : 0;
   const totalQty = trades.reduce((sum, t) => sum + t.quantity, 0);
-  const stockTrades = trades.filter(t => t.securityType === 'Stock').length;
-  const optionTrades = trades.filter(t => t.securityType !== 'Stock').length;
+  const stockTrades = trades.filter(t => t.securityType === 'Stock');
+  const optionTrades = trades.filter(t => t.securityType !== 'Stock');
+
+  // Build unit label: "shares", "contracts", or "shares/contracts"
+  const getUnitLabel = () => {
+    if (stockTrades.length > 0 && optionTrades.length === 0) return 'shares';
+    if (optionTrades.length > 0 && stockTrades.length === 0) return 'contracts';
+    return 'units'; // Mixed stock and options
+  };
 
   return (
     <div style={{
@@ -137,7 +144,7 @@ export function ProfitableTrades({
               fontSize: '11px',
               color: palette.textMuted,
             }}>
-              {totalQty.toLocaleString()} units
+              {totalQty.toLocaleString()} {getUnitLabel()}
             </span>
           </div>
         </div>
@@ -177,8 +184,8 @@ export function ProfitableTrades({
         flexWrap: 'wrap',
       }}>
         {[
-          { icon: BarChart3, label: 'Trades', value: totalProfitableTrades.toString() },
-          { icon: Layers, label: 'Units', value: totalQty.toLocaleString() },
+          { icon: BarChart3, label: 'trades', value: totalProfitableTrades.toString() },
+          { icon: Layers, label: getUnitLabel(), value: totalQty.toLocaleString() },
         ].map((stat) => (
           <div key={stat.label} style={{
             display: 'flex',
@@ -204,30 +211,30 @@ export function ProfitableTrades({
         ))}
 
         {/* Stock/Option breakdown */}
-        {(stockTrades > 0 || optionTrades > 0) && (
+        {(stockTrades.length > 0 || optionTrades.length > 0) && (
           <div style={{
             display: 'flex',
             alignItems: 'center',
-            gap: '8px',
+            gap: '12px',
           }}>
-            {stockTrades > 0 && (
+            {stockTrades.length > 0 && (
               <div style={{
                 display: 'flex',
                 alignItems: 'center',
                 gap: '4px',
               }}>
-                <span style={{ fontSize: '10px', color: palette.textMuted }}>S</span>
-                <span style={{ fontSize: '12px', fontWeight: 700, color: palette.textSecondary }}>{stockTrades}</span>
+                <span style={{ fontSize: '12px', fontWeight: 700, color: palette.textSecondary }}>{stockTrades.length}</span>
+                <span style={{ fontSize: '10px', color: palette.textMuted }}>stock</span>
               </div>
             )}
-            {optionTrades > 0 && (
+            {optionTrades.length > 0 && (
               <div style={{
                 display: 'flex',
                 alignItems: 'center',
                 gap: '4px',
               }}>
-                <span style={{ fontSize: '10px', color: palette.textMuted }}>O</span>
-                <span style={{ fontSize: '12px', fontWeight: 700, color: palette.textSecondary }}>{optionTrades}</span>
+                <span style={{ fontSize: '12px', fontWeight: 700, color: palette.textSecondary }}>{optionTrades.length}</span>
+                <span style={{ fontSize: '10px', color: palette.textMuted }}>option</span>
               </div>
             )}
           </div>
@@ -316,7 +323,7 @@ export function ProfitableTrades({
                     backgroundColor: trade.securityType === 'Stock' ? palette.elevated : palette.profitDim,
                     color: trade.securityType === 'Stock' ? palette.textSecondary : palette.profit,
                   }}>
-                    {trade.securityType === 'Stock' ? 'STK' : 'OPT'}
+                    {trade.securityType === 'Stock' ? 'Stock' : 'Option'}
                   </span>
                   <span style={{
                     fontSize: '11px',
@@ -333,7 +340,7 @@ export function ProfitableTrades({
                   fontSize: '10px',
                   color: palette.textMuted,
                 }}>
-                  {trade.quantity} × {formatCurrency(trade.buyPrice)} → {formatCurrency(trade.sellPrice)}
+                  {trade.quantity} {trade.securityType === 'Stock' ? 'shares' : 'contracts'} × {formatCurrency(trade.buyPrice)} → {formatCurrency(trade.sellPrice)}
                 </div>
               </div>
               <div style={{

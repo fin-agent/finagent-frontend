@@ -1,9 +1,17 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
-import { parseTimeExpression } from '@/src/lib/date-parser';
 import { getDateOffset } from '@/src/lib/date-utils';
 import { calculateRealizedMatchesFIFO, filterProfitableTrades } from '@/src/lib/profitable-trades';
 import { normalizeSymbol } from '@/src/lib/symbol-utils';
+
+// LLM-resolved date filter
+interface DateFilter {
+  type: 'range' | 'discrete' | 'relative';
+  startDate?: string;
+  endDate?: string;
+  dates?: string[];
+  description: string;
+}
 
 // Format date in PACIFIC TIMEZONE to match UI display
 // The UI renders dates in the user's browser (typically Pacific time)
@@ -63,7 +71,7 @@ async function getTradeSummary(symbol: string) {
 }
 
 // Tool: Get trade statistics (highest, lowest, average prices)
-async function getTradeStats(symbol: string, tradeType?: string, year?: number, timePeriod?: string) {
+async function getTradeStats(symbol: string, tradeType?: string, year?: number, timePeriod?: string, dateFilter?: DateFilter) {
   const normalizedSymbol = normalizeSymbol(symbol);
 
   // Get date offset for demo database
@@ -76,22 +84,18 @@ async function getTradeStats(symbol: string, tradeType?: string, year?: number, 
   let dateEnd: string;
   let timePeriodDescription: string | null = null;
 
-  // If timePeriod is provided (e.g., "last month", "last week"), parse it
-  if (timePeriod) {
-    const parsedTime = parseTimeExpression(timePeriod);
-    if (parsedTime) {
-      dateStart = parsedTime.dateRange.startDate;
-      dateEnd = parsedTime.dateRange.endDate;
-      timePeriodDescription = parsedTime.dateRange.description;
-    } else {
-      // Fallback to full year if parsing fails
-      dateStart = `${dbYear}-01-01`;
-      dateEnd = `${dbYear}-12-31`;
-    }
+  // Prioritize LLM-resolved dateFilter
+  if (dateFilter && dateFilter.type === 'range' && dateFilter.startDate && dateFilter.endDate) {
+    const startParts = dateFilter.startDate.split('-').map(Number);
+    const endParts = dateFilter.endDate.split('-').map(Number);
+    dateStart = `${startParts[0] + offsetYears}-${String(startParts[1]).padStart(2, '0')}-${String(startParts[2]).padStart(2, '0')}`;
+    dateEnd = `${endParts[0] + offsetYears}-${String(endParts[1]).padStart(2, '0')}-${String(endParts[2]).padStart(2, '0')}`;
+    timePeriodDescription = dateFilter.description || timePeriod || null;
   } else {
     // Default to full year
     dateStart = `${dbYear}-01-01`;
     dateEnd = `${dbYear}-12-31`;
+    timePeriodDescription = timePeriod || null;
   }
 
   let query = supabase
@@ -173,12 +177,25 @@ async function getTradeStats(symbol: string, tradeType?: string, year?: number, 
 }
 
 // Tool: Get profitable trades (FIFO matching)
-async function getProfitableTrades(symbol: string, onlyProfitable: boolean = true, timePeriod?: string) {
+async function getProfitableTrades(symbol: string, onlyProfitable: boolean = true, timePeriod?: string, dateFilter?: DateFilter) {
   const normalizedSymbol = normalizeSymbol(symbol);
 
-  const parsedTime = timePeriod ? parseTimeExpression(timePeriod) : null;
-  const dateStart = parsedTime?.dateRange.startDate;
-  const dateEnd = parsedTime?.dateRange.endDate;
+  // Get date offset for demo database
+  const offset = getDateOffset();
+  const offsetYears = Math.round(offset / 365);
+
+  let dateStart: string | undefined;
+  let dateEnd: string | undefined;
+  let description: string | undefined = timePeriod;
+
+  // Prioritize LLM-resolved dateFilter
+  if (dateFilter && dateFilter.type === 'range' && dateFilter.startDate && dateFilter.endDate) {
+    const startParts = dateFilter.startDate.split('-').map(Number);
+    const endParts = dateFilter.endDate.split('-').map(Number);
+    dateStart = `${startParts[0] + offsetYears}-${String(startParts[1]).padStart(2, '0')}-${String(startParts[2]).padStart(2, '0')}`;
+    dateEnd = `${endParts[0] + offsetYears}-${String(endParts[1]).padStart(2, '0')}-${String(endParts[2]).padStart(2, '0')}`;
+    description = dateFilter.description || timePeriod;
+  }
 
   let query = supabase
     .from('TradeData')
@@ -202,7 +219,7 @@ async function getProfitableTrades(symbol: string, onlyProfitable: boolean = tru
   if (allTrades.length === 0) {
     return {
       symbol: normalizedSymbol,
-      timePeriod: parsedTime?.dateRange.description || timePeriod || null,
+      timePeriod: description || null,
       message: `No trades found for ${normalizedSymbol}.`,
       totalMatchedTrades: 0,
       totalProfitableTrades: 0,
@@ -215,7 +232,7 @@ async function getProfitableTrades(symbol: string, onlyProfitable: boolean = tru
   if (matchedTrades.length === 0) {
     return {
       symbol: normalizedSymbol,
-      timePeriod: parsedTime?.dateRange.description || timePeriod || null,
+      timePeriod: description || null,
       message: `No completed round-trip trades found for ${normalizedSymbol}.`,
       totalMatchedTrades: 0,
       totalProfitableTrades: 0,
@@ -228,7 +245,7 @@ async function getProfitableTrades(symbol: string, onlyProfitable: boolean = tru
     const { profitableTrades, totalProfit } = filterProfitableTrades(matchedTrades, dateStart, dateEnd);
     return {
       symbol: normalizedSymbol,
-      timePeriod: parsedTime?.dateRange.description || timePeriod || null,
+      timePeriod: description || null,
       totalMatchedTrades: matchedTrades.length,
       totalProfitableTrades: profitableTrades.length,
       totalProfit,
@@ -239,7 +256,7 @@ async function getProfitableTrades(symbol: string, onlyProfitable: boolean = tru
   const allTotal = matchedTrades.reduce((sum, t) => sum + t.profitLoss, 0);
   return {
     symbol: normalizedSymbol,
-    timePeriod: parsedTime?.dateRange.description || timePeriod || null,
+    timePeriod: description || null,
     totalMatchedTrades: matchedTrades.length,
     totalProfitableTrades: matchedTrades.filter(t => t.profitLoss > 0).length,
     totalProfit: allTotal,
@@ -347,7 +364,8 @@ export async function POST(req: NextRequest) {
           parameters.symbol,
           parameters.trade_type || parameters.tradeType,
           parameters.year,
-          parameters.time_period || parameters.timePeriod
+          parameters.time_period || parameters.timePeriod,
+          parameters.date_filter || parameters.dateFilter
         );
         break;
 
@@ -356,7 +374,8 @@ export async function POST(req: NextRequest) {
         result = await getProfitableTrades(
           parameters.symbol,
           parameters.only_profitable ?? parameters.onlyProfitable ?? true,
-          parameters.time_period || parameters.timePeriod
+          parameters.time_period || parameters.timePeriod,
+          parameters.date_filter || parameters.dateFilter
         );
         break;
 

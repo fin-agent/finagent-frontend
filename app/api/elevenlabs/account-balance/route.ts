@@ -1,8 +1,16 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
-import { formatCalendarDate } from '@/src/lib/date-utils';
-import { parseTimePeriodToResolvedDates } from '@/src/lib/date-parser';
+import { formatCalendarDate, getDateOffset } from '@/src/lib/date-utils';
 import { suggestDataPeriod } from '@/src/lib/data-availability';
+
+// LLM-resolved date filter
+interface DateFilter {
+  type: 'range' | 'discrete' | 'relative';
+  startDate?: string;
+  endDate?: string;
+  dates?: string[];
+  description: string;
+}
 
 // Use formatCalendarDate from date-utils to apply demo date offset
 // This ensures voice and UI show the same dates
@@ -87,9 +95,46 @@ export async function POST(req: NextRequest) {
                                   'account_summary';
     const timePeriod = body.time_period || body.parameters?.time_period ||
                        body.body?.time_period || body.body?.parameters?.time_period;
+    const dateFilter: DateFilter | undefined = body.date_filter || body.parameters?.date_filter ||
+                       body.body?.date_filter || body.body?.parameters?.date_filter;
 
-    // Resolve dates using centralized parser
-    const resolved = timePeriod ? parseTimePeriodToResolvedDates(timePeriod) : null;
+    // Get date offset for demo database
+    const offset = getDateOffset();
+    const offsetYears = Math.round(offset / 365);
+    const userYear = new Date().getFullYear();
+    const dbYear = userYear + offsetYears;
+
+    // Resolve dates - prioritize LLM-resolved dateFilter
+    let startDate: string | undefined;
+    let endDate: string | undefined;
+    let dates: string[] | undefined;
+    let description: string = timePeriod || '';
+    let resolvedType: 'range' | 'discrete' = 'range';
+
+    if (dateFilter && dateFilter.type === 'range' && dateFilter.startDate && dateFilter.endDate) {
+      // LLM has already resolved the dates - apply year offset
+      const startParts = dateFilter.startDate.split('-').map(Number);
+      const endParts = dateFilter.endDate.split('-').map(Number);
+      startDate = `${startParts[0] + offsetYears}-${String(startParts[1]).padStart(2, '0')}-${String(startParts[2]).padStart(2, '0')}`;
+      endDate = `${endParts[0] + offsetYears}-${String(endParts[1]).padStart(2, '0')}-${String(endParts[2]).padStart(2, '0')}`;
+      description = dateFilter.description || timePeriod || 'selected period';
+      console.log(`Using LLM-resolved dateFilter: ${startDate} to ${endDate} (${description})`);
+    } else if (dateFilter && dateFilter.type === 'discrete' && dateFilter.dates && dateFilter.dates.length > 0) {
+      // LLM provided discrete dates - apply year offset
+      dates = dateFilter.dates.map(d => {
+        const parts = d.split('-').map(Number);
+        return `${parts[0] + offsetYears}-${String(parts[1]).padStart(2, '0')}-${String(parts[2]).padStart(2, '0')}`;
+      });
+      resolvedType = 'discrete';
+      description = dateFilter.description || timePeriod || 'selected dates';
+      console.log(`Using LLM-resolved discrete dates: ${dates.join(', ')} (${description})`);
+    } else if (timePeriod) {
+      // Default to full year when timePeriod is provided but no dateFilter
+      startDate = `${dbYear}-01-01`;
+      endDate = `${dbYear}-12-31`;
+      description = timePeriod;
+      console.log(`Using default year range for timePeriod "${timePeriod}": ${startDate} to ${endDate}`);
+    }
 
     // For balance trends (debit/credit balances), get multiple records
     if (queryType === 'debit_balances' || queryType === 'credit_balances') {
@@ -99,12 +144,11 @@ export async function POST(req: NextRequest) {
         .eq('AccountCode', ACCOUNT_CODE)
         .order('Date', { ascending: false });
 
-      if (resolved) {
-        if (resolved.type === 'discrete' && resolved.dates && resolved.dates.length > 0) {
-          query = query.in('Date', resolved.dates);
-        } else if (resolved.startDate && resolved.endDate) {
-          query = query.gte('Date', resolved.startDate).lte('Date', resolved.endDate);
-        }
+      // Apply date filters
+      if (resolvedType === 'discrete' && dates && dates.length > 0) {
+        query = query.in('Date', dates);
+      } else if (startDate && endDate) {
+        query = query.gte('Date', startDate).lte('Date', endDate);
       }
 
       const { data, error } = await query;
@@ -112,7 +156,7 @@ export async function POST(req: NextRequest) {
       if (error) {
         const uiData: AccountBalanceUIData = {
           queryType,
-          timePeriod: resolved?.description || timePeriod,
+          timePeriod: description || timePeriod,
           asOfDate: '',
         };
         return NextResponse.json({
@@ -123,7 +167,7 @@ export async function POST(req: NextRequest) {
 
       if (!data || data.length === 0) {
         // Use LLM-based suggestion for a natural time period
-        const periodDescription = resolved?.description || timePeriod || 'the specified period';
+        const periodDescription = description || timePeriod || 'the specified period';
         const suggestion = await suggestDataPeriod('AccountBalance', periodDescription);
 
         if (suggestion) {
@@ -161,7 +205,7 @@ export async function POST(req: NextRequest) {
       const minDate = data.find(d => d[balanceField] === min)?.Date;
 
       const balanceType = queryType === 'debit_balances' ? 'debit' : 'credit';
-      const periodLabel = resolved?.description || timePeriod || 'the period';
+      const periodLabel = description || timePeriod || 'the period';
       const highestDate = formatDate(maxDate || '');
       const lowestDate = formatDate(minDate || '');
 

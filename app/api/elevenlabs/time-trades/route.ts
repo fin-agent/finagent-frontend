@@ -1,9 +1,17 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
-import { parseTimePeriodToResolvedDates } from '@/src/lib/date-parser';
-import { formatDisplayDate, formatDateRange } from '@/src/lib/date-utils';
+import { formatDisplayDate, formatDateRange, getDateOffset } from '@/src/lib/date-utils';
 import { normalizeSymbol } from '@/src/lib/symbol-utils';
 import { suggestDataPeriod } from '@/src/lib/data-availability';
+
+// LLM-resolved date filter
+interface DateFilter {
+  type: 'range' | 'discrete' | 'relative';
+  startDate?: string;
+  endDate?: string;
+  dates?: string[];
+  description: string;
+}
 
 // Format date in PACIFIC TIMEZONE to match UI display
 // The UI renders dates in the user's browser (typically Pacific time)
@@ -48,23 +56,54 @@ export async function POST(req: NextRequest) {
                         body.body?.calculation || body.body?.parameters?.calculation;
     const tradeType = body.trade_type || body.parameters?.trade_type ||
                       body.body?.trade_type || body.body?.parameters?.trade_type;
+    const dateFilter: DateFilter | undefined = body.date_filter || body.parameters?.date_filter ||
+                       body.body?.date_filter || body.body?.parameters?.date_filter;
 
-    if (!timePeriod) {
+    if (!timePeriod && !dateFilter) {
       return NextResponse.json({
-        response: 'Please specify a time period like "last week", "yesterday", "past 5 days", "November 18th", "June 1st to the 7th", or a day name like "Monday".',
+        response: 'Please specify a time period like "last week", "yesterday", "past 5 days", "Q3", "January", or a date range like "June 1st to the 7th".',
       });
     }
 
-    // Parse the time period using centralized parser
-    const resolved = parseTimePeriodToResolvedDates(timePeriod);
-    if (!resolved) {
-      return NextResponse.json({
-        response: `I couldn't understand the time period "${timePeriod}". Try "last week", "yesterday", "past 5 days", "November 18th", "June 1st to the 7th", "August and September", or a day name like "Monday".`,
+    // Get date offset for demo database
+    const offset = getDateOffset();
+    const offsetYears = Math.round(offset / 365);
+    const userYear = new Date().getFullYear();
+    const dbYear = userYear + offsetYears;
+
+    // Resolve dates - prioritize LLM-resolved dateFilter
+    let startDate: string | undefined;
+    let endDate: string | undefined;
+    let dates: string[] | undefined;
+    let description: string = timePeriod || '';
+    let resolvedType: 'range' | 'discrete' = 'range';
+
+    if (dateFilter && dateFilter.type === 'range' && dateFilter.startDate && dateFilter.endDate) {
+      // LLM has already resolved the dates - apply year offset
+      const startParts = dateFilter.startDate.split('-').map(Number);
+      const endParts = dateFilter.endDate.split('-').map(Number);
+      startDate = `${startParts[0] + offsetYears}-${String(startParts[1]).padStart(2, '0')}-${String(startParts[2]).padStart(2, '0')}`;
+      endDate = `${endParts[0] + offsetYears}-${String(endParts[1]).padStart(2, '0')}-${String(endParts[2]).padStart(2, '0')}`;
+      description = dateFilter.description || timePeriod || 'selected period';
+      console.log(`Using LLM-resolved dateFilter: ${startDate} to ${endDate} (${description})`);
+    } else if (dateFilter && dateFilter.type === 'discrete' && dateFilter.dates && dateFilter.dates.length > 0) {
+      // LLM provided discrete dates - apply year offset
+      dates = dateFilter.dates.map(d => {
+        const parts = d.split('-').map(Number);
+        return `${parts[0] + offsetYears}-${String(parts[1]).padStart(2, '0')}-${String(parts[2]).padStart(2, '0')}`;
       });
+      resolvedType = 'discrete';
+      description = dateFilter.description || timePeriod || 'selected dates';
+      console.log(`Using LLM-resolved discrete dates: ${dates.join(', ')} (${description})`);
+    } else {
+      // Default to full year when no dateFilter provided
+      startDate = `${dbYear}-01-01`;
+      endDate = `${dbYear}-12-31`;
+      description = timePeriod || `${userYear}`;
+      console.log(`Using default year range: ${startDate} to ${endDate} (${description})`);
     }
 
-    const { startDate, endDate, dates, description } = resolved;
-    console.log(`Parsed time period: ${description}, type: ${resolved.type}, dates: ${dates || `${startDate} to ${endDate}`}`);
+    console.log(`Parsed time period: ${description}, type: ${resolvedType}, dates: ${dates || `${startDate} to ${endDate}`}`);
 
     // Build the query
     let query = supabase
@@ -72,7 +111,7 @@ export async function POST(req: NextRequest) {
       .select('*')
       .eq('AccountCode', ACCOUNT_CODE);
 
-    if (resolved.type === 'discrete' && dates && dates.length > 0) {
+    if (resolvedType === 'discrete' && dates && dates.length > 0) {
       query = query.in('Date', dates);
     } else if (startDate && endDate) {
       query = query.gte('Date', startDate).lte('Date', endDate);
@@ -175,13 +214,13 @@ export async function POST(req: NextRequest) {
     const isAbsoluteMonth = /^(January|February|March|April|May|June|July|August|September|October|November|December)$/i.test(description);
     const displayRange = isAbsoluteMonth
       ? description
-      : resolved.type === 'discrete' && dates
+      : resolvedType === 'discrete' && dates
         ? dates.map(d => formatDisplayDate(d)).join(', ')
         : formatDateRange(startDate || '', endDate || '');
 
     // Calculate trading days
     let tradingDays = 1;
-    if (resolved.type === 'discrete' && dates) {
+    if (resolvedType === 'discrete' && dates) {
       tradingDays = dates.length;
     } else if (startDate && endDate) {
       const start = new Date(startDate);

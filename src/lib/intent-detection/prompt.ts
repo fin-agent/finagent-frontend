@@ -41,7 +41,14 @@ ${intents.map(i => `### ${i.id}
   - Relative: "today", "yesterday", "tomorrow"
   - Week-based: "this week", "last week"
   - Month-based: "this month", "last month", "last 30 days", "last N months"
+  - Single months: "January", "February", "March", etc. (current year unless specified)
   - Year-based: "this year", "last year", "last 12 months"
+  - Quarter-based: "Q1", "Q2", "Q3", "Q4", "first quarter", "second quarter", "last quarter", "this quarter"
+    - Q1 = Jan 1 - Mar 31, Q2 = Apr 1 - Jun 30, Q3 = Jul 1 - Sep 30, Q4 = Oct 1 - Dec 31
+    - "last quarter" = previous quarter relative to today
+    - "last 2 quarters" = previous 2 quarters
+  - Half-year: "first half", "second half", "H1", "H2"
+    - H1 = Jan 1 - Jun 30, H2 = Jul 1 - Dec 31
   - Date ranges: "June 1st to the 7th", "June 1 to June 7", "November 15 to December 5"
   - Multi-month ranges: "August and September", "August through October"
   - Discrete dates: "July 1st and August 1st", "January 5th, March 10th and June 20th"
@@ -73,7 +80,22 @@ ${intents.map(i => `### ${i.id}
   - "yesterday" → { "type": "relative", "period": "yesterday", "description": "yesterday" }
   - "this year" → { "type": "relative", "period": "this year", "description": "this year" }
 
+  Quarter examples (ALWAYS resolve to type "range" with actual dates):
+  - "last quarter" (if today is Dec 2025) → { "type": "range", "startDate": "2025-07-01", "endDate": "2025-09-30", "description": "Q3 2025" }
+  - "Q3 2025" → { "type": "range", "startDate": "2025-07-01", "endDate": "2025-09-30", "description": "Q3 2025" }
+  - "first quarter" → { "type": "range", "startDate": "2025-01-01", "endDate": "2025-03-31", "description": "Q1 2025" }
+  - "last 2 quarters" (if today is Dec 2025) → { "type": "range", "startDate": "2025-04-01", "endDate": "2025-09-30", "description": "Q2-Q3 2025" }
+
+  Single month examples (ALWAYS resolve to type "range" with actual dates):
+  - "January" → { "type": "range", "startDate": "2025-01-01", "endDate": "2025-01-31", "description": "January 2025" }
+  - "March" → { "type": "range", "startDate": "2025-03-01", "endDate": "2025-03-31", "description": "March 2025" }
+
+  Half-year examples:
+  - "first half" / "H1" → { "type": "range", "startDate": "2025-01-01", "endDate": "2025-06-30", "description": "H1 2025" }
+  - "second half" / "H2" → { "type": "range", "startDate": "2025-07-01", "endDate": "2025-12-31", "description": "H2 2025" }
+
   **IMPORTANT**: Use current calendar year (2025). If a date would be in the future relative to today, use the previous year.
+  **CRITICAL**: For quarters, single months, and half-years, ALWAYS use type "range" with resolved startDate/endDate - NOT type "relative".
 - **tradeType**: "buy"/"bought"/"purchased"/"long" -> "buy", "sell"/"sold"/"short"/"written" -> "sell"
 - **callPut**: "call"/"calls" -> "call", "put"/"puts" -> "put"
 - **expiration**: "tomorrow", "this week", "this month", or specific date
@@ -214,5 +236,26 @@ Query: "What is my short interest for this year?"
 Response: {"intent": "fees.query", "confidence": 0.93, "entities": {"feeType": "short_interest", "timePeriod": "this year", "dateFilter": {"type": "relative", "period": "this year", "description": "this year"}}}
 
 Query: "Show my short interest for MTEN"
-Response: {"intent": "fees.query", "confidence": 0.92, "entities": {"symbol": "MTEN", "feeType": "short_interest"}}`;
+Response: {"intent": "fees.query", "confidence": 0.92, "entities": {"symbol": "MTEN", "feeType": "short_interest"}}
+
+Query: "What's the highest price I sold Apple for last quarter?" (context: Today is December 26, 2025)
+Response: {"intent": "trades.stats", "confidence": 0.96, "entities": {"symbol": "AAPL", "tradeType": "sell", "timePeriod": "last quarter", "dateFilter": {"type": "range", "startDate": "2025-07-01", "endDate": "2025-09-30", "description": "Q3 2025"}}}
+
+Query: "Show my trades for Q3 2025"
+Response: {"intent": "trades.time_based", "confidence": 0.95, "entities": {"timePeriod": "Q3 2025", "dateFilter": {"type": "range", "startDate": "2025-07-01", "endDate": "2025-09-30", "description": "Q3 2025"}}}
+
+Query: "What did I trade in the first quarter?"
+Response: {"intent": "trades.time_based", "confidence": 0.94, "entities": {"timePeriod": "first quarter", "dateFilter": {"type": "range", "startDate": "2025-01-01", "endDate": "2025-03-31", "description": "Q1 2025"}}}
+
+Query: "Show my commissions for the last 2 quarters" (context: Today is December 26, 2025)
+Response: {"intent": "fees.query", "confidence": 0.93, "entities": {"feeType": "commission", "timePeriod": "last 2 quarters", "dateFilter": {"type": "range", "startDate": "2025-04-01", "endDate": "2025-09-30", "description": "Q2-Q3 2025"}}}
+
+Query: "What did I trade in January?"
+Response: {"intent": "trades.time_based", "confidence": 0.94, "entities": {"timePeriod": "January", "dateFilter": {"type": "range", "startDate": "2025-01-01", "endDate": "2025-01-31", "description": "January 2025"}}}
+
+Query: "Show my trades for the first half of the year"
+Response: {"intent": "trades.time_based", "confidence": 0.94, "entities": {"timePeriod": "first half", "dateFilter": {"type": "range", "startDate": "2025-01-01", "endDate": "2025-06-30", "description": "H1 2025"}}}
+
+Query: "Options I sold in Q2"
+Response: {"intent": "options.bulk", "confidence": 0.95, "entities": {"tradeType": "sell", "timePeriod": "Q2", "dateFilter": {"type": "range", "startDate": "2025-04-01", "endDate": "2025-06-30", "description": "Q2 2025"}}}`;
 }

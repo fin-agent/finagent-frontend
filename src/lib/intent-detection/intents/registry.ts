@@ -54,6 +54,17 @@ export const intentRegistry: IntentDefinition[] = [
       // Discrete date examples
       'Show my trades for July 1st and August 1st',
       'Trades on January 5th, March 10th and June 20th',
+      // Quarter-based examples
+      'What did I trade last quarter?',
+      'Show my trades for Q3',
+      'Trades in the first quarter',
+      'What did I trade in Q2 2025?',
+      // Single month examples
+      'What did I trade in January?',
+      'Show my February trades',
+      // Half-year examples
+      'Trades in the first half of the year',
+      'What did I trade in H2?',
     ],
     requiredEntities: ['timePeriod'],
     optionalEntities: ['symbol'],
@@ -68,6 +79,13 @@ export const intentRegistry: IntentDefinition[] = [
       'Lowest price I bought Tesla?',
       'Average buy price for NVDA this year',
       'What was my best sale price for SPY?',
+      // Quarter-based examples
+      'Highest price I sold Apple last quarter',
+      'What was the lowest price I bought Tesla in Q3?',
+      'Average price for AAPL in the first quarter',
+      // Single month examples
+      'Highest price sold in January',
+      'What did I buy GOOGL for in March?',
     ],
     requiredEntities: ['symbol'],
     optionalEntities: ['tradeType', 'timePeriod'],

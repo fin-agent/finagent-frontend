@@ -2741,11 +2741,38 @@ const UnifiedAssistant: React.FC = () => {
         const res = await fetch('/api/elevenlabs/trade-stats', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ symbol, trade_type: tradeType, time_period: timePeriod }),
+          body: JSON.stringify({
+            symbol,
+            trade_type: tradeType,
+            time_period: timePeriod,
+            date_filter: extraParams?.dateFilter, // LLM-resolved dates for quarters, months, etc.
+          }),
         });
         const voicePayload = await res.json();
-        const uiData = voicePayload?.uiData || {};
-        return { type, symbol, tradeType, timePeriod, data: uiData.stockStats || uiData, optionData: null };
+        const rawUiData = voicePayload?.uiData || {};
+        const rawStats = rawUiData.stockStats || {};
+
+        // Transform webhook response to match TradeStats/TimePeriodStats component expected format
+        // Webhook returns: avgPrice, highestDate, lowestDate, highestShares, lowestShares, tradeCount
+        // Component expects: averagePrice, highestPriceDate, lowestPriceDate, highestPriceShares, lowestPriceShares, totalTrades
+        const transformedStats = {
+          symbol: rawUiData.symbol || symbol,
+          year: new Date().getFullYear(),
+          tradeType: (rawUiData.tradeType?.toLowerCase() === 'sell' ? 'sell' : rawUiData.tradeType?.toLowerCase() === 'buy' ? 'buy' : 'all') as 'buy' | 'sell' | 'all',
+          timePeriod: rawUiData.timePeriod || timePeriod || null,
+          highestPrice: rawStats.highestPrice || 0,
+          highestPriceDate: rawStats.highestDate || '',
+          highestPriceShares: rawStats.highestShares || 0,
+          lowestPrice: rawStats.lowestPrice || 0,
+          lowestPriceDate: rawStats.lowestDate || '',
+          lowestPriceShares: rawStats.lowestShares || 0,
+          averagePrice: rawStats.avgPrice || 0,
+          totalTrades: rawStats.tradeCount || 0,
+          totalShares: rawStats.totalShares || 0,
+          totalValue: rawStats.totalValue || 0,
+        };
+
+        return { type, symbol, tradeType, timePeriod, data: { stats: transformedStats }, optionData: null };
       } else if (type === 'option-stats') {
         // Use options endpoint for option stats
         endpoint = '/api/elevenlabs/options';
@@ -2768,7 +2795,19 @@ const UnifiedAssistant: React.FC = () => {
           body: JSON.stringify(body),
         });
         const voicePayload = await res.json();
-        const uiData = voicePayload?.uiData || voicePayload;
+        const rawUiData = voicePayload?.uiData || voicePayload;
+
+        // Transform webhook response to match ProfitableTrades component expected format
+        // Webhook returns: tradeCount, profitableTrades
+        // Component expects: totalProfitableTrades, trades
+        const uiData = {
+          symbol: rawUiData.symbol || symbol,
+          totalProfitableTrades: rawUiData.tradeCount || 0,
+          totalProfit: rawUiData.totalProfit || 0,
+          trades: rawUiData.profitableTrades || [],
+          topTrade: rawUiData.topTrade || null,
+        };
+
         return { type, symbol, timePeriod, data: uiData };
       } else if (type === 'time-based') {
         // SINGLE FETCH: Use voice endpoint with uiData

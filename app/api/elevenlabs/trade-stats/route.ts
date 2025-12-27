@@ -1,8 +1,16 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import { getDateOffset } from '@/src/lib/date-utils';
-import { parseTimeExpression } from '@/src/lib/date-parser';
 import { normalizeSymbol } from '@/src/lib/symbol-utils';
+
+// LLM-resolved date filter
+interface DateFilter {
+  type: 'range' | 'discrete' | 'relative';
+  startDate?: string;
+  endDate?: string;
+  dates?: string[];
+  description: string;
+}
 
 // Format date for voice - shows raw database dates (no offset)
 // For "this year" queries, database dates are already 2025 dates
@@ -49,6 +57,7 @@ export async function POST(req: NextRequest) {
     const symbol = body.symbol || body.parameters?.symbol;
     const tradeType = body.trade_type || body.parameters?.trade_type;
     const timePeriod = body.time_period || body.parameters?.time_period;
+    const dateFilter: DateFilter | undefined = body.date_filter || body.parameters?.date_filter;
 
     if (!symbol) {
       return NextResponse.json({
@@ -70,24 +79,26 @@ export async function POST(req: NextRequest) {
     let dateEnd: string;
     let periodDescription: string;
 
-    // If timePeriod is provided (e.g., "last month", "last week"), parse it
-    if (timePeriod) {
-      const parsedTime = parseTimeExpression(timePeriod);
-      if (parsedTime) {
-        dateStart = parsedTime.dateRange.startDate;
-        dateEnd = parsedTime.dateRange.endDate;
-        periodDescription = parsedTime.dateRange.description;
-      } else {
-        // Fallback to full year if parsing fails
-        dateStart = `${dbYear}-01-01`;
-        dateEnd = `${dbYear}-12-31`;
-        periodDescription = `${userYear}`;
-      }
+    // Use LLM-resolved dateFilter with explicit dates (quarters, months, etc.)
+    if (dateFilter && dateFilter.type === 'range' && dateFilter.startDate && dateFilter.endDate) {
+      // LLM has already resolved the dates - use them directly
+      // Apply date offset to convert from user's calendar to demo database dates
+      const startParts = dateFilter.startDate.split('-').map(Number);
+      const endParts = dateFilter.endDate.split('-').map(Number);
+
+      const adjustedStartYear = startParts[0] + offsetYears;
+      const adjustedEndYear = endParts[0] + offsetYears;
+
+      dateStart = `${adjustedStartYear}-${String(startParts[1]).padStart(2, '0')}-${String(startParts[2]).padStart(2, '0')}`;
+      dateEnd = `${adjustedEndYear}-${String(endParts[1]).padStart(2, '0')}-${String(endParts[2]).padStart(2, '0')}`;
+      periodDescription = dateFilter.description || timePeriod || 'selected period';
+      console.log(`Using LLM-resolved dateFilter: ${dateStart} to ${dateEnd} (${periodDescription})`);
     } else {
-      // Default to full year
+      // Default to full year when no dateFilter provided
       dateStart = `${dbYear}-01-01`;
       dateEnd = `${dbYear}-12-31`;
-      periodDescription = `${userYear}`;
+      periodDescription = timePeriod || `${userYear}`;
+      console.log(`Using default year range: ${dateStart} to ${dateEnd} (${periodDescription})`);
     }
 
     let query = supabase

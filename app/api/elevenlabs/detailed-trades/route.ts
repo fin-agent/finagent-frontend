@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
-import { normalizeSymbol, parseOptionSymbol } from '@/src/lib/symbol-utils';
+import { normalizeSymbol, parseOptionSymbol, getCompanyName } from '@/src/lib/symbol-utils';
 import { formatCalendarDate } from '@/src/lib/date-utils';
 
 const supabase = createClient(
@@ -61,6 +61,7 @@ export async function POST(req: NextRequest) {
     }
 
     const normalizedSymbol = normalizeSymbol(symbol);
+    const companyName = getCompanyName(normalizedSymbol);  // For voice output
 
     const { data, error } = await supabase
       .from('TradeData')
@@ -85,7 +86,7 @@ export async function POST(req: NextRequest) {
         trades: [],
       };
       return NextResponse.json({
-        response: `Error getting trade details for ${normalizedSymbol}: ${error.message}`,
+        response: `Error getting trade details for ${companyName}: ${error.message}`,
         uiData,
       });
     }
@@ -106,7 +107,7 @@ export async function POST(req: NextRequest) {
         trades: [],
       };
       return NextResponse.json({
-        response: `No trades found for ${normalizedSymbol}.`,
+        response: `No trades found for ${companyName}.`,
         uiData,
       });
     }
@@ -133,8 +134,8 @@ export async function POST(req: NextRequest) {
     // Calculate average value per trade
     const avgValue = data.length > 0 ? totalValue / data.length : 0;
 
-    // Build response for TTS - matches UI display
-    let response = `For ${normalizedSymbol}, you have ${data.length} total trades: `;
+    // Build response for TTS - use company name for natural speech
+    let response = `For ${companyName}, you have ${data.length} total trades: `;
     response += `${stockTrades.length} stock trades and ${optionTrades.length} option trades. `;
     response += `${buyCount} buys and ${sellCount} sells. `;
     response += `Total quantity: ${formatNumber(totalQuantity)}`;

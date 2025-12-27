@@ -197,8 +197,8 @@ function detectContextualTimePeriodFollowup(query: string): string | null {
     /^(?:and\s+)?what(?:'s|\s+is)\s+(?:the\s+)?(.+?)\??$/i,
     // "and for X", "and in X"
     /^(?:and\s+)?(?:for|in)\s+(?:the\s+)?(.+?)\??$/i,
-    // "show me the same for X"
-    /^(?:show\s+me\s+)?(?:the\s+)?(?:same\s+(?:for|thing)\s+)?(?:for\s+)?(.+?)\??$/i,
+    // "show me the same for X" - REQUIRE "same" keyword to avoid matching standalone queries
+    /^(?:show\s+me\s+)?(?:the\s+)?same\s+(?:(?:for|thing)\s+)?(?:for\s+)?(.+?)\??$/i,
     // "and X?" - short follow-up
     /^and\s+(?:the\s+)?(.+?)\??$/i,
     // "so how much [was paid/did I pay/has been paid] in/for the last X" - repeat question
@@ -323,7 +323,9 @@ function buildAnswerOverride(intent: QueryIntent | null, tradeUI: TradeUIData | 
     const stockCount = d.stockCount ?? 0;
     const optionCount = d.optionCount ?? 0;
     const totalValue = d.totalValue ?? 0;
-    const desc = d.timePeriod || tradeUI.timePeriod || intent.timePeriod || '';
+    // Ensure desc is always a string (webhook may return object for timePeriod)
+    const rawDesc = d.timePeriod || tradeUI.timePeriod || intent.timePeriod || '';
+    const desc = typeof rawDesc === 'string' ? rawDesc : (rawDesc as { description?: string })?.description || '';
     const range = d.displayRange ? ` from ${d.displayRange}` : '';
     const symbolText = tradeUI.symbol ? ` for ${tradeUI.symbol}` : '';
 
@@ -2030,13 +2032,34 @@ const UnifiedAssistant: React.FC = () => {
       const voicePayload = await postJson('/api/elevenlabs/trade-stats', { symbol, trade_type: tradeType, time_period: timePeriod });
 
       // Store UI data from voice response (guaranteed sync)
+      // Transform webhook format to UI expected format
       if (voicePayload && typeof voicePayload === 'object' && 'uiData' in voicePayload) {
+        const webhookData = voicePayload.uiData;
+        const stockStats = webhookData.stockStats;
+
+        // Transform stockStats to match UI expected field names
+        const transformedStats = stockStats ? {
+          symbol: webhookData.symbol,
+          tradeType: (webhookData.tradeType || 'all') as 'buy' | 'sell' | 'all',
+          timePeriod: webhookData.timePeriod || timePeriod || null,
+          highestPrice: stockStats.highestPrice,
+          highestPriceDate: stockStats.highestDate,  // Map highestDate → highestPriceDate
+          highestPriceShares: stockStats.highestShares,  // Map highestShares → highestPriceShares
+          lowestPrice: stockStats.lowestPrice,
+          lowestPriceDate: stockStats.lowestDate,  // Map lowestDate → lowestPriceDate
+          lowestPriceShares: stockStats.lowestShares,  // Map lowestShares → lowestPriceShares
+          averagePrice: stockStats.avgPrice,  // Map avgPrice → averagePrice
+          totalTrades: stockStats.tradeCount,  // Map tradeCount → totalTrades
+          totalShares: stockStats.totalShares,
+          totalValue: stockStats.totalValue,
+        } : null;
+
         toolUIDataRef.current = {
           type: 'stats',
           symbol: symbol || '',
           tradeType: tradeType as 'buy' | 'sell' | undefined,
           timePeriod,
-          data: voicePayload.uiData.stockStats,  // Matches expected format for TradeStats card
+          data: transformedStats ? { stats: transformedStats } : null,  // Nest under 'stats' as expected
           optionData: null  // Voice endpoint focuses on stock stats (options handled by options tool)
         };
         console.log('📊 [Trade Stats Tool] Set toolUIDataRef from voice response:', toolUIDataRef.current);
@@ -2057,8 +2080,16 @@ const UnifiedAssistant: React.FC = () => {
       const voicePayload = await postJson('/api/elevenlabs/profitable-trades', { symbol, time_period: timePeriod });
 
       // Store UI data from voice response (guaranteed sync)
+      // Transform webhook format to UI expected format
       if (voicePayload && typeof voicePayload === 'object' && 'uiData' in voicePayload) {
-        toolUIDataRef.current = { type: 'profitable', symbol: symbol || '', timePeriod, data: voicePayload.uiData };
+        const webhookData = voicePayload.uiData;
+        const transformedData = {
+          symbol: webhookData.symbol,
+          totalProfitableTrades: webhookData.tradeCount || 0,  // Map tradeCount → totalProfitableTrades
+          totalProfit: webhookData.totalProfit || 0,
+          trades: webhookData.profitableTrades || [],  // Map profitableTrades → trades
+        };
+        toolUIDataRef.current = { type: 'profitable', symbol: symbol || '', timePeriod, data: transformedData };
         console.log('📊 [Profitable Trades Tool] Set toolUIDataRef from voice response:', toolUIDataRef.current);
       }
 
@@ -2749,7 +2780,28 @@ const UnifiedAssistant: React.FC = () => {
           body: JSON.stringify(body),
         });
         const voicePayload = await res.json();
-        const uiData = voicePayload?.uiData || voicePayload;
+        const rawUiData = voicePayload?.uiData || voicePayload;
+
+        // Transform webhook response to match TimeBasedTrades expected format
+        // Webhook returns flat structure: tradeCount, stockCount, timePeriod (string), etc.
+        // Component expects: timePeriod (object), summary (object), trades (array)
+        const uiData = {
+          timePeriod: {
+            description: rawUiData.timePeriod || timePeriod || 'selected period',
+            displayRange: rawUiData.displayRange || rawUiData.dateRange || '',
+            tradingDays: rawUiData.tradingDays || 1,
+          },
+          summary: {
+            totalTrades: rawUiData.tradeCount || 0,
+            stockCount: rawUiData.stockCount || 0,
+            optionCount: rawUiData.optionCount || 0,
+            totalValue: rawUiData.totalValue || 0,
+            averagePrice: rawUiData.avgValue || undefined,
+          },
+          trades: rawUiData.trades || [],
+          symbol: rawUiData.symbol || symbol || null,
+        };
+
         return { type, symbol, timePeriod, data: uiData };
       } else if (type === 'detailed') {
         // SINGLE FETCH: Use voice endpoint with uiData
@@ -2985,145 +3037,44 @@ const UnifiedAssistant: React.FC = () => {
               return;
             }
 
+            // ============================================================
+            // VOICE MODE: LLM-ONLY INTENT DETECTION
+            //
+            // In voice mode, ElevenLabs webhook returns uiData which flows
+            // through toolUIDataRef. We use LLM classification ONLY for:
+            // 1. Logging/debugging
+            // 2. Card type inference (when webhook doesn't provide it)
+            //
+            // We do NOT call fetchTradeData() here to avoid voice/UI drift.
+            // The webhook uiData is the SINGLE SOURCE OF TRUTH.
+            // ============================================================
+
             const token = Date.now();
             pendingVoiceIntentTokenRef.current = token;
 
-            // Detect if the query likely references a symbol we couldn't extract
-            // (e.g., "M10 stock" where M10 is a misheard ticker)
-            const queryLikelyHasSymbol = /\b(stock|ticker|shares?|borrow(?:ing)?)\b/i.test(userQuery);
+            // Clear any stale pending state
+            pendingQueryIntentRef.current = null;
+            pendingTradeUIRequestRef.current = null;
+            pendingAnswerOverrideRef.current = null;
 
-            // Fast path: regex intent (sync) so we can prefetch before the assistant responds.
-            console.log('🔍 [REGEX] ================================');
-            console.log('🔍 [REGEX] Query:', userQuery);
-            const fastIntent = detectUserQueryIntent(userQuery);
-
-            // Determine if we should wait for LLM instead of prefetching with incomplete data
-            // Wait for LLM if: intent detected but no symbol AND query likely has a symbol reference
-            const shouldWaitForLLM = fastIntent && !fastIntent.symbol && queryLikelyHasSymbol;
-
-            if (fastIntent && !shouldWaitForLLM) {
-              console.log('🔍 [REGEX] ✅ Detected intent:', fastIntent.cardType, '| symbol:', fastIntent.symbol, '| timePeriod:', fastIntent.timePeriod);
-              pendingQueryIntentRef.current = fastIntent;
-              pendingTradeUIRequestRef.current = fetchTradeData(
-                fastIntent.symbol || '',
-                fastIntent.cardType,
-                fastIntent.tradeType,
-                fastIntent.timePeriod,
-                {
-                  callPut: fastIntent.callPut,
-                  expiration: fastIntent.expiration,
-                  accountQueryType: fastIntent.accountQueryType,
-                  feeType: fastIntent.feeType,
-                }
-              );
-              pendingAnswerOverrideRef.current = pendingTradeUIRequestRef.current.then((tradeUI) =>
-                buildAnswerOverride(fastIntent, tradeUI)
-              );
-            } else if (shouldWaitForLLM) {
-              console.log('🔍 [REGEX] ⏳ Intent detected but no symbol - waiting for LLM:', fastIntent.cardType);
-              // Store intent but DON'T prefetch - let LLM provide the symbol
-              pendingQueryIntentRef.current = fastIntent;
-              pendingTradeUIRequestRef.current = null;
-              pendingAnswerOverrideRef.current = null;
-            } else {
-              console.log('🔍 [REGEX] ❌ No intent detected');
-              // Clear any stale pending intent from prior cycles.
-              pendingQueryIntentRef.current = null;
-              pendingTradeUIRequestRef.current = null;
-              pendingAnswerOverrideRef.current = null;
-            }
-
-            // LLM classifier (async) - provides accurate symbol extraction
-            // If regex couldn't get a symbol, LLM result will trigger the prefetch
+            // LLM classifier (async) - for logging and card type inference only
+            // No fetchTradeData calls - webhook uiData is the data source
             void (async () => {
-              console.log('🤖 [LLM] ================================');
-              console.log('🤖 [LLM] Query:', userQuery);
-              console.log('🤖 [LLM] Calling Azure OpenAI classifier...');
+              console.log('🤖 [LLM-ONLY] ================================');
+              console.log('🤖 [LLM-ONLY] Query:', userQuery);
+              console.log('🤖 [LLM-ONLY] Classifying intent (no prefetch - using webhook uiData)...');
+
               const llmIntent = await classifyIntentViaAPI(userQuery);
-              if (!llmIntent) {
-                console.log('🤖 [LLM] ❌ No intent returned (failed or low confidence)');
-                // If we were waiting for LLM and it failed, fall back to regex intent without symbol
-                if (shouldWaitForLLM && pendingQueryIntentRef.current && !pendingTradeUIRequestRef.current) {
-                  console.log('🤖 [LLM] Falling back to regex intent without symbol');
-                  const fallbackIntent = pendingQueryIntentRef.current;
-                  pendingTradeUIRequestRef.current = fetchTradeData(
-                    '',
-                    fallbackIntent.cardType,
-                    fallbackIntent.tradeType,
-                    fallbackIntent.timePeriod,
-                    {
-                      callPut: fallbackIntent.callPut,
-                      expiration: fallbackIntent.expiration,
-                      accountQueryType: fallbackIntent.accountQueryType,
-                      feeType: fallbackIntent.feeType,
-                    }
-                  );
-                }
-                return;
-              }
-              console.log('🤖 [LLM] ✅ Detected intent:', llmIntent.cardType, '| symbol:', llmIntent.symbol, '| timePeriod:', llmIntent.timePeriod);
 
               if (pendingVoiceIntentTokenRef.current !== token) return;
 
-              // If we were waiting for LLM to provide symbol, use LLM result directly
-              if (shouldWaitForLLM || !pendingTradeUIRequestRef.current) {
-                console.log('🎯 [LLM] Using LLM intent (was waiting for symbol):', llmIntent);
+              if (llmIntent) {
+                console.log('🤖 [LLM-ONLY] ✅ Intent:', llmIntent.cardType, '| symbol:', llmIntent.symbol, '| timePeriod:', llmIntent.timePeriod);
+                // Store intent for card type inference (used if toolUIDataRef not set)
                 pendingQueryIntentRef.current = llmIntent;
-                pendingTradeUIRequestRef.current = fetchTradeData(
-                  llmIntent.symbol || '',
-                  llmIntent.cardType,
-                  llmIntent.tradeType,
-                  llmIntent.timePeriod,
-                  {
-                    callPut: llmIntent.callPut,
-                    expiration: llmIntent.expiration,
-                    accountQueryType: llmIntent.accountQueryType,
-                    feeType: llmIntent.feeType,
-                  }
-                );
-                pendingAnswerOverrideRef.current = pendingTradeUIRequestRef.current.then((tradeUI) =>
-                  buildAnswerOverride(llmIntent, tradeUI)
-                );
-                return;
+              } else {
+                console.log('🤖 [LLM-ONLY] ❌ No intent detected');
               }
-
-              if (!pendingQueryIntentRef.current) return;
-
-              const current = pendingQueryIntentRef.current;
-              // If regex detected a high-signal option pattern and LLM is not highly confident, keep regex
-              if (isHighSignalOptionIntent(current) && (llmIntent.confidence ?? 0) < 0.85) {
-                console.log('🤖 [LLM] Keeping regex high-signal intent:', current.cardType, '(LLM confidence:', `${((llmIntent.confidence ?? 0) * 100).toFixed(0)}%)`);
-                return;
-              }
-              const isSame =
-                current.cardType === llmIntent.cardType &&
-                (current.symbol || '') === (llmIntent.symbol || '') &&
-                (current.tradeType || '') === (llmIntent.tradeType || '') &&
-                (current.timePeriod || '') === (llmIntent.timePeriod || '') &&
-                (current.callPut || '') === (llmIntent.callPut || '') &&
-                (current.expiration || '') === (llmIntent.expiration || '') &&
-                (current.accountQueryType || '') === (llmIntent.accountQueryType || '') &&
-                (current.feeType || '') === (llmIntent.feeType || '');
-
-              if (isSame) return;
-
-              console.log('🎯 [Voice LLM Classifier] Updating intent:', llmIntent);
-              pendingQueryIntentRef.current = llmIntent;
-              pendingTradeUIRequestRef.current = fetchTradeData(
-                llmIntent.symbol || '',
-                llmIntent.cardType,
-                llmIntent.tradeType,
-                llmIntent.timePeriod,
-                {
-                  callPut: llmIntent.callPut,
-                  expiration: llmIntent.expiration,
-                  accountQueryType: llmIntent.accountQueryType,
-                  feeType: llmIntent.feeType,
-                }
-              );
-              pendingAnswerOverrideRef.current = pendingTradeUIRequestRef.current.then((tradeUI) =>
-                buildAnswerOverride(llmIntent, tradeUI)
-              );
             })();
           }
         }
@@ -3179,12 +3130,17 @@ const UnifiedAssistant: React.FC = () => {
 	                }
 	              }
 
+              // NOTE: In new LLM-only architecture, pendingTradeUIRequest is null
+              // (we don't prefetch in voice mode - webhook uiData is the source)
               if (!tradeUI && pendingTradeUIRequest) {
                 const data = await pendingTradeUIRequest;
                 if (data) tradeUI = data;
               }
 
+              // FALLBACK: If webhook didn't provide uiData (toolUIDataRef was null),
+              // fetch data based on LLM intent. This should be rare in voice mode.
               if (!tradeUI) {
+                console.log('⚠️ [Voice Fallback] No webhook uiData - fetching from UI endpoint');
                 const intentSymbol = pendingIntent.symbol || '';
                 const data = await fetchTradeData(
                   intentSymbol,
@@ -3202,7 +3158,7 @@ const UnifiedAssistant: React.FC = () => {
                   tradeUI = data;
                   // Mark timestamp to prevent fallback from overriding on subsequent message events
                   lastIntentCardRenderedAtRef.current = Date.now();
-                  console.log('🎯 [Voice Intent-Based] Successfully rendered card:', pendingIntent.cardType);
+                  console.log('🎯 [Voice Fallback] Rendered card from UI endpoint:', pendingIntent.cardType);
                 }
               }
             }

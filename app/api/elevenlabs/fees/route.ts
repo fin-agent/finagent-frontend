@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import { parseTimePeriodToResolvedDates } from '@/src/lib/date-parser';
-import { normalizeSymbol, parseOptionSymbol } from '@/src/lib/symbol-utils';
+import { normalizeSymbol, parseOptionSymbol, getCompanyName } from '@/src/lib/symbol-utils';
 import { suggestDataPeriod } from '@/src/lib/data-availability';
 
 const supabase = createClient(
@@ -185,6 +185,7 @@ export async function POST(req: NextRequest) {
     const { data, error } = await feesQuery.order('Date', { ascending: false });
 
     const normalizedSymbol = symbol ? normalizeSymbol(symbol) : undefined;
+    const companyName = normalizedSymbol ? getCompanyName(normalizedSymbol) : undefined;  // For voice output
 
     if (error) {
       const uiData: FeesUIData = {
@@ -211,7 +212,7 @@ export async function POST(req: NextRequest) {
       });
 
       const feeTypeName = feeType.replace('_', ' ');
-      const symbolText = symbol ? ` for ${normalizedSymbol}` : '';
+      const symbolText = companyName ? ` for ${companyName}` : '';
 
       if (suggestion && suggestion.amount > 0) {
         const uiData: FeesUIData = {
@@ -260,12 +261,12 @@ export async function POST(req: NextRequest) {
         response = `The total Debit interest you paid for ${description} is ${formatCurrency(Math.abs(totalAmount))}${txCountText}`;
         break;
       case 'locate_fee': {
-        const symbolText = symbol ? ` for stock ${normalizedSymbol}` : '';
+        const symbolText = companyName ? ` for ${companyName}` : '';
         response = `The total Locate fees you paid${symbolText} for ${description} is ${formatCurrency(Math.abs(totalAmount))}${txCountText}`;
         break;
       }
       case 'short_interest': {
-        const symbolText = symbol ? ` for ${normalizedSymbol}` : '';
+        const symbolText = companyName ? ` for ${companyName}` : '';
         response = `Your total short interest${symbolText} for ${description} is ${formatCurrency(Math.abs(totalAmount))}${txCountText}`;
         break;
       }

@@ -73,6 +73,79 @@ export const SYMBOL_MAP: Record<string, string> = {
   'chevron': 'CVX',
 };
 
+// Map ticker symbols to speakable company names (for voice output)
+export const TICKER_TO_COMPANY: Record<string, string> = {
+  'AAPL': 'Apple',
+  'GOOGL': 'Google',
+  'GOOG': 'Google',
+  'AMZN': 'Amazon',
+  'MSFT': 'Microsoft',
+  'TSLA': 'Tesla',
+  'NVDA': 'Nvidia',
+  'META': 'Meta',
+  'NFLX': 'Netflix',
+  'AMD': 'AMD',
+  'INTC': 'Intel',
+  'IBM': 'IBM',
+  'CRM': 'Salesforce',
+  'ADBE': 'Adobe',
+  'PYPL': 'PayPal',
+  'SHOP': 'Shopify',
+  'UBER': 'Uber',
+  'LYFT': 'Lyft',
+  'SNAP': 'Snap',
+  'X': 'X',
+  'SPOT': 'Spotify',
+  'ZM': 'Zoom',
+  'PLTR': 'Palantir',
+  'COIN': 'Coinbase',
+  'HOOD': 'Robinhood',
+  'DIS': 'Disney',
+  'BA': 'Boeing',
+  'JPM': 'JPMorgan',
+  'GS': 'Goldman Sachs',
+  'MS': 'Morgan Stanley',
+  'BAC': 'Bank of America',
+  'WFC': 'Wells Fargo',
+  'V': 'Visa',
+  'MA': 'Mastercard',
+  'AXP': 'American Express',
+  'KO': 'Coca-Cola',
+  'PEP': 'Pepsi',
+  'WMT': 'Walmart',
+  'TGT': 'Target',
+  'COST': 'Costco',
+  'HD': 'Home Depot',
+  'LOW': 'Lowe\'s',
+  'SBUX': 'Starbucks',
+  'MCD': 'McDonald\'s',
+  'NKE': 'Nike',
+  'XOM': 'Exxon',
+  'CVX': 'Chevron',
+  'SPY': 'S&P 500 ETF',
+  'QQQ': 'Nasdaq ETF',
+  'IWM': 'Russell 2000 ETF',
+  'C': 'Citigroup',
+  'AMAT': 'Applied Materials',
+  'PATH': 'UiPath',
+  'LCID': 'Lucid Motors',
+  'MTEN': 'Mingteng International',
+};
+
+/**
+ * Get the speakable company name for a ticker symbol
+ * Returns the company name if found, otherwise returns the ticker itself
+ *
+ * e.g., "AAPL" -> "Apple"
+ *       "GOOGL" -> "Google"
+ *       "XYZ" -> "XYZ" (unknown ticker)
+ */
+export function getCompanyName(ticker: string): string {
+  if (!ticker) return ticker;
+  const upper = ticker.toUpperCase();
+  return TICKER_TO_COMPANY[upper] || ticker;
+}
+
 /**
  * Normalize a company name or symbol to its ticker
  * Handles: Speech corrections, OCC option symbols, company names, and raw tickers

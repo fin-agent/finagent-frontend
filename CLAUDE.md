@@ -62,10 +62,13 @@ After making voice endpoint changes, remind the user: "This change affects the v
 
 ### Key Directories
 
-- `app/api/elevenlabs/` - Webhook endpoints called by ElevenLabs agent (tools, profitable-trades, trade-summary, detailed-trades, advanced-query, options, account-balance, fees)
+- `app/api/elevenlabs/` - Webhook endpoints called by ElevenLabs agent (tools, profitable-trades, trade-summary, detailed-trades, advanced-query, options, account-balance, fees, market-data, fundamentals)
 - `app/api/` - UI data endpoints (profitable-trades-ui, trade-stats, trades-ui, advanced-query-ui, account-balance-ui, fees-ui, conversations, messages, resolve-symbol)
 - `src/lib/symbol-utils.ts` - Centralized symbol parsing and normalization utilities
-- `src/components/generative-ui/` - Dynamic UI cards (ProfitableTrades, TradeStats, TradesTable, TradeSummary, AdvancedOptionsTable, TradeQueryCard, AccountSummary, FeesSummary, etc.)
+- `src/services/alpacaMarketData.ts` - Alpaca Markets API client (stock quotes, option NBBO, bars, news)
+- `src/services/alphaVantageApi.ts` - Alpha Vantage API client (company overview, financials, earnings, dividends)
+- `src/lib/option-symbol-builder.ts` - OCC option symbol parsing utilities
+- `src/components/generative-ui/` - Dynamic UI cards (ProfitableTrades, TradeStats, TradesTable, TradeSummary, AdvancedOptionsTable, TradeQueryCard, AccountSummary, FeesSummary, StockQuoteCard, OptionQuoteCard, CompanyOverviewCard, etc.)
 - `src/components/UnifiedAssistant.tsx` - Main chat/voice interface
 - `src/components/QueryBuilder.tsx` - Manual advanced query builder UI
 
@@ -601,6 +604,13 @@ AZURE_EXISTING_AIPROJECT_ENDPOINT=https://<resource>.openai.azure.com/openai/v1/
 AZURE_OPENAI_API_KEY=<your-api-key>
 AZURE_OPENAI_MODEL=gpt-5.2  # Your deployment name
 AZURE_OPENAI_API_VERSION=2024-10-21  # Optional, defaults to 2024-10-21
+
+# Alpaca Markets (for real-time market data - already configured for trading)
+ALPACA_API_KEY=<your-alpaca-key>
+ALPACA_SECRET_KEY=<your-alpaca-secret>
+
+# Alpha Vantage (for company fundamentals - free tier: 25 calls/day)
+ALPHA_VANTAGE_API_KEY=<your-alpha-vantage-key>
 ```
 
 **Note:** Shell environment variables override `.env.local`. If you see 401 errors with correct `.env.local` credentials, check for conflicting shell variables with `env | grep AZURE`.
@@ -617,7 +627,70 @@ AZURE_OPENAI_API_VERSION=2024-10-21  # Optional, defaults to 2024-10-21
 | `get_options` | **Dedicated options tool** with 5 query types: `last` (single most recent), `bulk` (multiple trades), `expiring` (by expiration), `highest_strike`, `total_premium` |
 | `get_account_balance` | Account balance, equity, buying power, margin info |
 | `get_fees` | Commissions, interest charges, and locate fees |
+| `get_market_data` | **Real-time market data** (Alpaca): stock quotes, option NBBO, price charts, news, trading halts |
+| `get_fundamentals` | **Company fundamentals** (Alpha Vantage): overview, metrics (P/E, market cap), financials, earnings, dividends |
 | `advanced_query` | Legacy flexible queries (use `get_options` for options) |
+
+### `get_market_data` Tool (Real-Time Market Data)
+
+Provides real-time market data from **Alpaca Markets API** using the free IEX feed.
+
+**Webhook:** `app/api/elevenlabs/market-data/route.ts`
+**Service:** `src/services/alpacaMarketData.ts`
+
+| Query Type | Use Case | Example Query |
+|------------|----------|---------------|
+| `stock_quote` | Current stock price, bid/ask | "What's the price of Apple?", "Quote for TSLA" |
+| `option_quote` | Option NBBO, Greeks, IV | "Quote for SPY Dec 200 call", "NBBO of AAPL 195 put" |
+| `historical` | Price charts, OHLCV bars | "Show 3 week chart for AAPL", "Tesla 1 month chart" |
+| `news` | Market news articles | "News for MSFT", "What's happening with Apple?" |
+| `halt` | Trading halt status | "Is GME halted?", "Trading halt status" |
+
+**Parameters:**
+- `query_type` (required): One of `stock_quote`, `option_quote`, `historical`, `news`, `halt`
+- `symbol` (required for quotes): Stock ticker
+- `strike` (required for option_quote): Strike price
+- `call_put` (required for option_quote): "call" or "put"
+- `expiration` (optional for option_quote): "Dec 20", "January 17 2025"
+- `chart_period` (optional for historical): "1 week", "3 weeks", "1 month", "1 year"
+
+**Important Notes:**
+- Uses IEX feed (free tier) - not SIP (requires paid subscription)
+- Historical data before 2020 returns "not available" message
+- Futures symbols (ES, NQ, etc.) return "not supported" message
+
+**UI Components:**
+- `StockQuoteCard` - Current price, bid/ask, volume, change
+- `OptionQuoteCard` - Bid/ask with sizes, spread, mid, Greeks, IV
+
+### `get_fundamentals` Tool (Company Fundamentals)
+
+Provides company fundamental data from **Alpha Vantage API** (free tier: 25 calls/day).
+
+**Webhook:** `app/api/elevenlabs/fundamentals/route.ts`
+**Service:** `src/services/alphaVantageApi.ts`
+
+| Query Type | Use Case | Example Query |
+|------------|----------|---------------|
+| `overview` | Company info, description, sector | "Tell me about Apple", "What does Tesla do?" |
+| `metric` | Specific metrics (PE, market cap, etc.) | "PE ratio of Apple", "Market cap of Tesla" |
+| `financials` | Income/balance/cash flow statements | "Revenue for Apple", "Balance sheet for MSFT" |
+| `earnings` | Earnings dates and history | "When does Apple report earnings?" |
+| `dividend` | Dividend yield and history | "Dividend yield for Apple", "Does Tesla pay dividends?" |
+
+**Parameters:**
+- `query_type` (required): One of `overview`, `metric`, `financials`, `earnings`, `dividend`
+- `symbol` (required): Stock ticker
+- `metric_type` (required for metric): One of: `pe_ratio`, `peg_ratio`, `market_cap`, `beta`, `eps`, `dividend_yield`, `52_week_high`, `52_week_low`, `book_value`, `price_to_book`, `price_to_sales`, `profit_margin`, `operating_margin`, `return_on_assets`, `return_on_equity`, `50_day_ma`, `200_day_ma`
+- `statement_type` (optional for financials): `income`, `balance`, or `cashflow`
+
+**Rate Limiting:**
+- Free tier allows 25 API calls per day
+- If rate limited, cached responses are used when available
+- Agent responds with "API rate limited, try again later" when exhausted
+
+**UI Components:**
+- `CompanyOverviewCard` - Company info, sector, key metrics
 
 ## Troubleshooting
 

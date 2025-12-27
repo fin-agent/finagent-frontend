@@ -171,6 +171,8 @@ The ElevenLabs agent has access to webhook tools that query trade data:
 | `get_options` | `/api/elevenlabs/options` | **Dedicated options tool** with 5 query types (see below) |
 | `get_account_balance` | `/api/elevenlabs/account-balance` | Account balance, equity, buying power, margin info |
 | `get_fees` | `/api/elevenlabs/fees` | Commissions, interest charges, locate fees, short interest |
+| `get_market_data` | `/api/elevenlabs/market-data` | **Real-time market data** (Alpaca): stock quotes, option NBBO, charts, news, halts |
+| `get_fundamentals` | `/api/elevenlabs/fundamentals` | **Company fundamentals** (Alpha Vantage): overview, metrics, financials, earnings |
 | `advanced_query` | `/api/elevenlabs/advanced-query` | Legacy flexible queries (use `get_options` for options) |
 
 #### Tool Usage Guidelines (from System Prompt)
@@ -244,6 +246,49 @@ Returns commissions, interest charges, and locate fees.
 - `symbol` (optional): For `locate_fee` and `short_interest` queries
 
 **Note:** `short_interest` maps to `LocateFee` type in the database. Both represent borrow fees for shorting stocks.
+
+#### `get_market_data` Tool (Real-Time Market Data)
+
+Provides real-time market data from **Alpaca Markets API** using the free IEX feed.
+
+| Query Type | Use Case | Example Query |
+|------------|----------|---------------|
+| `stock_quote` | Current stock price, bid/ask | "What's the price of Apple?", "Quote for TSLA" |
+| `option_quote` | Option NBBO, Greeks, IV | "Quote for SPY Dec 200 call", "NBBO of AAPL 195 put" |
+| `historical` | Price charts, OHLCV bars | "Show 3 week chart for AAPL", "Tesla 1 month chart" |
+| `news` | Market news articles | "News for MSFT", "What's happening with Apple?" |
+| `halt` | Trading halt status | "Is GME halted?", "Trading halt status" |
+
+**Parameters:**
+- `query_type` (required): One of `stock_quote`, `option_quote`, `historical`, `news`, `halt`
+- `symbol` (required for quotes): Stock ticker
+- `strike` (required for option_quote): Strike price
+- `call_put` (required for option_quote): "call" or "put"
+- `expiration` (optional for option_quote): Expiration date
+- `chart_period` (optional for historical): "1 week", "3 weeks", "1 month"
+
+**Important Notes:**
+- Uses IEX feed (free tier) - SIP requires paid subscription
+- Historical data before 2020 returns "not available"
+- Futures symbols (ES, NQ) return "not supported"
+
+#### `get_fundamentals` Tool (Company Fundamentals)
+
+Provides company fundamental data from **Alpha Vantage API** (free tier: 25 calls/day).
+
+| Query Type | Use Case | Example Query |
+|------------|----------|---------------|
+| `overview` | Company info, description, sector | "Tell me about Apple", "What does Tesla do?" |
+| `metric` | Specific metrics (PE, market cap, etc.) | "PE ratio of Apple", "Market cap of Tesla" |
+| `financials` | Income/balance/cash flow statements | "Revenue for Apple", "Balance sheet for MSFT" |
+| `earnings` | Earnings dates and history | "When does Apple report earnings?" |
+| `dividend` | Dividend yield and history | "Dividend yield for Apple" |
+
+**Parameters:**
+- `query_type` (required): One of `overview`, `metric`, `financials`, `earnings`, `dividend`
+- `symbol` (required): Stock ticker
+- `metric_type` (required for metric): One of `pe_ratio`, `market_cap`, `beta`, `eps`, `dividend_yield`, `52_week_high`, `52_week_low`, etc.
+- `statement_type` (optional for financials): `income`, `balance`, or `cashflow`
 
 ### Connection Stability
 
@@ -1272,7 +1317,9 @@ finagent-frontend/
 │   │   │   ├── advanced-query/       # Advanced options query webhook
 │   │   │   ├── tools/                # Multi-tool webhook endpoint
 │   │   │   ├── trade-summary/        # Trade summary endpoint
-│   │   │   └── detailed-trades/      # Detailed trades endpoint
+│   │   │   ├── detailed-trades/      # Detailed trades endpoint
+│   │   │   ├── market-data/          # Real-time market data (Alpaca)
+│   │   │   └── fundamentals/         # Company fundamentals (Alpha Vantage)
 │   │   ├── profitable-trades-ui/     # UI data for profitable trades card
 │   │   ├── time-trades-ui/           # UI data for time-based trades card
 │   │   ├── advanced-query-ui/        # UI data for advanced options queries
@@ -1291,7 +1338,11 @@ finagent-frontend/
 │   │   │   ├── types.ts              # TypeScript interfaces
 │   │   │   └── intents/registry.ts   # Intent definitions
 │   │   ├── date-utils.ts             # Date offset utilities for demo data
-│   │   └── date-parser.ts            # Natural language date parsing
+│   │   ├── date-parser.ts            # Natural language date parsing
+│   │   └── option-symbol-builder.ts  # OCC option symbol parsing
+│   ├── services/
+│   │   ├── alpacaMarketData.ts       # Alpaca Markets API (quotes, bars, news)
+│   │   └── alphaVantageApi.ts        # Alpha Vantage API (fundamentals)
 │   └── components/
 │       ├── UnifiedAssistant.tsx      # Main chat/voice interface
 │       ├── QueryBuilder.tsx          # Manual query builder modal
@@ -1310,7 +1361,10 @@ finagent-frontend/
 │           ├── TradeQueryCard.tsx        # Query filter display card
 │           ├── TradeStats.tsx            # Trade statistics card (full year)
 │           ├── TradesTable.tsx           # Full trades table
-│           └── TradeSummary.tsx          # Quick summary card
+│           ├── TradeSummary.tsx          # Quick summary card
+│           ├── StockQuoteCard.tsx        # Real-time stock quote display
+│           ├── OptionQuoteCard.tsx       # Option NBBO with Greeks
+│           └── CompanyOverviewCard.tsx   # Company fundamentals
 ├── tool-config.json                  # ElevenLabs tool configuration
 └── package.json
 ```
@@ -1341,6 +1395,13 @@ AZURE_OPENAI_MODEL=your_deployment_name
 
 # ElevenLabs
 NEXT_PUBLIC_ELEVENLABS_AGENT_ID=agent_3101kbjqgdc0fkgvt8f1zw2hbvxv
+
+# Alpaca Markets (real-time market data - uses existing trading credentials)
+ALPACA_API_KEY=your_alpaca_api_key
+ALPACA_SECRET_KEY=your_alpaca_secret_key
+
+# Alpha Vantage (company fundamentals - free tier: 25 calls/day)
+ALPHA_VANTAGE_API_KEY=your_alpha_vantage_api_key
 ```
 
 ### Installation
@@ -1420,6 +1481,18 @@ curl -X POST http://localhost:3000/api/elevenlabs/detailed-trades \
 | "What was my short interest for October?" | get_fees | FeesSummary |
 | "Short interest for MTEN this year" | get_fees | FeesSummary |
 | "How much did I pay to borrow MTEN stock?" | get_fees | FeesSummary |
+| "What's the price of Apple?" | get_market_data | StockQuoteCard |
+| "Quote for TSLA" | get_market_data | StockQuoteCard |
+| "NBBO of SPY 200 call" | get_market_data | OptionQuoteCard |
+| "Show 3 week chart for AAPL" | get_market_data | PriceChart |
+| "News for MSFT" | get_market_data | NewsCard |
+| "Is GME halted?" | get_market_data | - |
+| "Tell me about Apple" | get_fundamentals | CompanyOverviewCard |
+| "PE ratio for AAPL" | get_fundamentals | - |
+| "Market cap of Tesla" | get_fundamentals | - |
+| "When does Microsoft report earnings?" | get_fundamentals | - |
+| "Revenue for Amazon" | get_fundamentals | - |
+| "Dividend yield for Apple" | get_fundamentals | - |
 
 ---
 

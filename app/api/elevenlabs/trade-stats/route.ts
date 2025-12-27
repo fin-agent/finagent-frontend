@@ -2,7 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import { getDateOffset } from '@/src/lib/date-utils';
 import { parseTimeExpression } from '@/src/lib/date-parser';
-import { normalizeSymbol, getCompanyName } from '@/src/lib/symbol-utils';
+import { normalizeSymbol } from '@/src/lib/symbol-utils';
 
 // Format date for voice - shows raw database dates (no offset)
 // For "this year" queries, database dates are already 2025 dates
@@ -57,7 +57,6 @@ export async function POST(req: NextRequest) {
     }
 
     const normalizedSymbol = normalizeSymbol(symbol);
-    const companyName = getCompanyName(normalizedSymbol);  // For voice output
 
     // Get the date offset to map user's year to demo database year
     const offset = getDateOffset();
@@ -117,7 +116,7 @@ export async function POST(req: NextRequest) {
     if (!data || data.length === 0) {
       const typeLabel = tradeType ? (tradeType.toLowerCase().startsWith('s') ? 'sell' : 'buy') : '';
       return NextResponse.json({
-        response: `No ${typeLabel} trades found for ${companyName} ${periodDescription}.`,
+        response: `No ${typeLabel} trades found for ${normalizedSymbol} ${periodDescription}.`,
         uiData: {
           symbol: normalizedSymbol,
           timePeriod: periodDescription,
@@ -157,7 +156,7 @@ export async function POST(req: NextRequest) {
     const highDate = highestTrade?.Date ? formatDateForVoice(highestTrade.Date) : 'N/A';
     const lowDate = lowestTrade?.Date ? formatDateForVoice(lowestTrade.Date) : 'N/A';
 
-    let response = `${companyName} trade statistics for ${periodDescription}: `;
+    let response = `${normalizedSymbol} trade statistics for ${periodDescription}: `;
     response += `Highest price ${typeLabel}: ${formatPrice(highestPrice)} on ${highDate} for ${formatNumber(highShareQty)} shares. `;
     response += `Lowest price ${typeLabel}: ${formatPrice(lowestPrice)} on ${lowDate} for ${formatNumber(lowShareQty)} shares. `;
     response += `Average price: ${formatPrice(avgPrice)}. `;

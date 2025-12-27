@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
-import { normalizeSymbol, getCompanyName } from '@/src/lib/symbol-utils';
+import { normalizeSymbol } from '@/src/lib/symbol-utils';
 import { parseTimePeriodToResolvedDates, type ResolvedDates } from '@/src/lib/date-parser';
 
 // Format date in PACIFIC TIMEZONE to match UI display
@@ -78,7 +78,6 @@ export async function POST(req: NextRequest) {
 
     // Apply symbol filter
     const normalizedSymbol = symbol ? normalizeSymbol(symbol) : undefined;
-    const companyName = normalizedSymbol ? getCompanyName(normalizedSymbol) : undefined;  // For voice output
     if (normalizedSymbol) {
       query = query.or(`Symbol.eq.${normalizedSymbol},UnderlyingSymbol.eq.${normalizedSymbol}`);
     }
@@ -150,7 +149,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (!data || data.length === 0) {
-      let filterDesc = companyName ? ` for ${companyName}` : '';
+      let filterDesc = normalizedSymbol ? ` for ${normalizedSymbol}` : '';
       if (callPut) filterDesc += ` ${callPut}`;
       filterDesc += ' options';
       if (timePeriod) filterDesc += ` ${timePeriod}`;
@@ -189,11 +188,10 @@ export async function POST(req: NextRequest) {
         const action = trade.TradeType === 'B' ? 'bought' : 'sold';
         const pVerb = trade.TradeType === 'B' ? 'paying' : 'collecting';
         const underlyingTicker = trade.UnderlyingSymbol || normalizedSymbol || 'the stock';
-        const underlyingName = getCompanyName(underlyingTicker);  // Use company name for voice
         const tradeDate = formatDateForVoice(trade.Date);
         const expirationDate = trade.Expiration ? formatDateForVoice(trade.Expiration) : 'N/A';
 
-        response = `Your most recent ${cp} option on ${underlyingName} was on ${tradeDate}. You ${action} ${qty} ${qty === 1 ? 'contract' : 'contracts'} of the $${strike} strike, ${pVerb} $${premium.toFixed(2)} total premium ($${perContract.toFixed(2)} per contract). This option expires ${expirationDate}.`;
+        response = `Your most recent ${cp} option on ${underlyingTicker} was on ${tradeDate}. You ${action} ${qty} ${qty === 1 ? 'contract' : 'contracts'} of the $${strike} strike, ${pVerb} $${premium.toFixed(2)} total premium ($${perContract.toFixed(2)} per contract). This option expires ${expirationDate}.`;
         break;
       }
 
@@ -206,11 +204,10 @@ export async function POST(req: NextRequest) {
         const cp = trade['Call/Put'] === 'C' ? 'call' : 'put';
         const action = trade.TradeType === 'B' ? 'bought' : 'sold';
         const underlyingTicker = trade.UnderlyingSymbol || normalizedSymbol || 'the stock';
-        const underlyingName = getCompanyName(underlyingTicker);  // Use company name for voice
         const tradeDate = formatDateForVoice(trade.Date);
         const expirationDate = trade.Expiration ? formatDateForVoice(trade.Expiration) : 'N/A';
 
-        response = `Your highest strike ${cp} option on ${underlyingName} was the $${strike} strike. You ${action} ${qty} ${qty === 1 ? 'contract' : 'contracts'} on ${tradeDate} for $${premium.toFixed(2)} total premium, expiring ${expirationDate}.`;
+        response = `Your highest strike ${cp} option on ${underlyingTicker} was the $${strike} strike. You ${action} ${qty} ${qty === 1 ? 'contract' : 'contracts'} on ${tradeDate} for $${premium.toFixed(2)} total premium, expiring ${expirationDate}.`;
         break;
       }
 
@@ -220,9 +217,8 @@ export async function POST(req: NextRequest) {
         const totalPremium = data.reduce((sum, t) => sum + Math.abs(parseFloat(t.NetAmount || '0')), 0);
         const sharesCovered = totalContracts * 100;
         const avgPremium = totalContracts > 0 ? totalPremium / totalContracts / 100 : 0;
-        const symbolLabel = companyName || '';
 
-        response = `You ${actionVerb} ${totalContracts} ${callPutLabel} option contracts${symbolLabel ? ` on ${symbolLabel}` : ''}${timePeriod ? ` ${timePeriod}` : ''}, ${premiumVerb} total premium of $${totalPremium.toFixed(2)}. The average premium per share was $${avgPremium.toFixed(2)}, covering ${sharesCovered} shares across ${data.length} trades.`;
+        response = `You ${actionVerb} ${totalContracts} ${callPutLabel} option contracts${normalizedSymbol ? ` on ${normalizedSymbol}` : ''}${timePeriod ? ` ${timePeriod}` : ''}, ${premiumVerb} total premium of $${totalPremium.toFixed(2)}. The average premium per share was $${avgPremium.toFixed(2)}, covering ${sharesCovered} shares across ${data.length} trades.`;
         break;
       }
 
@@ -243,9 +239,8 @@ export async function POST(req: NextRequest) {
         const totalPremium = data.reduce((sum, t) => sum + Math.abs(parseFloat(t.NetAmount || '0')), 0);
         const sharesCovered = totalContracts * 100;
         const avgPremium = totalContracts > 0 ? totalPremium / totalContracts / 100 : 0;
-        const symbolLabel = companyName || '';
 
-        response = `You ${actionVerb} ${totalContracts} ${callPutLabel} option contracts${symbolLabel ? ` on ${symbolLabel}` : ''}${timePeriod ? ` ${timePeriod}` : ''}, ${premiumVerb} total premium of $${totalPremium.toFixed(2)}. The average premium per share was $${avgPremium.toFixed(2)}, covering ${sharesCovered} shares across ${data.length} trades.`;
+        response = `You ${actionVerb} ${totalContracts} ${callPutLabel} option contracts${normalizedSymbol ? ` on ${normalizedSymbol}` : ''}${timePeriod ? ` ${timePeriod}` : ''}, ${premiumVerb} total premium of $${totalPremium.toFixed(2)}. The average premium per share was $${avgPremium.toFixed(2)}, covering ${sharesCovered} shares across ${data.length} trades.`;
         break;
       }
     }

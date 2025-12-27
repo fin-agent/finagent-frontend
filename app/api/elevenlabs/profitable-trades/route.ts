@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import { calculateRealizedMatchesFIFO, filterProfitableTrades } from '@/src/lib/profitable-trades';
-import { normalizeSymbol, getCompanyName } from '@/src/lib/symbol-utils';
+import { normalizeSymbol } from '@/src/lib/symbol-utils';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -25,7 +25,6 @@ export async function POST(req: NextRequest) {
     }
 
     const normalizedSymbol = normalizeSymbol(symbol);
-    const companyName = getCompanyName(normalizedSymbol);  // For voice output
 
     const { data: trades, error } = await supabase
       .from('TradeData')
@@ -45,7 +44,7 @@ export async function POST(req: NextRequest) {
     const allTrades = trades || [];
     if (allTrades.length === 0) {
       return NextResponse.json({
-        response: `No trades found for ${companyName}.`,
+        response: `No trades found for ${normalizedSymbol}.`,
         uiData: {
           symbol: normalizedSymbol,
           profitableTrades: [],
@@ -60,7 +59,7 @@ export async function POST(req: NextRequest) {
 
     if (profitableTrades.length === 0) {
       return NextResponse.json({
-        response: `No completed profitable trades found for ${companyName}. Your positions may still be open.`,
+        response: `No completed profitable trades found for ${normalizedSymbol}. Your positions may still be open.`,
         uiData: {
           symbol: normalizedSymbol,
           profitableTrades: [],
@@ -72,8 +71,8 @@ export async function POST(req: NextRequest) {
 
     const top = profitableTrades[0];
     const response = top
-      ? `For ${companyName}, you have ${profitableTrades.length} profitable trades with total realized profit $${totalProfit.toFixed(2)}. Your top profit was $${top.profitLoss.toFixed(2)} from ${top.buyDate} to ${top.sellDate}.`
-      : `For ${companyName}, you have ${profitableTrades.length} profitable trades with total realized profit $${totalProfit.toFixed(2)}.`;
+      ? `For ${normalizedSymbol}, you have ${profitableTrades.length} profitable trades with total realized profit $${totalProfit.toFixed(2)}. Your top profit was $${top.profitLoss.toFixed(2)} from ${top.buyDate} to ${top.sellDate}.`
+      : `For ${normalizedSymbol}, you have ${profitableTrades.length} profitable trades with total realized profit $${totalProfit.toFixed(2)}.`;
 
     // Build uiData with all information needed for UI rendering - SINGLE SOURCE OF TRUTH
     const uiData = {

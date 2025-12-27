@@ -2,7 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import { parseTimePeriodToResolvedDates } from '@/src/lib/date-parser';
 import { formatDisplayDate, formatDateRange } from '@/src/lib/date-utils';
-import { normalizeSymbol, getCompanyName } from '@/src/lib/symbol-utils';
+import { normalizeSymbol } from '@/src/lib/symbol-utils';
 import { suggestDataPeriod } from '@/src/lib/data-availability';
 
 // Format date in PACIFIC TIMEZONE to match UI display
@@ -104,9 +104,8 @@ export async function POST(req: NextRequest) {
     const trades = data || [];
     const tradeCount = trades.length;
 
-    // Build response based on results - use company name for voice
-    const companyName = normalizedSymbol ? getCompanyName(normalizedSymbol) : null;
-    const symbolText = companyName ? ` for ${companyName}` : '';
+    // Build response based on results
+    const symbolText = normalizedSymbol ? ` for ${normalizedSymbol}` : '';
 
     if (tradeCount === 0) {
       // Use LLM-based suggestion for a natural time period with actual count
@@ -201,8 +200,7 @@ export async function POST(req: NextRequest) {
       const action = t.TradeType === 'B' ? 'buying' : 'selling';
       const shares = parseInt(t.StockShareQty || '0');
       const price = parseFloat(t.StockTradePrice || '0');
-      const stockName = getCompanyName(t.Symbol);  // Use company name for voice
-      return `${action} ${shares} shares of ${stockName} at $${price.toFixed(2)}`;
+      return `${action} ${shares} shares of ${t.Symbol} at $${price.toFixed(2)}`;
     });
 
     const optionHighlights = optionTrades.slice(0, 2).map(t => {
@@ -213,9 +211,8 @@ export async function POST(req: NextRequest) {
       const rawSymbol = String(t.Symbol || '');
       const parsedUnderlying = rawSymbol.match(/^[A-Z]{1,6}/)?.[0];
       const underlying = t.UnderlyingSymbol || parsedUnderlying || rawSymbol;
-      const underlyingName = getCompanyName(underlying);  // Use company name for voice
       const strike = t.Strike ? `$${t.Strike}` : null;
-      const instrumentText = strike ? `${underlyingName} ${strike}` : underlyingName;
+      const instrumentText = strike ? `${underlying} ${strike}` : underlying;
       return `${action} ${contracts} ${instrumentText} ${callPut} contracts at $${premium.toFixed(2)} premium`;
     });
 

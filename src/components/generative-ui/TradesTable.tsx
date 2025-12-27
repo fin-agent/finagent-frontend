@@ -514,7 +514,7 @@ export function TradesTable({ trades, summary, filters, aggregations, pageSize =
 
               return (
                 <tr
-                  key={trade.TradeID}
+                  key={trade.TradeID ?? `trade-${index}`}
                   style={{ backgroundColor: index % 2 === 0 ? palette.surface : palette.void }}
                 >
                   {/* Date */}

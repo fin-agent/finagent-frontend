@@ -472,18 +472,20 @@ function buildAnswerOverride(intent: QueryIntent | null, tradeUI: TradeUIData | 
 	  }
 
   if (tradeUI.type === 'last-option') {
+    // Webhook returns transformed camelCase data, not raw database fields
     const d = tradeUI.data as {
       trades?: Array<{
-        Date: string;
-        Symbol: string;
-        TradeType: string;
-        'Call/Put': string;
-        Strike: string;
-        Expiration: string;
-        OptionContracts: string;
-        OptionTradePremium?: string;
-        NetAmount: string;
-        UnderlyingSymbol?: string;
+        id: number;
+        date: string;
+        symbol: string;
+        underlyingSymbol?: string;
+        tradeType: string;      // 'B' or 'S'
+        callPut: string;        // 'C' or 'P'
+        strike: number;
+        expiration: string;
+        contracts: number;
+        premium: number;        // Already absolute value of NetAmount
+        premiumPerContract: number;
       }>;
     };
 
@@ -492,19 +494,17 @@ function buildAnswerOverride(intent: QueryIntent | null, tradeUI: TradeUIData | 
 
     // Get the most recent (first) trade
     const trade = trades[0];
-    const parsed = parseOCCOptionSymbolDetails(trade.Symbol);
-    const underlying = trade.UnderlyingSymbol || parsed?.underlying || tradeUI.symbol || 'unknown';
-    const contracts = Math.trunc(safeParseNumber(trade.OptionContracts));
-    const strike = safeParseNumber(trade.Strike);
-    const netAmount = safeParseNumber(trade.NetAmount);
-    const grossPremium = getOptionPremiumUSD(trade);
-    const totalPremium = netAmount !== 0 ? Math.abs(netAmount) : grossPremium;
-    const perContract = contracts > 0 ? totalPremium / contracts : 0;
-    const callPut = trade['Call/Put'] === 'C' ? 'call' : 'put';
-    const action = trade.TradeType === 'B' ? 'bought' : 'sold';
-    const premiumVerb = trade.TradeType === 'B' ? 'paying' : 'collecting';
-    const displayDate = formatDateForHighestStrikeCard(trade.Date);
-    const displayExpiration = formatDateForHighestStrikeCard(trade.Expiration);
+    const underlying = trade.underlyingSymbol || parseOCCOptionSymbolDetails(trade.symbol)?.underlying || tradeUI.symbol || 'unknown';
+    const contracts = Math.trunc(trade.contracts);
+    const strike = trade.strike;
+    // Webhook already provides premium as absolute value
+    const totalPremium = trade.premium;
+    const perContract = trade.premiumPerContract;
+    const callPut = trade.callPut === 'C' ? 'call' : 'put';
+    const action = trade.tradeType === 'B' ? 'bought' : 'sold';
+    const premiumVerb = trade.tradeType === 'B' ? 'paying' : 'collecting';
+    const displayDate = formatDateForHighestStrikeCard(trade.date);
+    const displayExpiration = formatDateForHighestStrikeCard(trade.expiration);
 
     return `Your most recent ${callPut} option trade on ${underlying} was on ${displayDate}. You ${action} ${contracts} ${pluralize(contracts, 'contract')} of the $${formatStrikeForDisplay(strike)} strike, ${premiumVerb} ${formatUSDNoCommas(totalPremium)} total premium (${formatUSDNoCommas(perContract)} per contract). This option expires ${displayExpiration}.`;
   }
@@ -4520,36 +4520,29 @@ const UnifiedAssistant: React.FC = () => {
 
     if (type === 'last-option') {
       console.log('🎨 Rendering last option trade card with data:', data);
+      // Webhook returns transformed camelCase data, not raw database fields
       const lastOptionData = data as {
         trades: Array<{
-          TradeID: number;
-          Date: string;
-          Symbol: string;
-          UnderlyingSymbol?: string;
-          TradeType: string;
-          'Call/Put': string;
-          Strike: string;
-          Expiration: string;
-          OptionContracts: string;
-          OptionTradePremium: string;
-          NetAmount: string;
+          id: number;
+          date: string;
+          symbol: string;
+          underlyingSymbol?: string;
+          tradeType: string;      // 'B' or 'S'
+          callPut: string;        // 'C' or 'P'
+          strike: number;
+          expiration: string;
+          contracts: number;
+          premium: number;        // Already absolute value of NetAmount
+          premiumPerContract: number;
         }>;
-        aggregations?: {
-          totalTrades: number;
+        summary?: {
+          tradeCount: number;
           totalContracts: number;
           totalPremium: number;
+          avgPremiumPerShare: number;
+          sharesCovered: number;
           callCount: number;
           putCount: number;
-        };
-        filters?: {
-          symbol?: string;
-          securityType?: string;
-          tradeType?: string;
-          callPut?: string;
-          fromDate?: string;
-          toDate?: string;
-          expiration?: string;
-          strike?: number;
         };
       };
 
@@ -4557,15 +4550,14 @@ const UnifiedAssistant: React.FC = () => {
         // ALWAYS show single trade card for 'last-option' type - user asked for THE last trade
         // Take only the first (most recent) trade regardless of how many are in the response
         const trade = lastOptionData.trades[0];
-        const isCall = trade['Call/Put'] === 'C';
-        const isBuy = trade.TradeType === 'B';
-        const contracts = Math.trunc(safeParseNumber(trade.OptionContracts));
-        const premium = safeParseNumber(trade.OptionTradePremium);
-        const netAmount = safeParseNumber(trade.NetAmount);
-        const totalValue = netAmount !== 0 ? Math.abs(netAmount) : Math.abs(premium * contracts * 100);
-        const strike = safeParseNumber(trade.Strike);
-        // Use UnderlyingSymbol for options (e.g., "AAPL") instead of full option symbol (e.g., "AAPL251220C00195000")
-        const displaySymbol = trade.UnderlyingSymbol || trade.Symbol;
+        const isCall = trade.callPut === 'C';
+        const isBuy = trade.tradeType === 'B';
+        const contracts = Math.trunc(trade.contracts);
+        // Webhook already calculates premium as absolute NetAmount
+        const totalValue = trade.premium;
+        const strike = trade.strike;
+        // Use underlyingSymbol for options (e.g., "AAPL") instead of full option symbol
+        const displaySymbol = trade.underlyingSymbol || trade.symbol;
 
         return (
           <div style={{ marginTop: '12px' }}>
@@ -4574,8 +4566,8 @@ const UnifiedAssistant: React.FC = () => {
               callPut={isCall ? 'Call' : 'Put'}
               tradeType={isBuy ? 'buy' : 'sell'}
               strike={strike}
-              expiration={trade.Expiration}
-              tradeDate={trade.Date}
+              expiration={trade.expiration}
+              tradeDate={trade.date}
               contracts={contracts}
               totalValue={totalValue}
             />

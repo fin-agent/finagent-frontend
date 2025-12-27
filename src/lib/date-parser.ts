@@ -590,10 +590,12 @@ export function parseTimePeriodToResolvedDates(timePeriod: string): ResolvedDate
   const today = getPacificToday();
   today.setHours(0, 0, 0, 0);
 
-  // Helper to format date WITHOUT offset - for ABSOLUTE months/dates (September, Nov 18th)
-  // The database has 2025 data, so "September" should query September 2025 directly
-  // NOTE: Relative periods (yesterday, last week) fall back to parseTimeExpression which handles offset
-  const toDBDateNoOffset = formatDateForDB;
+  // Helper to format date WITH offset - for DB queries
+  // Absolute months/dates need offset because demo DB dates differ from real calendar dates
+  // e.g., "December" in real time maps to Oct/Nov in demo database
+  const toDBDate = (date: Date): string => {
+    return formatDateForDB(realDateToDemoDate(date));
+  };
 
   const monthNames = 'january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sept|sep|october|oct|november|nov|december|dec';
 
@@ -620,8 +622,8 @@ export function parseTimePeriodToResolvedDates(timePeriod: string): ResolvedDate
 
       return {
         type: 'range',
-        startDate: toDBDateNoOffset(startDate),  // ABSOLUTE date - no offset
-        endDate: toDBDateNoOffset(endDate),      // ABSOLUTE date - no offset
+        startDate: toDBDate(startDate),
+        endDate: toDBDate(endDate),
         description: `${monthDisplay} ${startDay} to ${endDay}`
       };
     }
@@ -656,8 +658,8 @@ export function parseTimePeriodToResolvedDates(timePeriod: string): ResolvedDate
 
       return {
         type: 'range',
-        startDate: toDBDateNoOffset(startDate),  // ABSOLUTE date - no offset
-        endDate: toDBDateNoOffset(endDate),      // ABSOLUTE date - no offset
+        startDate: toDBDate(startDate),
+        endDate: toDBDate(endDate),
         description: `${month1Display} ${day1} to ${month2Display} ${day2}`
       };
     }
@@ -690,8 +692,8 @@ export function parseTimePeriodToResolvedDates(timePeriod: string): ResolvedDate
 
       return {
         type: 'range',
-        startDate: toDBDateNoOffset(startDate),  // ABSOLUTE date - no offset
-        endDate: toDBDateNoOffset(endDate),      // ABSOLUTE date - no offset
+        startDate: toDBDate(startDate),
+        endDate: toDBDate(endDate),
         description: `${month1Display} and ${month2Display}`
       };
     }
@@ -720,8 +722,8 @@ export function parseTimePeriodToResolvedDates(timePeriod: string): ResolvedDate
 
       return {
         type: 'range',
-        startDate: toDBDateNoOffset(startDate),  // ABSOLUTE month - no offset
-        endDate: toDBDateNoOffset(endDate),      // ABSOLUTE month - no offset
+        startDate: toDBDate(startDate),
+        endDate: toDBDate(endDate),
         description: monthDisplay
       };
     }
@@ -752,7 +754,7 @@ export function parseTimePeriodToResolvedDates(timePeriod: string): ResolvedDate
           if (date > today) {
             date = new Date(year - 1, month, day);
           }
-          dates.push(toDBDateNoOffset(date));  // ABSOLUTE date - no offset
+          dates.push(toDBDate(date));
           const monthDisplay = date.toLocaleDateString('en-US', { month: 'long' });
           descriptions.push(`${monthDisplay} ${day}`);
         }

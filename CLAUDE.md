@@ -580,6 +580,36 @@ with an affirmative, you MUST call the tool again with the SUGGESTED time period
 
 **DO NOT repeat suggestion from memory - MUST call tool again for full breakdown.**
 
+### Follow-Up Query Handling (Critical)
+
+When users ask follow-up questions like "What about September?" after "Apple trades in January", the agent MUST:
+
+1. **Call the tool again** - Never answer from memory or context
+2. **Preserve the symbol** - Include AAPL from the previous query
+3. **Read the response verbatim** - Each time period may have completely different data
+
+**Example of CORRECT flow:**
+```
+1. User: "Apple trades in January?"
+2. Agent calls: get_time_based_trades(symbol: AAPL, time_period: January)
+3. Tool returns: "No trades found"
+4. Agent says: "No trades found for Apple in January"
+5. User: "What about September?"
+6. Agent calls: get_time_based_trades(symbol: AAPL, time_period: September) ← MUST CALL TOOL AGAIN
+7. Tool returns: "1 trade found"
+8. Agent says: "You had 1 trade for Apple in September"
+```
+
+**Follow-up patterns that ALWAYS require a new tool call:**
+- "What about [time period]?"
+- "How about [time period]?"
+- "And for [time period]?"
+- "[Month name]?" (e.g., "September?", "October?")
+
+**CRITICAL:** The agent must NEVER infer "September probably has no trades too" - it MUST call the tool because January may have 0 trades but September may have 10 trades.
+
+**Prompt Rules:** See `prompts/finagent-neo.md` Rules 9 and 10 in the `<core-rules>` section.
+
 ### Voice/UI Drift Prevention: Double Date Offset Fix
 
 **Problem:** When user says "Yes" to a data suggestion, the UI would show different amounts than the voice agent spoke.

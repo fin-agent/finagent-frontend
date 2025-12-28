@@ -23,12 +23,24 @@ export const intentRegistry: IntentDefinition[] = [
     id: 'trades.detailed',
     domain: 'trades',
     cardType: 'detailed',
-    description: 'User wants to see all trades or trade history for a symbol',
+    description: 'User wants information about trades for a specific symbol. This includes: seeing trades, counting trades, trade history, or any question about "how many" trades. IMPORTANT: All of these phrasings mean the same thing - user wants trade info for a symbol.',
     examples: [
+      // "Show" phrasing
       'Show my Apple trades',
       'List all TSLA trades',
       'What did I trade for Google?',
       'My Tesla trade history',
+      // "How many" phrasing (SAME INTENT - NOT trades.summary!)
+      'How many trades did I have for Apple?',
+      'How many Apple trades do I have?',
+      'How many trades done in Apple this year?',
+      'Count my TSLA trades',
+      'Number of Google trades',
+      'How many trades for Apple in January?',
+      // Combined symbol + time
+      'Show my Apple trades for January',
+      'AAPL trades last month',
+      'How many Tesla trades last week?',
     ],
     requiredEntities: ['symbol'],
     optionalEntities: ['timePeriod', 'tradeType'],
@@ -90,19 +102,9 @@ export const intentRegistry: IntentDefinition[] = [
     requiredEntities: ['symbol'],
     optionalEntities: ['tradeType', 'timePeriod'],
   },
-  {
-    id: 'trades.summary',
-    domain: 'trades',
-    cardType: 'summary',
-    description: 'User asks how many trades they have for a symbol',
-    examples: [
-      'How many Apple trades do I have?',
-      'Count my TSLA trades',
-      'Number of Google trades',
-    ],
-    requiredEntities: ['symbol'],
-    optionalEntities: [],
-  },
+  // NOTE: trades.summary was REMOVED - it's now part of trades.detailed
+  // "How many trades?" and "Show my trades" are semantically the same intent
+  // All symbol-based trade queries now route to trades.detailed
   {
     id: 'trades.average_price',
     domain: 'trades',

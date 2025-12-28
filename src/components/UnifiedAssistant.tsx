@@ -1710,20 +1710,23 @@ const UnifiedAssistant: React.FC = () => {
     };
 
     const get_trade_summary = async (parameters: Record<string, unknown>) => {
+      // UNIFIED INTENT: "How many trades" and "Show my trades" are the same intent
+      // Both now route to detailed-trades endpoint for consistent UI
       console.log('📊 [Trade Summary Tool] ================================');
       console.log('📊 [Trade Summary Tool] Parameters:', JSON.stringify(parameters, null, 2));
+      console.log('📊 [Trade Summary Tool] Note: Routing to detailed-trades for unified experience');
 
       const symbol = getToolSymbol(parameters);
       const timePeriod = getString(parameters, 'time_period');
       const dateFilter = parameters.date_filter as Record<string, unknown> | undefined;
 
-      // SINGLE FETCH: Voice endpoint returns BOTH response AND uiData
-      const voicePayload = await postJson('/api/elevenlabs/trade-summary', { symbol, time_period: timePeriod, date_filter: dateFilter });
+      // SINGLE FETCH: Use detailed-trades endpoint which returns full data + counts
+      const voicePayload = await postJson('/api/elevenlabs/detailed-trades', { symbol, time_period: timePeriod, date_filter: dateFilter });
 
-      // Store UI data from voice response (guaranteed sync)
+      // Store UI data as 'detailed' type for TradesTable rendering
       if (voicePayload && typeof voicePayload === 'object' && 'uiData' in voicePayload) {
-        toolUIDataRef.current = { type: 'summary', symbol: symbol || '', data: voicePayload.uiData };
-        console.log('📊 [Trade Summary Tool] Set toolUIDataRef from voice response:', toolUIDataRef.current);
+        toolUIDataRef.current = { type: 'detailed', symbol: symbol || '', data: voicePayload.uiData };
+        console.log('📊 [Trade Summary Tool] Set toolUIDataRef (detailed type) from voice response:', toolUIDataRef.current);
       }
 
       console.log('📊 [Trade Summary Tool] ================================');
@@ -2281,9 +2284,11 @@ const UnifiedAssistant: React.FC = () => {
                         const data = await fetchTradeData(symbol, 'detailed');
                         if (data) tradeUI = data;
                       } else {
+                        // Unified: "how many trades" and "show trades" are the same intent
+                        // Both route to 'detailed' which returns full trade list + counts
                         const summaryMatch = detectTradeSummary(message.message);
                         if (summaryMatch) {
-                          const data = await fetchTradeData(symbol, 'summary');
+                          const data = await fetchTradeData(symbol, 'detailed');
                           if (data) tradeUI = data;
                         }
                       }
@@ -3232,9 +3237,10 @@ const UnifiedAssistant: React.FC = () => {
                           const data = await fetchTradeData(symbol, 'detailed');
                           if (data) tradeUI = data;
                         } else {
+                          // Unified: "how many trades" and "show trades" are the same intent
                           const summaryMatch = detectTradeSummary(message.message);
                           if (summaryMatch) {
-                            const data = await fetchTradeData(symbol, 'summary');
+                            const data = await fetchTradeData(symbol, 'detailed');
                             if (data) tradeUI = data;
                           }
                         }
@@ -3471,9 +3477,10 @@ const UnifiedAssistant: React.FC = () => {
                       baseMessage.tradeUI = tradeData;
                     }
                   } else {
+                    // Unified: "how many trades" and "show trades" are the same intent
                     const summaryMatch = detectTradeSummary(msg.content);
                     if (summaryMatch) {
-                      const tradeData = await fetchTradeData(symbol, 'summary');
+                      const tradeData = await fetchTradeData(symbol, 'detailed');
                       if (tradeData) {
                         baseMessage.tradeUI = tradeData;
                       }

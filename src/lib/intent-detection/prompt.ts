@@ -116,6 +116,35 @@ ${intents.map(i => `### ${i.id}
   - "locate fee" / "borrow fee" / "stock borrow" -> "locate_fee"
   - "short interest" / "short borrow interest" / "shorting interest" -> "short_interest"
 
+## Semantic Equivalence Rules (CRITICAL)
+
+**Different phrasings of the SAME intent must route to the SAME classification.**
+
+### Trade Queries - Semantic Groupings:
+
+**These are ALL the same intent (trades.detailed) - they ask for trade information about a symbol:**
+- "Show my Apple trades" → trades.detailed
+- "How many Apple trades do I have?" → trades.detailed (NOT a separate intent!)
+- "How many trades did I have for Apple?" → trades.detailed
+- "How many trades done in Apple this year?" → trades.detailed
+- "Count my TSLA trades" → trades.detailed
+- "Number of Google trades" → trades.detailed
+- "List all Apple trades" → trades.detailed
+- "Apple trade history" → trades.detailed
+
+**The key insight:** "Show trades", "How many trades", "Count trades", "Number of trades" - these are ALL asking for trade information. The word choice doesn't change the user's intent.
+
+**Adding a time filter doesn't change the base intent:**
+- "Show my Apple trades for January" → trades.detailed (with timePeriod: "January")
+- "How many Apple trades in January?" → trades.detailed (with timePeriod: "January")
+- "AAPL trades last month" → trades.detailed (with timePeriod: "last month")
+
+**When to use trades.time_based instead:**
+- ONLY when time period is the PRIMARY focus and symbol is optional/absent
+- "What did I trade yesterday?" → trades.time_based
+- "Show all my trades last week" → trades.time_based
+- "Trades from January" (no symbol) → trades.time_based
+
 ## Intent Disambiguation Rules
 
 IMPORTANT: When a query contains overlapping signals, use these rules:
@@ -178,6 +207,27 @@ If no intent AND no symbol can be extracted:
 
 Query: "Show my profitable trades for Apple"
 Response: {"intent": "trades.profitable", "confidence": 0.95, "entities": {"symbol": "AAPL"}}
+
+Query: "Show my Apple trades"
+Response: {"intent": "trades.detailed", "confidence": 0.96, "entities": {"symbol": "AAPL"}}
+
+Query: "How many Apple trades do I have?"
+Response: {"intent": "trades.detailed", "confidence": 0.95, "entities": {"symbol": "AAPL"}}
+
+Query: "How many trades did I have for Apple?"
+Response: {"intent": "trades.detailed", "confidence": 0.95, "entities": {"symbol": "AAPL"}}
+
+Query: "How many trades done in Apple this year?"
+Response: {"intent": "trades.detailed", "confidence": 0.94, "entities": {"symbol": "AAPL", "timePeriod": "this year", "dateFilter": {"type": "relative", "period": "this year", "description": "this year"}}}
+
+Query: "How many trades for Apple in January?"
+Response: {"intent": "trades.detailed", "confidence": 0.95, "entities": {"symbol": "AAPL", "timePeriod": "January", "dateFilter": {"type": "range", "startDate": "2025-01-01", "endDate": "2025-01-31", "description": "January 2025"}}}
+
+Query: "Count my TSLA trades"
+Response: {"intent": "trades.detailed", "confidence": 0.94, "entities": {"symbol": "TSLA"}}
+
+Query: "Number of Google trades"
+Response: {"intent": "trades.detailed", "confidence": 0.93, "entities": {"symbol": "GOOGL"}}
 
 Query: "What options expire tomorrow?"
 Response: {"intent": "options.expiring", "confidence": 0.98, "entities": {"expiration": "tomorrow"}}

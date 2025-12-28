@@ -13,7 +13,7 @@ import { DateFilter } from '@/src/lib/query-resolver';
 import { suggestDataPeriod } from '@/src/lib/data-availability';
 import { formatDisplayDate, formatDateRange } from '@/src/lib/date-utils';
 import { startTrace, formatTraceForResponse } from '@/src/lib/request-trace';
-import { getConversationKey, mergeWithContext, storeContext } from '@/src/lib/conversation-context';
+import { getConversationKey, mergeWithContextAsync, storeContextAsync } from '@/src/lib/conversation-context';
 
 // Format date in PACIFIC TIMEZONE to match UI display
 function formatDateForVoice(dateStr: string): string {
@@ -106,7 +106,7 @@ export async function POST(req: NextRequest) {
                        body.body?.date_filter || body.body?.parameters?.date_filter;
 
     // Merge with conversation context if symbol is missing (follow-up query)
-    const merged = mergeWithContext(conversationKey, { symbol, timePeriod, dateFilter });
+    const merged = await mergeWithContextAsync(conversationKey, { symbol, timePeriod, dateFilter });
     symbol = merged.symbol;
 
     // Log input (including context application)
@@ -120,7 +120,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Store context for future follow-up queries (even if symbol is null for all-trades queries)
-    storeContext(conversationKey, { symbol, timePeriod, dateFilter, queryType: 'time-trades' });
+    await storeContextAsync(conversationKey, { symbol, timePeriod, dateFilter, queryType: 'time-trades' });
 
     // Determine trade type filter
     const normalizedTradeType = tradeType && tradeType.toLowerCase() !== 'all'

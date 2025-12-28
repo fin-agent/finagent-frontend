@@ -10,7 +10,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { queryTrades, buildVoiceResponse, buildUIData, validateConsistency } from '@/src/lib/trade-query';
 import { DateFilter } from '@/src/lib/query-resolver';
 import { startTrace, formatTraceForResponse } from '@/src/lib/request-trace';
-import { getConversationKey, mergeWithContext, storeContext } from '@/src/lib/conversation-context';
+import { getConversationKey, mergeWithContextAsync, storeContextAsync } from '@/src/lib/conversation-context';
 
 export async function POST(req: NextRequest) {
   const trace = startTrace('detailed-trades');
@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
                        body.body?.date_filter || body.body?.parameters?.date_filter;
 
     // Merge with conversation context if symbol is missing (follow-up query)
-    const merged = mergeWithContext(conversationKey, { symbol, timePeriod, dateFilter });
+    const merged = await mergeWithContextAsync(conversationKey, { symbol, timePeriod, dateFilter });
     symbol = merged.symbol;
 
     // Log input (including context application)
@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Store context for future follow-up queries
-    storeContext(conversationKey, { symbol, timePeriod, dateFilter, queryType: 'detailed-trades' });
+    await storeContextAsync(conversationKey, { symbol, timePeriod, dateFilter, queryType: 'detailed-trades' });
 
     // Use unified query - SINGLE SOURCE OF TRUTH
     const result = await queryTrades({

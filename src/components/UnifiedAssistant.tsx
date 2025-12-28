@@ -41,7 +41,9 @@ interface TradeUIData {
     // Market data types
     | 'stock-quote' | 'option-quote' | 'price-chart' | 'news' | 'halt-status'
     // Fundamentals types
-    | 'company-overview' | 'fundamental-metric' | 'financials' | 'earnings' | 'dividend';
+    | 'company-overview' | 'fundamental-metric' | 'financials' | 'earnings' | 'dividend'
+    // Contextual follow-up (detected by LLM, merged with previous context)
+    | 'contextual-followup';
   symbol: string;
   tradeType?: 'buy' | 'sell' | 'all';
   timePeriod?: string;
@@ -76,53 +78,25 @@ interface QueryIntent {
   dateFilter?: { type: string; startDate?: string; endDate?: string; description: string };
 }
 
-// High-signal option intents where regex patterns are very reliable
-function isHighSignalOptionIntent(intent: QueryIntent | null): boolean {
-  if (!intent) return false;
-  return (
-    intent.cardType === 'last-option' ||
-    intent.cardType === 'highest-strike' ||
-    intent.cardType === 'total-premium' ||
-    intent.cardType === 'expiring-options' ||
-    intent.cardType === 'advanced-options'
-  );
-}
-
 interface QueryIntentWithConfidence extends QueryIntent {
   confidence?: number;
 }
 
+/**
+ * LLM-first intent selection - uses LLM classifier as the sole source of truth
+ * No regex fallback - the LLM handles all intent detection
+ */
 function chooseIntent(
   userQuery: string,
-  llmIntent: QueryIntentWithConfidence | null,
-  regexIntent: QueryIntent | null
+  llmIntent: QueryIntentWithConfidence | null
 ): QueryIntent | null {
-  // If both agree, use LLM (has more entity extraction)
-  if (llmIntent && regexIntent && llmIntent.cardType === regexIntent.cardType) {
-    console.log('🎯 [Intent Choice] LLM and regex agree:', llmIntent.cardType);
-    return llmIntent;
-  }
-
-  // If LLM is highly confident (>= 0.85), trust it even if regex differs
-  if (llmIntent && (llmIntent.confidence ?? 0) >= 0.85) {
-    console.log('🎯 [Intent Choice] LLM high confidence:', llmIntent.cardType, `(${((llmIntent.confidence ?? 0) * 100).toFixed(0)}%)`);
-    return llmIntent;
-  }
-
-  // For high-signal option patterns (clear regex match), prefer regex when LLM is uncertain
-  if (isHighSignalOptionIntent(regexIntent) && (!llmIntent || (llmIntent.confidence ?? 0) < 0.85)) {
-    console.log('🎯 [Intent Choice] Regex high-signal pattern:', regexIntent?.cardType);
-    return regexIntent;
-  }
-
-  // Default: prefer LLM if available, otherwise regex
   if (llmIntent) {
-    console.log('🎯 [Intent Choice] Using LLM:', llmIntent.cardType);
+    console.log('🎯 [Intent] LLM classified:', llmIntent.cardType, `(${((llmIntent.confidence ?? 0) * 100).toFixed(0)}% confidence)`);
     return llmIntent;
   }
 
-  console.log('🎯 [Intent Choice] Fallback to regex:', regexIntent?.cardType || 'null');
-  return regexIntent;
+  console.log('🎯 [Intent] LLM returned no match for query:', userQuery.slice(0, 50));
+  return null;
 }
 
 function formatUSDNoCommas(value: unknown): string {
@@ -183,58 +157,9 @@ function isSuggestionFollowup(query: string): boolean {
   );
 }
 
-/**
- * Detect if user is asking a contextual follow-up with a time period change
- * Examples: "And what about the last three months?", "How about last quarter?", "What about this year?"
- *           "And what's this year?", "What's last month?", "So how much has paid in the last three months?"
- * Returns the extracted time period if detected, null otherwise
- */
-function detectContextualTimePeriodFollowup(query: string): string | null {
-  const q = query.trim().toLowerCase();
-  if (!q) return null;
-
-  // Time period validation - must contain time-related words
-  const timeWords = /\b(last|past|this|previous|yesterday|today|week|month|year|quarter|days?|months?|years?|\d+)\b/i;
-
-  // Patterns for contextual follow-ups with time period changes
-  const patterns = [
-    // "and what about X", "how about X", "what about X"
-    /^(?:and\s+)?(?:what|how)\s+about\s+(?:the\s+)?(.+?)\??$/i,
-    // "and what's X" / "and what is X" / "what's X" - common voice follow-up
-    /^(?:and\s+)?what(?:'s|\s+is)\s+(?:the\s+)?(.+?)\??$/i,
-    // "and for X", "and in X"
-    /^(?:and\s+)?(?:for|in)\s+(?:the\s+)?(.+?)\??$/i,
-    // "show me the same for X" - REQUIRE "same" keyword to avoid matching standalone queries
-    /^(?:show\s+me\s+)?(?:the\s+)?same\s+(?:(?:for|thing)\s+)?(?:for\s+)?(.+?)\??$/i,
-    // "and X?" - short follow-up
-    /^and\s+(?:the\s+)?(.+?)\??$/i,
-    // "so how much [was paid/did I pay/has been paid] in/for the last X" - repeat question
-    /^(?:so\s+)?how\s+much\s+(?:was\s+paid|did\s+i\s+pay|has\s+(?:been\s+)?paid|have\s+i\s+paid)?\s*(?:in|for)?\s*(?:the\s+)?(.+?)\??$/i,
-    // "how much in/for X?" - shortened repeat
-    /^how\s+much\s+(?:in|for)\s+(?:the\s+)?(.+?)\??$/i,
-    // "what was it for X?" or "what is it for X?"
-    /^what\s+(?:was|is)\s+it\s+(?:for|in)\s+(?:the\s+)?(.+?)\??$/i,
-  ];
-
-  for (const pattern of patterns) {
-    const match = q.match(pattern);
-    if (match && match[1]) {
-      const timePart = match[1].trim();
-      // Validate it looks like a time period
-      if (timeWords.test(timePart)) {
-        return timePart;
-      }
-    }
-  }
-
-  // Fallback: check if query is just a time period (e.g., "the last three months?", "last quarter?")
-  const justTimePeriod = /^(?:the\s+)?(last|past|this)\s+(?:\d+\s+)?(week|month|year|quarter|days?|months?|years?)\??$/i;
-  if (justTimePeriod.test(q)) {
-    return q.replace(/\?$/, '').trim();
-  }
-
-  return null;
-}
+// NOTE: detectContextualTimePeriodFollowup regex function has been REMOVED
+// Contextual follow-up detection is now handled by LLM classification (intent: contextual.time_period_followup)
+// The LLM approach is more flexible and handles natural language variations better
 
 function normalizeTradeVerb(tradeType: string): 'buying' | 'selling' {
   const normalized = tradeType.trim().toUpperCase();
@@ -785,228 +710,6 @@ function buildAveragePriceCalculationExplanation(tradeUI: TradeUIData | null): s
   return `Here’s how I calculated it for ${symbol} ${period}:\n\n${lines.join('\n')}${more}\n\nTotal: ${formatUSDNoCommas(breakdown?.totalNotional ?? 0)} ÷ ${Math.round(totalShares)} ${pluralize(Math.round(totalShares), 'share')} = ${formatUSDNoCommas(avg)} per share.`;
 }
 
-
-/**
- * Detect query intent from USER's message (before sending to agent)
- * This is more reliable than parsing agent's variable responses
- */
-function detectUserQueryIntent(query: string): QueryIntent | null {
-  const lowerQuery = query.toLowerCase();
-
-  // Speech recognition correction map - voice transcription often mishears stock tickers
-  // These corrections are applied BEFORE symbol extraction
-  const speechCorrections: Record<string, string> = {
-    'm10': 'MTEN', 'm 10': 'MTEN', 'mtn': 'MTEN', 'emten': 'MTEN', 'em ten': 'MTEN',
-    'lc id': 'LCID', 'l c i d': 'LCID', 'lucid': 'LCID',
-    'ui path': 'PATH', 'you eye path': 'PATH',
-    'bmnr': 'BMNR', 'b m n r': 'BMNR',
-    'crcl': 'CRCL', 'c r c l': 'CRCL', 'circle': 'CRCL',
-    'rgc': 'RGC', 'r g c': 'RGC',
-  };
-
-  // Company name to symbol mapping for user queries
-  const companyToSymbol: Record<string, string> = {
-    'apple': 'AAPL', 'google': 'GOOGL', 'alphabet': 'GOOGL',
-    'amazon': 'AMZN', 'microsoft': 'MSFT', 'tesla': 'TSLA',
-    'nvidia': 'NVDA', 'meta': 'META', 'facebook': 'META',
-    'netflix': 'NFLX', 'amd': 'AMD', 'intel': 'INTC',
-    'gamestop': 'GME', 'qualcomm': 'QCOM',
-  };
-
-  // Extract symbol from query - check company names first, then uppercase tickers
-  let symbol: string | undefined;
-
-  // FIRST: Check for speech recognition corrections (highest priority)
-  for (const [misheard, correct] of Object.entries(speechCorrections)) {
-    if (new RegExp(`\\b${misheard.replace(/\s+/g, '\\s*')}\\b`, 'i').test(lowerQuery)) {
-      symbol = correct;
-      break;
-    }
-  }
-
-  // SECOND: Check for company names
-  if (!symbol) {
-    for (const [company, ticker] of Object.entries(companyToSymbol)) {
-      if (new RegExp(`\\b${company}\\b`, 'i').test(lowerQuery)) {
-        symbol = ticker;
-        break;
-      }
-    }
-  }
-
-  // THIRD: Check for uppercase tickers (letters only)
-  if (!symbol) {
-    const symbolMatch = query.match(/\b([A-Z]{2,5})\b/g);
-    symbol = symbolMatch?.find(s =>
-      KNOWN_SYMBOLS.includes(s) ||
-      !['THE', 'FOR', 'AND', 'ALL', 'MY', 'HOW', 'WHAT', 'SHOW', 'GET', 'DID', 'HAVE', 'HAS'].includes(s)
-    );
-  }
-
-  // FOURTH: Check for alphanumeric patterns like M10, NVDA2 (speech recognition artifacts)
-  if (!symbol) {
-    const alphanumMatch = query.match(/\b([A-Z][A-Z0-9]{1,4})\b/g);
-    const candidate = alphanumMatch?.find(s =>
-      /[0-9]/.test(s) && // Must contain a digit (to avoid catching normal words)
-      !['THE', 'FOR', 'AND', 'ALL', 'MY', 'HOW', 'WHAT', 'SHOW', 'GET', 'DID', 'HAVE', 'HAS', '1ST', '2ND', '3RD'].includes(s)
-    );
-    if (candidate) {
-      // Check if this alphanumeric pattern has a known correction
-      const corrected = speechCorrections[candidate.toLowerCase()];
-      symbol = corrected || candidate;
-    }
-  }
-
-  // Extract time period from query (comprehensive patterns)
-  // Support both numeric (4) and spelled-out (four) numbers
-  const numberPattern = '(?:\\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)';
-  const timePeriodRegex = new RegExp(
-    `\\b(today|yesterday|last\\s+week|this\\s+week|last\\s+month|this\\s+month|last\\s+year|this\\s+year|(?:last|past)\\s+${numberPattern}\\s+days?|(?:last|past)\\s+${numberPattern}\\s+months?|(?:last|past)\\s+${numberPattern}\\s+trading\\s+days?|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\\b`,
-    'i'
-  );
-  const timePeriodMatch = lowerQuery.match(timePeriodRegex);
-  let timePeriod = timePeriodMatch?.[1];
-
-  // Month name support (e.g., "in October", "month of October")
-  if (!timePeriod) {
-    const monthMatch = lowerQuery.match(/\b(?:month\s+of\s+)?(january|february|march|april|may|june|july|august|september|october|november|december)\b/i);
-    if (monthMatch) timePeriod = monthMatch[1].toLowerCase();
-  }
-
-  // "for the month" defaults to current month if unspecified
-  if (!timePeriod && /\bfor\s+the\s+month\b/i.test(lowerQuery)) {
-    timePeriod = 'this month';
-  }
-
-  // Extract trade type context
-  const isSellQuery = /\b(sold|sell|selling|short|written)\b/i.test(lowerQuery);
-  const isBuyQuery = /\b(bought|buy|buying|long|purchased)\b/i.test(lowerQuery);
-  const tradeType = isSellQuery ? 'sell' : isBuyQuery ? 'buy' : undefined;
-
-  // Extract call/put context
-  const isCallQuery = /\bcalls?\b/i.test(lowerQuery);
-  const isPutQuery = /\bputs?\b/i.test(lowerQuery);
-  const callPut = isCallQuery && !isPutQuery ? 'call' : isPutQuery && !isCallQuery ? 'put' : undefined;
-
-  // 1. Account balance queries
-  const isAccountQuery = /\b(account|balances?|buying\s*power|equity|margin|net\s*liquidation|nlv|market\s*value|withdraw|available\s+funds|available\s+cash|how\s+much\s+money)\b/i.test(lowerQuery);
-  if (isAccountQuery) {
-    let accountQueryType: AccountQueryType = 'account_summary';
-
-    // Most-specific patterns first
-    if (/\bdebit\s+balances?\b/i.test(lowerQuery)) accountQueryType = 'debit_balances';
-    else if (/\bcredit\s+balances?\b/i.test(lowerQuery)) accountQueryType = 'credit_balances';
-    else if (/\bhow\s+much\s+money\s+do\s+i\s+have\b/i.test(lowerQuery)) accountQueryType = 'cash_and_equity';
-    else if (/\b(withdraw|available\s+funds|available\s+cash|cash\s*balance)\b/i.test(lowerQuery)) accountQueryType = 'cash_balance';
-    else if (/buying\s*power/i.test(lowerQuery)) accountQueryType = 'buying_power';
-    else if (/nlv|net\s*liquidation/i.test(lowerQuery)) accountQueryType = 'nlv';
-    else if (/overnight\s+margin|margin/i.test(lowerQuery)) accountQueryType = 'overnight_margin';
-    else if (/market\s*value/i.test(lowerQuery)) accountQueryType = 'market_value';
-    else if (/account\s+summary|show\s+me\s+my\s+account|show\s+my\s+account\b/i.test(lowerQuery)) accountQueryType = 'account_summary';
-
-    return { cardType: 'account-balance', accountQueryType, timePeriod };
-  }
-
-  // 2. Fees queries
-  if (/\b(fees?|commissions?|interest|locate|borrow(?:ing)?|short\s+interest)\b/i.test(lowerQuery)) {
-    let feeType: FeeType = 'commission';
-    if (/credit\s*interest/i.test(lowerQuery)) feeType = 'credit_interest';
-    else if (/short\s+interest/i.test(lowerQuery)) feeType = 'short_interest'; // Must check before debit_interest
-    else if (/debit\s*interest|margin\s*interest/i.test(lowerQuery)) feeType = 'debit_interest';
-    else if (/locate|borrow(?:ing)?|stock\s+borrow/i.test(lowerQuery)) feeType = 'locate_fee';
-    return { cardType: 'fees', feeType, timePeriod, symbol };
-  }
-
-  // 3. Expiring options
-  if (/\b(expir(?:ing|es?|ation))\s+(tomorrow|this\s+week|this\s+month)/i.test(lowerQuery) ||
-      /options?\s+expir/i.test(lowerQuery)) {
-    const expirationMatch = lowerQuery.match(/expir\w*\s+(tomorrow|this\s+week|this\s+month)/i) ||
-                            lowerQuery.match(/(tomorrow|this\s+week|this\s+month)/i);
-    return { cardType: 'expiring-options', expiration: expirationMatch?.[1] || 'tomorrow', symbol };
-  }
-
-  // 4. Last/most recent option trade (must come before bulk options)
-  // Matches: "last call option", "last call options", "most recent put", "latest option"
-  // Note: "options" plural still means "the last one" in context like "last call options I bought"
-  if (/\b(last|most\s+recent|latest)\s+(call|put|options?)\b/i.test(lowerQuery)) {
-    return { cardType: 'last-option', symbol, tradeType, callPut };
-  }
-
-  // 5. Highest/lowest strike (must come before bulk options)
-  if (/\b(highest|lowest)\s+strike\b/i.test(lowerQuery)) {
-    return { cardType: 'highest-strike', symbol, tradeType, callPut, timePeriod };
-  }
-
-  // 6. Total premium (must come before bulk options)
-  if (/\btotal\s+premium\b/i.test(lowerQuery) || /\bpremium\s+(collected|paid|received)\b/i.test(lowerQuery)) {
-    return { cardType: 'total-premium', symbol, tradeType, timePeriod };
-  }
-
-  // 7. Bulk options queries (all short/long calls/puts, option trades)
-  // Matches: "show all the short calls", "all my short puts", "short call options on TSLA"
-  const isBulkOptionsQuery =
-    // Pattern: "show [me] [all] [the] [my] short/long calls/puts [options]"
-    /\bshow\s+(?:me\s+)?(?:all\s+)?(?:the\s+)?(?:my\s+)?(short|long)?\s*(call|put)s?\s*(?:options?)?\b/i.test(lowerQuery) ||
-    // Pattern: "all [the] [my] short/long calls/puts [options]"
-    /\ball\s+(?:the\s+)?(?:my\s+)?(short|long)?\s*(call|put)s?\s*(?:options?)?\b/i.test(lowerQuery) ||
-    // Pattern: "my short/long calls/puts [options]"
-    /\bmy\s+(short|long)?\s*(call|put)s?\s*(?:options?)?\b/i.test(lowerQuery) ||
-    // Pattern: "short/long calls/puts [options] on/for SYMBOL"
-    /\b(short|long)\s+(call|put)s?\s*(?:options?)?\s+(on|for)\b/i.test(lowerQuery) ||
-    // Pattern: "option trades"
-    /\boption\s+trades?\b/i.test(lowerQuery);
-
-  if (isBulkOptionsQuery) {
-    return { cardType: 'advanced-options', symbol, tradeType, callPut, timePeriod };
-  }
-
-  // 8. Average price (simple average query - before general stats)
-  if (/\b(average|avg)\s+(price|cost)\b/i.test(lowerQuery) &&
-      !/\b(highest|lowest|max|min)\b/i.test(lowerQuery)) {
-    return { cardType: 'average-price', symbol, tradeType, timePeriod };
-  }
-
-  // 9. Trade stats (highest/lowest price)
-  if (/\b(highest|lowest|max|min)\s+(price|sold|bought|paid)\b/i.test(lowerQuery)) {
-    return { cardType: 'stats', symbol, tradeType, timePeriod };
-  }
-
-  // 10. Profitable trades
-  if (/\b(profitable|profit|gains?|winners?|winning)\b/i.test(lowerQuery)) {
-    return { cardType: 'profitable', symbol };
-  }
-
-  // 11. Time-based trades (yesterday, last week, etc.) - MUST COME BEFORE detailed trades
-  if (timePeriod && !symbol) {
-    // Portfolio-wide time query (no symbol specified)
-    return { cardType: 'time-based', symbol: undefined, timePeriod };
-  }
-  if (timePeriod && symbol) {
-    // Symbol-specific time query
-    return { cardType: 'time-based', symbol, timePeriod };
-  }
-
-  // 12. Trade summary (how many trades)
-  if (/\b(how\s+many|count|number\s+of|total)\s+trades?\b/i.test(lowerQuery)) {
-    return { cardType: 'summary', symbol };
-  }
-
-  // 13. Detailed trades (show trades, list trades, what did I trade)
-  // Updated to handle "show my Apple trades" pattern (symbol between "my" and "trades")
-  if (/\b(show|list|get|display|what)\s+(my\s+|did\s+I\s+)?(\w+\s+)*(all\s+)?trades?\b/i.test(lowerQuery) ||
-      /\btrades?\s+(for|on)\s+/i.test(lowerQuery) ||
-      /\bmy\s+\w+\s+trades?\b/i.test(lowerQuery)) {
-    // If symbol detected and query mentions "trades", this is a detailed trades request
-    return { cardType: 'detailed', symbol };
-  }
-
-  // 14. General symbol query (e.g., "AAPL" or "Apple" by itself, or "my Apple trades")
-  if (symbol && /\btrades?\b/i.test(lowerQuery)) {
-    return { cardType: 'detailed', symbol };
-  }
-
-  return null;
-}
 
 /**
  * Classify intent using GPT-based LLM classifier (via API)
@@ -3943,47 +3646,69 @@ const UnifiedAssistant: React.FC = () => {
 	      lastSuggestionRef.current = null;
 	    }
 
-	    // Handle contextual follow-up with time period change (e.g., "And what about last three months?")
-	    // This preserves the previous query's context (feeType, cardType) but uses the new time period
-	    const contextualTimePeriod = detectContextualTimePeriodFollowup(message);
-	    const isContextualFollowup = contextualTimePeriod && lastAssistantTradeUIRef.current !== null;
-
-	    if (isContextualFollowup && lastAssistantTradeUIRef.current && !isSuggestionAccept) {
-	      const prevUI = lastAssistantTradeUIRef.current;
-	      console.log('📊 [Contextual Follow-up] Detected time period change:', contextualTimePeriod, '| Previous context:', prevUI.type);
-
-	      // Create intent based on previous query type with new time period
-	      if (prevUI.type === 'fees' && prevUI.feeType) {
-	        intent = {
-	          cardType: 'fees',
-	          feeType: prevUI.feeType,
-	          timePeriod: contextualTimePeriod,
-	          symbol: prevUI.symbol,
-	        };
-	        console.log('📊 [Contextual Follow-up] Created fees intent:', intent);
-	      } else if (prevUI.type === 'account-balance' && prevUI.accountQueryType) {
-	        intent = {
-	          cardType: 'account-balance',
-	          accountQueryType: prevUI.accountQueryType,
-	          timePeriod: contextualTimePeriod,
-	        };
-	        console.log('📊 [Contextual Follow-up] Created account intent:', intent);
-	      }
-	      // Could add more types here (trades, options, etc.) as needed
-	    }
-
-	    if (!isCalcFollowup && !isSuggestionAccept && !isContextualFollowup) {
-	      // Classify query intent using GPT-based LLM classifier with confidence-based selection
+	    if (!isCalcFollowup && !isSuggestionAccept) {
+	      // LLM-first intent classification for ALL queries (including contextual follow-ups)
 	      console.log('🎯 [Intent Detection] User query:', message);
-	      const regexIntent = detectUserQueryIntent(message);
 	      const llmIntent = await classifyIntentViaAPI(message);
 	      if (llmIntent) {
-	        console.log('🎯 [LLM Classifier] Intent:', llmIntent.cardType, `(${((llmIntent.confidence ?? 0) * 100).toFixed(0)}% confidence)`, '| entities:', { symbol: llmIntent.symbol, timePeriod: llmIntent.timePeriod, tradeType: llmIntent.tradeType, callPut: llmIntent.callPut });
+	        console.log('🎯 [LLM Classifier] Intent:', llmIntent.cardType, `(${((llmIntent.confidence ?? 0) * 100).toFixed(0)}% confidence)`, '| entities:', { symbol: llmIntent.symbol, timePeriod: llmIntent.timePeriod, tradeType: llmIntent.tradeType, callPut: llmIntent.callPut, feeType: llmIntent.feeType });
 	      }
-	      if (regexIntent) {
-	        console.log('🎯 [Regex Detection] Intent:', regexIntent.cardType, '| entities:', { symbol: regexIntent.symbol, timePeriod: regexIntent.timePeriod, tradeType: regexIntent.tradeType, callPut: regexIntent.callPut });
+
+	      // Handle contextual follow-up detected by LLM (e.g., "And what about last three months?")
+	      // LLM classifies as contextual.time_period_followup, we merge with previous context
+	      if (llmIntent?.cardType === 'contextual-followup' && lastAssistantTradeUIRef.current) {
+	        const prevUI = lastAssistantTradeUIRef.current;
+	        const newTimePeriod = llmIntent.timePeriod || 'this year';
+	        const newDateFilter = llmIntent.dateFilter;
+	        console.log('📊 [LLM Contextual Follow-up] Time period change:', newTimePeriod, '| Previous context:', prevUI.type);
+
+	        // Create intent based on previous query type with new time period from LLM
+	        if (prevUI.type === 'fees' && prevUI.feeType) {
+	          intent = {
+	            cardType: 'fees',
+	            feeType: prevUI.feeType,
+	            timePeriod: newTimePeriod,
+	            symbol: prevUI.symbol,
+	            dateFilter: newDateFilter,
+	          };
+	          console.log('📊 [LLM Contextual Follow-up] Created fees intent:', intent);
+	        } else if (prevUI.type === 'account-balance' && prevUI.accountQueryType) {
+	          intent = {
+	            cardType: 'account-balance',
+	            accountQueryType: prevUI.accountQueryType,
+	            timePeriod: newTimePeriod,
+	            dateFilter: newDateFilter,
+	          };
+	          console.log('📊 [LLM Contextual Follow-up] Created account intent:', intent);
+	        } else if (prevUI.type === 'time-based' || prevUI.type === 'detailed' || prevUI.type === 'profitable' || prevUI.type === 'stats') {
+	          // Handle trades-related follow-ups
+	          // Filter out 'all' from tradeType since QueryIntent only accepts 'buy' | 'sell'
+	          const tradeTypeForIntent = prevUI.tradeType === 'all' ? undefined : prevUI.tradeType;
+	          intent = {
+	            cardType: prevUI.type,
+	            symbol: prevUI.symbol,
+	            timePeriod: newTimePeriod,
+	            tradeType: tradeTypeForIntent,
+	            dateFilter: newDateFilter,
+	          };
+	          console.log('📊 [LLM Contextual Follow-up] Created trades intent:', intent);
+	        } else if (prevUI.type === 'advanced-options' || prevUI.type === 'total-premium' || prevUI.type === 'highest-strike') {
+	          // Handle options-related follow-ups
+	          const optionTradeType = prevUI.tradeType === 'all' ? undefined : prevUI.tradeType;
+	          intent = {
+	            cardType: prevUI.type,
+	            symbol: prevUI.symbol,
+	            timePeriod: newTimePeriod,
+	            tradeType: optionTradeType,
+	            callPut: prevUI.callPut,
+	            dateFilter: newDateFilter,
+	          };
+	          console.log('📊 [LLM Contextual Follow-up] Created options intent:', intent);
+	        }
+	      } else {
+	        // Regular intent (not a contextual follow-up)
+	        intent = chooseIntent(message, llmIntent);
 	      }
-	      intent = chooseIntent(message, llmIntent, regexIntent);
 	    }
 	    // NOTE: cardRenderedForCycleRef is reset in render_ui client tool, NOT here
 	    // Resetting here would cause late message fragments from previous query to trigger duplicates

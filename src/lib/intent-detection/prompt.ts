@@ -144,6 +144,13 @@ IMPORTANT: When a query contains overlapping signals, use these rules:
    - "What did I trade yesterday?" → trades.time_based
    - "My trades last week" → trades.time_based
 
+7. **Contextual follow-up detection**: SHORT queries that ONLY change the time period (without repeating the subject like fees, trades, account, etc.) are follow-ups. These are typically conversational additions like "And what about X?" or "How about Y?". IMPORTANT: Only classify as contextual.time_period_followup if the query does NOT contain specific subject keywords (commission, interest, borrow, trades, account, buying power, etc.).
+   - "And what about last month?" → contextual.time_period_followup (user wants to change time period)
+   - "How about this year?" → contextual.time_period_followup
+   - "Same for October" → contextual.time_period_followup
+   - "How much did I pay in commissions last month?" → fees.query (NOT a follow-up - mentions "commissions")
+   - "What was my debit interest last year?" → fees.query (NOT a follow-up - mentions "debit interest")
+
 ## Response Format
 
 Respond with ONLY valid JSON:
@@ -257,5 +264,23 @@ Query: "Show my trades for the first half of the year"
 Response: {"intent": "trades.time_based", "confidence": 0.94, "entities": {"timePeriod": "first half", "dateFilter": {"type": "range", "startDate": "2025-01-01", "endDate": "2025-06-30", "description": "H1 2025"}}}
 
 Query: "Options I sold in Q2"
-Response: {"intent": "options.bulk", "confidence": 0.95, "entities": {"tradeType": "sell", "timePeriod": "Q2", "dateFilter": {"type": "range", "startDate": "2025-04-01", "endDate": "2025-06-30", "description": "Q2 2025"}}}`;
+Response: {"intent": "options.bulk", "confidence": 0.95, "entities": {"tradeType": "sell", "timePeriod": "Q2", "dateFilter": {"type": "range", "startDate": "2025-04-01", "endDate": "2025-06-30", "description": "Q2 2025"}}}
+
+Query: "And what about last month?"
+Response: {"intent": "contextual.time_period_followup", "confidence": 0.92, "entities": {"timePeriod": "last month", "dateFilter": {"type": "relative", "period": "last month", "description": "last month"}}}
+
+Query: "How about this year?"
+Response: {"intent": "contextual.time_period_followup", "confidence": 0.90, "entities": {"timePeriod": "this year", "dateFilter": {"type": "relative", "period": "this year", "description": "this year"}}}
+
+Query: "Same for October"
+Response: {"intent": "contextual.time_period_followup", "confidence": 0.88, "entities": {"timePeriod": "October", "dateFilter": {"type": "range", "startDate": "2025-10-01", "endDate": "2025-10-31", "description": "October 2025"}}}
+
+Query: "What was it for last quarter?" (context: Today is December 26, 2025)
+Response: {"intent": "contextual.time_period_followup", "confidence": 0.89, "entities": {"timePeriod": "last quarter", "dateFilter": {"type": "range", "startDate": "2025-07-01", "endDate": "2025-09-30", "description": "Q3 2025"}}}
+
+Query: "And what about the first half of the year?"
+Response: {"intent": "contextual.time_period_followup", "confidence": 0.91, "entities": {"timePeriod": "first half of the year", "dateFilter": {"type": "range", "startDate": "2025-01-01", "endDate": "2025-06-30", "description": "H1 2025"}}}
+
+Query: "So how much for the last six months?"
+Response: {"intent": "contextual.time_period_followup", "confidence": 0.87, "entities": {"timePeriod": "last six months", "dateFilter": {"type": "relative", "period": "last six months", "description": "last six months"}}}`;
 }

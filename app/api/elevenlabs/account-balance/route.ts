@@ -215,9 +215,11 @@ export async function POST(req: NextRequest) {
 
       const balanceType = queryType === 'debit_balances' ? 'debit' : 'credit';
       const periodLabel = description || timePeriod || 'the period';
-      const highestDate = formatDate(maxDate || '');
-      const lowestDate = formatDate(minDate || '');
+      // Use formatted dates for voice response
+      const highestDateFormatted = formatDate(maxDate || '');
+      const lowestDateFormatted = formatDate(minDate || '');
 
+      // Use raw dates for UI so the component can format them
       const uiData: AccountBalanceUIData = {
         queryType,
         timePeriod: periodLabel,
@@ -225,12 +227,12 @@ export async function POST(req: NextRequest) {
         avgBalance: avg,
         maxBalance: max,
         minBalance: min,
-        maxBalanceDate: highestDate,
-        minBalanceDate: lowestDate,
+        maxBalanceDate: maxDate || '', // Raw date for UI
+        minBalanceDate: minDate || '', // Raw date for UI
       };
 
       return NextResponse.json({
-        response: `Your Average ${balanceType} balance for ${periodLabel} is ${formatCurrency(avg)}. The Highest ${balanceType} balance was on ${highestDate} in the amount of ${formatCurrency(max)}. The Lowest ${balanceType} balance was on ${lowestDate} in the amount of ${formatCurrency(min)}`,
+        response: `Your Average ${balanceType} balance for ${periodLabel} is ${formatCurrency(avg)}. The Highest ${balanceType} balance was on ${highestDateFormatted} in the amount of ${formatCurrency(max)}. The Lowest ${balanceType} balance was on ${lowestDateFormatted} in the amount of ${formatCurrency(min)}`,
         uiData,
       });
     }
@@ -270,9 +272,10 @@ export async function POST(req: NextRequest) {
     const balanceDate = formatDate(balance.Date);
 
     // Build base uiData with all available account fields
+    // Use raw date for uiData so UI can format it; use formatted date for voice response
     const baseUIData: AccountBalanceUIData = {
       queryType,
-      asOfDate: balanceDate,
+      asOfDate: balance.Date, // Raw date for UI formatting
       cashBalance: balance.CashBalance,
       accountEquity: balance['Account Equity'],
       dayTradingBP: balance.DayTradingBP,

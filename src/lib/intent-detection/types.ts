@@ -20,10 +20,23 @@ export type CardType =
   | 'last-option'
   | 'account-balance'
   | 'fees'
+  // Market data card types
+  | 'stock-quote'
+  | 'option-quote'
+  | 'price-chart'
+  | 'news'
+  | 'halt-status'
+  // Fundamentals card types
+  | 'company-overview'
+  | 'fundamental-metric'
+  | 'financials'
+  | 'earnings'
+  | 'dividend'
+  | 'contextual-followup' // For time period change follow-ups (uses previous query context)
   | 'none'; // Used for entity extraction from agent responses (no UI card)
 
 // Domain categories for intents
-export type IntentDomain = 'trades' | 'options' | 'account' | 'fees' | 'positions' | 'dividends' | 'tax';
+export type IntentDomain = 'trades' | 'options' | 'account' | 'fees' | 'positions' | 'dividends' | 'tax' | 'market' | 'fundamentals' | 'contextual';
 
 // Intent definition for the registry
 export interface IntentDefinition {
@@ -60,6 +73,11 @@ export interface ExtractedEntities {
   limit?: number;
   orderBy?: string;
   orderDir?: 'asc' | 'desc';
+  // Market data entities
+  chartPeriod?: string;          // "1 week", "3 months", "1 year"
+  // Fundamentals entities
+  metricType?: string;           // "pe_ratio", "market_cap", "beta", "52_week_high", etc.
+  statementType?: 'income' | 'balance' | 'cashflow';
 }
 
 // Result from GPT classification

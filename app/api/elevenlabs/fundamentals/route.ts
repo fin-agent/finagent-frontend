@@ -106,6 +106,10 @@ interface ErrorUIData {
 export async function POST(req: NextRequest) {
   try {
     const body: FundamentalsRequest = await req.json();
+
+    // Debug logging for ElevenLabs requests
+    console.log('📊 [Fundamentals] Request body:', JSON.stringify(body, null, 2));
+
     const { query_type, symbol, metric_type, statement_type } = body;
 
     // Validate required parameters

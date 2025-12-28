@@ -8,11 +8,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { queryTrades, buildVoiceResponse, buildUIData, validateConsistency } from '@/src/lib/trade-query';
 import { DateFilter } from '@/src/lib/query-resolver';
+import { startTrace, formatTraceForResponse } from '@/src/lib/request-trace';
 
 export async function POST(req: NextRequest) {
+  const trace = startTrace('detailed-trades');
+
   try {
     const body = await req.json();
-    console.log('Detailed trades request body:', JSON.stringify(body, null, 2));
 
     // ElevenLabs may send symbol directly or nested in various ways
     const symbol = body.symbol || body.parameters?.symbol || body.body?.symbol || body.body?.parameters?.symbol;
@@ -21,7 +23,11 @@ export async function POST(req: NextRequest) {
     const dateFilter: DateFilter | undefined = body.date_filter || body.parameters?.date_filter ||
                        body.body?.date_filter || body.body?.parameters?.date_filter;
 
+    // Log input
+    trace.logInput({ symbol, timePeriod, dateFilter });
+
     if (!symbol) {
+      trace.logError('No symbol provided');
       return NextResponse.json({
         response: 'Please specify a stock symbol or company name.',
         uiData: null,
@@ -36,6 +42,16 @@ export async function POST(req: NextRequest) {
       limit: 50,  // Limit for detailed view
     });
 
+    // Log resolved parameters and query results
+    trace.logResolved({
+      symbol: result.metadata.symbol,
+      dateRange: result.metadata.dateRange,
+    });
+    trace.logQueryResult({
+      rowCount: result.rows.length,
+      counts: result.counts,
+    });
+
     // Build voice response from computed data (never fabricates)
     const response = buildVoiceResponse(result, {
       includeAggregates: true,   // Include value totals
@@ -47,18 +63,34 @@ export async function POST(req: NextRequest) {
 
     // Validate consistency before returning
     const consistencyErrors = validateConsistency(response, uiData);
+    let finalResponse = response;
+    let consistencyStatus: 'passed' | 'failed' = 'passed';
+
     if (consistencyErrors.length > 0) {
-      console.error('❌ [Consistency] Detailed trades voice/UI mismatch:', consistencyErrors);
+      consistencyStatus = 'failed';
+      trace.logError(`Consistency check failed: ${consistencyErrors.join(', ')}`);
       // Fall back to safe response using computed data only
-      const safeResponse = result.counts.total === 0
+      finalResponse = result.counts.total === 0
         ? `No trades found for ${result.metadata.symbol}.`
         : `Found ${result.counts.total} trades for ${result.metadata.symbol}. Let me show you the details.`;
-      return NextResponse.json({ response: safeResponse, uiData });
     }
 
-    return NextResponse.json({ response, uiData });
+    // Log response
+    trace.logResponse({
+      voiceText: finalResponse,
+      uiDataSummary: `${uiData.tradeCount} trades, ${uiData.trades.length} rows`,
+    }, consistencyStatus);
+
+    // Complete trace
+    const completedTrace = trace.complete();
+
+    return NextResponse.json({
+      response: finalResponse,
+      uiData,
+      _debug: formatTraceForResponse(completedTrace),
+    });
   } catch (error) {
-    console.error('Detailed trades error:', error);
+    trace.logError(error instanceof Error ? error : String(error));
     return NextResponse.json({
       response: 'Sorry, there was an error getting the detailed trades.',
       uiData: null,

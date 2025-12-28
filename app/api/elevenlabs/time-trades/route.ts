@@ -11,6 +11,7 @@ import { queryTrades, TradeRow } from '@/src/lib/trade-query';
 import { DateFilter } from '@/src/lib/query-resolver';
 import { suggestDataPeriod } from '@/src/lib/data-availability';
 import { formatDisplayDate, formatDateRange } from '@/src/lib/date-utils';
+import { startTrace, formatTraceForResponse } from '@/src/lib/request-trace';
 
 // Format date in PACIFIC TIMEZONE to match UI display
 function formatDateForVoice(dateStr: string): string {
@@ -62,9 +63,10 @@ function buildTradeHighlights(rows: TradeRow[]): string {
 }
 
 export async function POST(req: NextRequest) {
+  const trace = startTrace('time-trades');
+
   try {
     const body = await req.json();
-    console.log('Time trades request body:', JSON.stringify(body, null, 2));
 
     // Extract parameters - support various nesting patterns from ElevenLabs
     const timePeriod = body.time_period || body.parameters?.time_period ||
@@ -78,7 +80,11 @@ export async function POST(req: NextRequest) {
     const dateFilter: DateFilter | undefined = body.date_filter || body.parameters?.date_filter ||
                        body.body?.date_filter || body.body?.parameters?.date_filter;
 
+    // Log input
+    trace.logInput({ symbol, timePeriod, dateFilter, calculation, tradeType });
+
     if (!timePeriod && !dateFilter) {
+      trace.logError('No time period or date filter provided');
       return NextResponse.json({
         response: 'Please specify a time period like "last week", "yesterday", "past 5 days", "Q3", "January", or a date range like "June 1st to the 7th".',
       });
@@ -98,12 +104,30 @@ export async function POST(req: NextRequest) {
     });
 
     const { rows, counts, aggregates, metadata } = result;
+
+    // Log resolved parameters and query results
+    trace.logResolved({
+      symbol: metadata.symbol,
+      dateRange: metadata.dateRange,
+      tradeType: normalizedTradeType,
+    });
+    trace.logQueryResult({
+      rowCount: rows.length,
+      counts,
+    });
+
     const symbolText = metadata.symbol && metadata.symbol !== '(all)' ? ` for ${metadata.symbol}` : '';
     const description = metadata.dateRange.description;
 
     // Handle zero results with data availability suggestion
     if (counts.total === 0) {
       const suggestion = await suggestDataPeriod('TradeData', description);
+
+      trace.logResponse({
+        voiceText: `No trades found${symbolText} for ${description}.`,
+        uiDataSummary: '0 trades',
+      }, 'skipped');
+      const completedTrace = trace.complete();
 
       if (suggestion) {
         return NextResponse.json({
@@ -119,7 +143,8 @@ export async function POST(req: NextRequest) {
               startDate: suggestion.startDate,
               endDate: suggestion.endDate,
             },
-          }
+          },
+          _debug: formatTraceForResponse(completedTrace),
         });
       }
 
@@ -130,7 +155,8 @@ export async function POST(req: NextRequest) {
           timePeriod: description,
           symbol: metadata.symbol === '(all)' ? null : metadata.symbol,
           trades: [],
-        }
+        },
+        _debug: formatTraceForResponse(completedTrace),
       });
     }
 
@@ -173,6 +199,13 @@ export async function POST(req: NextRequest) {
     const end = new Date(endDate);
     const tradingDays = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
 
+    // Log response
+    trace.logResponse({
+      voiceText: response,
+      uiDataSummary: `${counts.total} trades, ${rows.length} rows`,
+    }, 'passed');
+    const completedTrace = trace.complete();
+
     return NextResponse.json({
       response,
       uiData: {
@@ -192,10 +225,11 @@ export async function POST(req: NextRequest) {
           Date: formatDateForVoice(t.Date),
           displayDate: formatDisplayDate(t.Date),
         })),
-      }
+      },
+      _debug: formatTraceForResponse(completedTrace),
     });
   } catch (error) {
-    console.error('Time trades error:', error);
+    trace.logError(error instanceof Error ? error : String(error));
     return NextResponse.json({
       response: 'Sorry, there was an error looking up your trades for that time period.',
     });

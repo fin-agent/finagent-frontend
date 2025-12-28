@@ -104,12 +104,24 @@ interface ErrorUIData {
 // ============================================================================
 
 export async function POST(req: NextRequest) {
+  // Debug: Log raw request info
+  console.log('📊 [Fundamentals] Incoming request');
+  console.log('📊 [Fundamentals] Method:', req.method);
+  console.log('📊 [Fundamentals] Content-Type:', req.headers.get('content-type'));
+
+  let body: FundamentalsRequest;
   try {
-    const body: FundamentalsRequest = await req.json();
-
-    // Debug logging for ElevenLabs requests
+    body = await req.json();
     console.log('📊 [Fundamentals] Request body:', JSON.stringify(body, null, 2));
+  } catch (parseError) {
+    console.error('📊 [Fundamentals] JSON parse error:', parseError);
+    return NextResponse.json({
+      response: 'Invalid request format. Please try again.',
+      uiData: { type: 'error', message: 'JSON parse error' },
+    }, { status: 400 });
+  }
 
+  try {
     const { query_type, symbol, metric_type, statement_type } = body;
 
     // Validate required parameters

@@ -1,7 +1,17 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import { normalizeSymbol, parseOptionSymbol } from '@/src/lib/symbol-utils';
-import { formatCalendarDate } from '@/src/lib/date-utils';
+import { formatCalendarDate, realDateToDemoDate, formatDateForDB } from '@/src/lib/date-utils';
+import { parseTimePeriodToResolvedDates } from '@/src/lib/date-parser';
+
+// LLM-resolved date filter
+interface DateFilter {
+  type: 'range' | 'discrete' | 'relative';
+  startDate?: string;
+  endDate?: string;
+  dates?: string[];
+  description: string;
+}
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -53,6 +63,10 @@ export async function POST(req: NextRequest) {
 
     // ElevenLabs may send symbol directly or nested in various ways
     const symbol = body.symbol || body.parameters?.symbol || body.body?.symbol || body.body?.parameters?.symbol;
+    const timePeriod = body.time_period || body.parameters?.time_period ||
+                       body.body?.time_period || body.body?.parameters?.time_period;
+    const dateFilter: DateFilter | undefined = body.date_filter || body.parameters?.date_filter ||
+                       body.body?.date_filter || body.body?.parameters?.date_filter;
 
     if (!symbol) {
       return NextResponse.json({
@@ -62,12 +76,69 @@ export async function POST(req: NextRequest) {
 
     const normalizedSymbol = normalizeSymbol(symbol);
 
-    const { data, error } = await supabase
+    // Resolve dates - prioritize LLM-resolved dateFilter, fall back to parsing timePeriod
+    let startDate: string | undefined;
+    let endDate: string | undefined;
+    let dates: string[] | undefined;
+    let description: string = timePeriod || '';
+    let resolvedType: 'range' | 'discrete' = 'range';
+
+    if (dateFilter && dateFilter.type === 'range' && dateFilter.startDate && dateFilter.endDate) {
+      // LLM has resolved the dates in real calendar time - convert to demo database dates
+      const [sy, sm, sd] = dateFilter.startDate.split('-').map(Number);
+      const [ey, em, ed] = dateFilter.endDate.split('-').map(Number);
+      const realStart = new Date(sy, sm - 1, sd);
+      const realEnd = new Date(ey, em - 1, ed);
+      startDate = formatDateForDB(realDateToDemoDate(realStart));
+      endDate = formatDateForDB(realDateToDemoDate(realEnd));
+      description = dateFilter.description || timePeriod || 'selected period';
+      console.log(`Using LLM dateFilter: real ${dateFilter.startDate} to ${dateFilter.endDate} -> demo ${startDate} to ${endDate} (${description})`);
+    } else if (dateFilter && dateFilter.type === 'discrete' && dateFilter.dates && dateFilter.dates.length > 0) {
+      // LLM provided discrete dates in real calendar time - convert each to demo dates
+      dates = dateFilter.dates.map(d => {
+        const [y, m, day] = d.split('-').map(Number);
+        const realDate = new Date(y, m - 1, day);
+        return formatDateForDB(realDateToDemoDate(realDate));
+      });
+      resolvedType = 'discrete';
+      description = dateFilter.description || timePeriod || 'selected dates';
+      console.log(`Using LLM discrete dates: ${dateFilter.dates.join(', ')} -> demo ${dates.join(', ')} (${description})`);
+    } else if (timePeriod) {
+      // Fall back to parsing timePeriod string when dateFilter not provided
+      const resolved = parseTimePeriodToResolvedDates(timePeriod);
+      if (resolved) {
+        if (resolved.type === 'discrete' && resolved.dates) {
+          dates = resolved.dates;
+          resolvedType = 'discrete';
+        } else if (resolved.startDate && resolved.endDate) {
+          startDate = resolved.startDate;
+          endDate = resolved.endDate;
+        }
+        description = resolved.description || timePeriod;
+        console.log(`Parsed timePeriod "${timePeriod}": ${resolved.type}, dates: ${dates || `${startDate} to ${endDate}`}`);
+      } else {
+        description = timePeriod;
+        console.log(`Could not parse timePeriod "${timePeriod}", querying all data`);
+      }
+    }
+
+    // Build query with optional date filtering
+    let query = supabase
       .from('TradeData')
       .select('*')
       .eq('AccountCode', ACCOUNT_CODE)
-      .or(`Symbol.eq.${normalizedSymbol},UnderlyingSymbol.eq.${normalizedSymbol}`)
-      .order('Date', { ascending: false });
+      .or(`Symbol.eq.${normalizedSymbol},UnderlyingSymbol.eq.${normalizedSymbol}`);
+
+    // Apply date filters
+    if (resolvedType === 'discrete' && dates && dates.length > 0) {
+      query = query.in('Date', dates);
+    } else if (startDate && endDate) {
+      query = query.gte('Date', startDate).lte('Date', endDate);
+    }
+
+    query = query.order('Date', { ascending: false });
+
+    const { data, error } = await query;
 
     if (error) {
       const uiData: DetailedTradesUIData = {
@@ -90,6 +161,9 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    // Build time period label for responses
+    const periodLabelFor = description ? ` for ${description}` : '';
+
     if (!data || data.length === 0) {
       const uiData: DetailedTradesUIData = {
         symbol: normalizedSymbol,
@@ -106,7 +180,7 @@ export async function POST(req: NextRequest) {
         trades: [],
       };
       return NextResponse.json({
-        response: `No trades found for ${normalizedSymbol}.`,
+        response: `No trades found for ${normalizedSymbol}${periodLabelFor}.`,
         uiData,
       });
     }
@@ -134,7 +208,7 @@ export async function POST(req: NextRequest) {
     const avgValue = data.length > 0 ? totalValue / data.length : 0;
 
     // Build response for TTS
-    let response = `For ${normalizedSymbol}, you have ${data.length} total trades: `;
+    let response = `For ${normalizedSymbol}${periodLabelFor}, you have ${data.length} total trades: `;
     response += `${stockTrades.length} stock trades and ${optionTrades.length} option trades. `;
     response += `${buyCount} buys and ${sellCount} sells. `;
     response += `Total quantity: ${formatNumber(totalQuantity)}`;

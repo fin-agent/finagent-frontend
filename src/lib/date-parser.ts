@@ -5,7 +5,7 @@
  * IMPORTANT: Uses US Pacific timezone for consistent date calculations
  */
 
-import { getDateOffset, formatDateForDB, realDateToDemoDate } from './date-utils';
+import { formatDateForDB, realDateToDemoDate } from './date-utils';
 import type { DateFilter } from './intent-detection/types';
 
 /**
@@ -85,13 +85,9 @@ export function parseTimeExpression(expression: string): ParsedDateQuery | null 
   const today = getPacificToday();
   today.setHours(0, 0, 0, 0);
 
-  const offset = getDateOffset();
-
-  // Helper to format date with offset applied for DB query
+  // Helper to format date for DB query (no offset applied)
   const toDBDate = (date: Date): string => {
-    const adjusted = new Date(date);
-    adjusted.setDate(adjusted.getDate() + offset);
-    return formatDateForDB(adjusted);
+    return formatDateForDB(date);
   };
 
   // Pattern: "today"
@@ -520,18 +516,17 @@ export interface ResolvedDates {
  * @returns ResolvedDates with DB-adjusted dates
  */
 export function resolveDateFilter(filter: DateFilter): ResolvedDates {
-  const offset = getDateOffset();
+  // No offset applied - dates pass through unchanged
 
   // Handle discrete dates (multiple specific dates)
   if (filter.type === 'discrete' && filter.dates && filter.dates.length > 0) {
-    const adjustedDates = filter.dates.map(d => {
+    const formattedDates = filter.dates.map(d => {
       const date = new Date(d);
-      date.setDate(date.getDate() + offset);
       return formatDateForDB(date);
     });
     return {
       type: 'discrete',
-      dates: adjustedDates,
+      dates: formattedDates,
       description: filter.description
     };
   }
@@ -540,8 +535,6 @@ export function resolveDateFilter(filter: DateFilter): ResolvedDates {
   if (filter.type === 'range' && filter.startDate && filter.endDate) {
     const start = new Date(filter.startDate);
     const end = new Date(filter.endDate);
-    start.setDate(start.getDate() + offset);
-    end.setDate(end.getDate() + offset);
     return {
       type: 'range',
       startDate: formatDateForDB(start),

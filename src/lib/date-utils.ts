@@ -46,32 +46,27 @@ export function getDateOffset(): number {
 
 /**
  * Convert a real-world date to the equivalent demo database date
- * e.g., if user asks about "yesterday", convert actual yesterday to demo equivalent
+ * NOTE: Date offsetting has been DISABLED - dates pass through unchanged
  *
  * @param realDate - The actual calendar date
- * @returns Date adjusted to demo timeline
+ * @returns Same date (no offset applied)
  */
 export function realDateToDemoDate(realDate: Date): Date {
-  const offset = getDateOffset();
-  const demoDate = new Date(realDate);
-  demoDate.setDate(demoDate.getDate() + offset);
-  return demoDate;
+  // No offset - return date as-is
+  return new Date(realDate);
 }
 
 /**
  * Convert a demo database date to display-friendly date
- * Subtracts offset so users see dates relative to actual today
+ * NOTE: Date offsetting has been DISABLED - dates pass through unchanged
  *
  * @param demoDateStr - Date string from database (YYYY-MM-DD)
- * @returns Date adjusted to actual timeline
+ * @returns Same date as Date object (no offset applied)
  */
 export function demoDateToRealDate(demoDateStr: string): Date {
-  const offset = getDateOffset();
-  // Parse as local date to avoid timezone issues
+  // Parse as local date, no offset applied
   const [year, month, day] = demoDateStr.split('-').map(Number);
-  const demoDate = new Date(year, month - 1, day);
-  demoDate.setDate(demoDate.getDate() - offset);
-  return demoDate;
+  return new Date(year, month - 1, day);
 }
 
 /**

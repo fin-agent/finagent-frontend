@@ -45,14 +45,63 @@ const supabase = createClient(
 const ACCOUNT_CODE = 'C40421';
 
 // Tool: Get trade summary
-async function getTradeSummary(symbol: string) {
+async function getTradeSummary(symbol: string, timePeriod?: string, dateFilter?: DateFilter) {
   const normalizedSymbol = normalizeSymbol(symbol);
 
-  const { data, error } = await supabase
+  // Resolve dates - prioritize LLM-resolved dateFilter, fall back to parsing timePeriod
+  let startDate: string | undefined;
+  let endDate: string | undefined;
+  let dates: string[] | undefined;
+  let description: string = timePeriod || '';
+  let resolvedType: 'range' | 'discrete' = 'range';
+
+  if (dateFilter && dateFilter.type === 'range' && dateFilter.startDate && dateFilter.endDate) {
+    const [sy, sm, sd] = dateFilter.startDate.split('-').map(Number);
+    const [ey, em, ed] = dateFilter.endDate.split('-').map(Number);
+    const realStart = new Date(sy, sm - 1, sd);
+    const realEnd = new Date(ey, em - 1, ed);
+    startDate = formatDateForDB(realDateToDemoDate(realStart));
+    endDate = formatDateForDB(realDateToDemoDate(realEnd));
+    description = dateFilter.description || timePeriod || 'selected period';
+    console.log(`getTradeSummary: LLM dateFilter real ${dateFilter.startDate} to ${dateFilter.endDate} -> demo ${startDate} to ${endDate}`);
+  } else if (dateFilter && dateFilter.type === 'discrete' && dateFilter.dates && dateFilter.dates.length > 0) {
+    dates = dateFilter.dates.map(d => {
+      const [y, m, day] = d.split('-').map(Number);
+      const realDate = new Date(y, m - 1, day);
+      return formatDateForDB(realDateToDemoDate(realDate));
+    });
+    resolvedType = 'discrete';
+    description = dateFilter.description || timePeriod || 'selected dates';
+    console.log(`getTradeSummary: LLM discrete dates -> demo ${dates.join(', ')}`);
+  } else if (timePeriod) {
+    const resolved = parseTimePeriodToResolvedDates(timePeriod);
+    if (resolved) {
+      if (resolved.type === 'discrete' && resolved.dates) {
+        dates = resolved.dates;
+        resolvedType = 'discrete';
+      } else if (resolved.startDate && resolved.endDate) {
+        startDate = resolved.startDate;
+        endDate = resolved.endDate;
+      }
+      description = resolved.description || timePeriod;
+      console.log(`getTradeSummary: Parsed timePeriod "${timePeriod}" -> ${resolved.type}, dates: ${dates || `${startDate} to ${endDate}`}`);
+    }
+  }
+
+  let query = supabase
     .from('TradeData')
-    .select('SecurityType, TradeType')
+    .select('SecurityType, TradeType, Date')
     .eq('AccountCode', ACCOUNT_CODE)
     .or(`Symbol.eq.${normalizedSymbol},UnderlyingSymbol.eq.${normalizedSymbol}`);
+
+  // Apply date filters
+  if (resolvedType === 'discrete' && dates && dates.length > 0) {
+    query = query.in('Date', dates);
+  } else if (startDate && endDate) {
+    query = query.gte('Date', startDate).lte('Date', endDate);
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     return { error: error.message, symbol: normalizedSymbol };
@@ -68,6 +117,7 @@ async function getTradeSummary(symbol: string) {
     optionTrades,
     warrantTrades,
     totalTrades: stockTrades + optionTrades + warrantTrades,
+    timePeriod: description || undefined,
   };
 }
 
@@ -365,7 +415,11 @@ export async function POST(req: NextRequest) {
     switch (tool_name) {
       case 'getTradeSummary':
       case 'get_trade_summary':
-        result = await getTradeSummary(parameters.symbol);
+        result = await getTradeSummary(
+          parameters.symbol,
+          parameters.time_period || parameters.timePeriod,
+          parameters.date_filter || parameters.dateFilter
+        );
         break;
 
       case 'getDetailedTrades':
@@ -409,7 +463,8 @@ export async function POST(req: NextRequest) {
       if ('error' in result && result.error) {
         responseText = `Error looking up trades: ${result.error}`;
       } else if ('totalTrades' in result) {
-        responseText = `For ${result.symbol}: Found ${result.stockTrades} stock trades and ${result.optionTrades} option trades. Total: ${result.totalTrades} trades.`;
+        const periodText = result.timePeriod ? ` for ${result.timePeriod}` : '';
+        responseText = `For ${result.symbol}${periodText}: Found ${result.stockTrades} stock trades and ${result.optionTrades} option trades. Total: ${result.totalTrades} trades.`;
       }
     } else if (tool_name === 'getDetailedTrades' || tool_name === 'get_detailed_trades') {
       if ('error' in result && result.error) {

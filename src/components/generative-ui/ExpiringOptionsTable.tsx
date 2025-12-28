@@ -393,7 +393,7 @@ export function ExpiringOptionsTable({
 
               return (
                 <tr
-                  key={trade.TradeID}
+                  key={trade.TradeID ? `${trade.TradeID}-${index}` : `trade-${index}`}
                   style={{ backgroundColor: index % 2 === 0 ? palette.surface : palette.void }}
                 >
                   {/* Symbol */}

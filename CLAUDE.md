@@ -515,6 +515,36 @@ return NextResponse.json({
 
 **Key Principle:** Single source of truth - voice webhook computes data once, both voice and UI use that exact data.
 
+### Tool Functions Must Pass time_period
+
+**CRITICAL:** When adding or modifying tool functions in `UnifiedAssistant.tsx`, always pass `time_period` and `date_filter` to webhook endpoints that support time filtering.
+
+The LLM intent classifier extracts `timePeriod` and `dateFilter` from user queries, but these must be explicitly passed to the webhook:
+
+```typescript
+// CORRECT - passes time_period and date_filter
+const voicePayload = await postJson('/api/elevenlabs/trade-summary', {
+  symbol,
+  time_period: timePeriod,
+  date_filter: dateFilter
+});
+
+// WRONG - only passes symbol, ignores time period
+const voicePayload = await postJson('/api/elevenlabs/trade-summary', { symbol });
+```
+
+**Tool functions that require time_period:**
+- `get_trade_summary` - Extract with `getString(parameters, 'time_period')`
+- `get_detailed_trades` - Extract with `getString(parameters, 'time_period')`
+- `get_trade_stats` - Already implemented correctly
+- `get_profitable_trades` - Check if implemented
+- `get_time_based_trades` - Time period is the primary parameter
+- `get_options` - Extract with `getString(parameters, 'time_period')`
+- `get_fees` - Extract with `getString(parameters, 'time_period')`
+- `get_account_balance` - For debit/credit balance queries
+
+**Also update `fetchTradeData` function** for each card type (summary, detailed, stats, etc.) to include `time_period` and `date_filter` in the request body.
+
 ### Data Availability Suggestions (`src/lib/data-availability.ts`)
 
 When queries return no data, the system suggests available data periods:

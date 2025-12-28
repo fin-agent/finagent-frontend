@@ -1714,9 +1714,11 @@ const UnifiedAssistant: React.FC = () => {
       console.log('📊 [Trade Summary Tool] Parameters:', JSON.stringify(parameters, null, 2));
 
       const symbol = getToolSymbol(parameters);
+      const timePeriod = getString(parameters, 'time_period');
+      const dateFilter = parameters.date_filter as Record<string, unknown> | undefined;
 
       // SINGLE FETCH: Voice endpoint returns BOTH response AND uiData
-      const voicePayload = await postJson('/api/elevenlabs/trade-summary', { symbol });
+      const voicePayload = await postJson('/api/elevenlabs/trade-summary', { symbol, time_period: timePeriod, date_filter: dateFilter });
 
       // Store UI data from voice response (guaranteed sync)
       if (voicePayload && typeof voicePayload === 'object' && 'uiData' in voicePayload) {
@@ -1736,13 +1738,16 @@ const UnifiedAssistant: React.FC = () => {
       const rawSymbol = getToolSymbol(parameters);
       const llmSymbol = pendingQueryIntentRef.current?.symbol;
       const symbol = llmSymbol || rawSymbol;
+      const timePeriod = getString(parameters, 'time_period');
+      const dateFilter = parameters.date_filter as Record<string, unknown> | undefined;
 
       console.log('📊 [Detailed Trades] Raw symbol:', rawSymbol);
       console.log('📊 [Detailed Trades] LLM-corrected symbol:', llmSymbol);
       console.log('📊 [Detailed Trades] Using symbol:', symbol);
+      console.log('📊 [Detailed Trades] Time period:', timePeriod);
 
       // SINGLE FETCH: Voice endpoint returns BOTH response AND uiData
-      const voicePayload = await postJson('/api/elevenlabs/detailed-trades', { symbol });
+      const voicePayload = await postJson('/api/elevenlabs/detailed-trades', { symbol, time_period: timePeriod, date_filter: dateFilter });
 
       // Store UI data from voice response (guaranteed sync)
       if (voicePayload && typeof voicePayload === 'object' && 'uiData' in voicePayload) {
@@ -2643,7 +2648,7 @@ const UnifiedAssistant: React.FC = () => {
       } else if (type === 'summary') {
         // SINGLE FETCH: Use voice endpoint with uiData
         endpoint = '/api/elevenlabs/trade-summary';
-        body = { symbol };
+        body = { symbol, time_period: timePeriod, date_filter: extraParams?.dateFilter };
         const res = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -2651,7 +2656,7 @@ const UnifiedAssistant: React.FC = () => {
         });
         const voicePayload = await res.json();
         const uiData = voicePayload?.uiData || voicePayload;
-        return { type, symbol, data: uiData };
+        return { type, symbol, timePeriod, data: uiData };
       } else if (type === 'stats') {
         // SINGLE FETCH: Use voice endpoint with uiData
         const res = await fetch('/api/elevenlabs/trade-stats', {
@@ -2761,7 +2766,7 @@ const UnifiedAssistant: React.FC = () => {
       } else if (type === 'detailed') {
         // SINGLE FETCH: Use voice endpoint with uiData
         endpoint = '/api/elevenlabs/detailed-trades';
-        body = { symbol };
+        body = { symbol, time_period: timePeriod, date_filter: extraParams?.dateFilter };
         const res = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -2769,7 +2774,7 @@ const UnifiedAssistant: React.FC = () => {
         });
         const voicePayload = await res.json();
         const uiData = voicePayload?.uiData || voicePayload;
-        return { type, symbol, data: uiData };
+        return { type, symbol, timePeriod, data: uiData };
       } else if (type === 'options') {
         // SINGLE FETCH: Use voice endpoint with uiData
         endpoint = '/api/elevenlabs/options';

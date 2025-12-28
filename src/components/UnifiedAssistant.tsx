@@ -47,6 +47,13 @@ interface TradeUIData {
   symbol: string;
   tradeType?: 'buy' | 'sell' | 'all';
   timePeriod?: string;
+  dateFilter?: {
+    type: 'range' | 'discrete' | 'relative';
+    startDate?: string;
+    endDate?: string;
+    dates?: string[];
+    description?: string;
+  };
   callPut?: 'call' | 'put';
   expiration?: string;
   queryType?: string; // For options queries
@@ -738,7 +745,13 @@ async function classifyIntentViaAPI(query: string): Promise<QueryIntentWithConfi
       return null;
     }
 
-    const { result } = await response.json() as { result: ClassificationResult | null };
+    const jsonResponse = await response.json() as { result: ClassificationResult | null };
+    const { result } = jsonResponse;
+
+    // DEBUG: Log the raw API response to verify dateFilter is present
+    console.log('🔍 [LLM Classifier] Raw API response:', JSON.stringify(jsonResponse, null, 2));
+    console.log('🔍 [LLM Classifier] result.entities:', result?.entities);
+    console.log('🔍 [LLM Classifier] result.entities.dateFilter:', result?.entities?.dateFilter);
 
     if (!result) {
       console.log('[LLM Classifier] No confident match from GPT');
@@ -755,6 +768,7 @@ async function classifyIntentViaAPI(query: string): Promise<QueryIntentWithConfi
       expiration: result.entities.expiration,
       accountQueryType: result.entities.accountQueryType,
       feeType: result.entities.feeType,
+      dateFilter: result.entities.dateFilter,
       confidence: result.confidence,
     };
   } catch (error) {
@@ -779,803 +793,12 @@ const colors = {
   assistantBubble: '#2a2a2a',
 };
 
-// Known stock symbols for validation
-const KNOWN_SYMBOLS = [
-  'AAPL', 'GOOGL', 'GOOG', 'AMZN', 'MSFT', 'TSLA', 'NVDA', 'META', 'NFLX', 'AMD', 'INTC', 'GME', 'QCOM',
-  'SPY', 'QQQ', 'DIA', 'IWM', 'VTI', 'VOO', 'ARKK', 'XLF', 'XLE', 'XLK',
-];
-
-// Check if response mentions multiple different stock symbols (portfolio-wide query)
-function isPortfolioWideQuery(text: string): boolean {
-  const symbolsFound = new Set<string>();
-
-  // Check for known symbols
-  for (const sym of KNOWN_SYMBOLS) {
-    const regex = new RegExp(`\\b${sym}\\b`, 'gi');
-    if (regex.test(text)) {
-      symbolsFound.add(sym);
-    }
-  }
-
-  // Check for company names
-  const companyMap: Record<string, string> = {
-    'google': 'GOOGL', 'apple': 'AAPL', 'tesla': 'TSLA', 'amazon': 'AMZN',
-    'microsoft': 'MSFT', 'nvidia': 'NVDA', 'meta': 'META', 'netflix': 'NFLX',
-  };
-  for (const [company, symbol] of Object.entries(companyMap)) {
-    const regex = new RegExp(`\\b${company}\\b`, 'gi');
-    if (regex.test(text)) {
-      symbolsFound.add(symbol);
-    }
-  }
-
-  // If 2+ different symbols are mentioned, it's a portfolio-wide query
-  return symbolsFound.size >= 2;
-}
-
-// Extract stock symbol or company name from agent's response
-function extractSymbolOrCompany(text: string): string | null {
-  const commonWords = [
-    'THE', 'FOR', 'AND', 'YOU', 'YOUR', 'ARE', 'HAS', 'HAVE', 'WAS', 'THIS', 'THAT', 'WITH', 'ANY',
-    'CLASS', 'BOTH', 'WERE', 'FIRST', 'TRADE', 'STOCK', 'TOTAL', 'PROFIT', 'FROM', 'EACH', 'ALL',
-    'LAST', 'WEEK', 'MONTH', 'YEAR', 'DAY', 'DAYS', 'TODAY', 'YESTERDAY', 'PAST', 'RECENT',
-    'SHOW', 'HERE', 'SUMMARY', 'DETAIL', 'OPTION', 'OPTIONS', 'SHARES', 'ABOUT', 'JUST', 'ONLY',
-    // Month names (to avoid extracting from date ranges)
-    'JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE', 'JULY', 'AUGUST',
-    'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER', 'JAN', 'FEB', 'MAR', 'APR',
-    'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC',
-    // Day names (to avoid extracting from day-of-week queries)
-    'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY',
-    'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN',
-    // Time indicators (to avoid extracting AM/PM from timestamps like "11:22 AM")
-    'AM', 'PM',
-    // Other common words
-    'EXECUTED', 'OVER', 'DURING', 'BREAKDOWN', 'WOULD', 'LIKE', 'MORE', 'DETAILS',
-    'BOUGHT', 'SOLD', 'WHAT', 'TRADED', 'VALUE', 'PRICE'
-  ];
-
-  // Pattern 0: "profitable trades for Google" or "trades for AAPL"
-  const tradesForMatch = text.match(/(?:profitable\s+)?trades?\s+for\s+(\w+)/i);
-  if (tradesForMatch && !commonWords.includes(tradesForMatch[1].toUpperCase())) {
-    return tradesForMatch[1];
-  }
-
-  // Pattern 1: "for GOOGL shares" or "AAPL trades" - ticker followed by shares/trades
-  const tickerSharesMatch = text.match(/\b([A-Z]{2,5})\s+(?:shares|trades?|stock|position)/i);
-  if (tickerSharesMatch && !commonWords.includes(tickerSharesMatch[1].toUpperCase())) {
-    return tickerSharesMatch[1].toUpperCase();
-  }
-
-  // Pattern 2: "price for Google" or "paid for Apple"
-  const priceForMatch = text.match(/(?:price|paid)\s+(?:for|of)\s+(\w+)/i);
-  if (priceForMatch && !commonWords.includes(priceForMatch[1].toUpperCase())) {
-    return priceForMatch[1];
-  }
-
-  // Pattern 3: "for Google this year" or "sold Tesla this year"
-  const thisYearMatch = text.match(/(?:for|bought|sold)\s+(\w+)\s+(?:this year|in \d{4})/i);
-  if (thisYearMatch && !commonWords.includes(thisYearMatch[1].toUpperCase())) {
-    return thisYearMatch[1];
-  }
-
-  // Pattern 4: Look for standalone tickers (2-5 uppercase) that aren't common words
-  const standaloneMatch = text.match(/\b([A-Z]{2,5})\b/g);
-  if (standaloneMatch) {
-    for (const match of standaloneMatch) {
-      if (!commonWords.includes(match) && /^[A-Z]{2,5}$/.test(match)) {
-        return match;
-      }
-    }
-  }
-
-  // Pattern 5: Company names like "Google", "Apple", "Tesla" etc
-  const companyMatch = text.match(/\b(Google|Apple|Tesla|Amazon|Microsoft|Nvidia|Meta|Netflix|GameStop|Qualcomm|Intel|AMD)\b/i);
-  if (companyMatch) {
-    return companyMatch[1];
-  }
-
-  return null;
-}
-
-// Detect if message contains trade summary data (brief count)
-function detectTradeSummary(text: string): { stockTrades: number; optionTrades: number } | null {
-  // Skip if just checking/looking up
-  const isJustChecking = /I'll check|let me check|checking your|retrieving|looking up|I'll help you find|I'll find|looking that up/i.test(text);
-  if (isJustChecking && !/found|have|total/i.test(text)) return null;
-
-  // Multiple patterns to match different response formats
-  const patterns = [
-    /(\d+)\s*stock\s*(?:trades?)?\s*(?:and)?\s*(\d+)\s*option\s*trades?/i,
-    /have\s+(\d+)\s+stock\s+and\s+(\d+)\s+option\s+trades?/i,
-    /(\d+)\s+stock\s+trades?\s+and\s+(\d+)\s+option/i,
-    /found\s+(\d+)\s+stock\s+trades?\s+and\s+(\d+)\s+option/i,
-  ];
-
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
-    if (match) {
-      return {
-        stockTrades: parseInt(match[1]) || 0,
-        optionTrades: parseInt(match[2]) || 0,
-      };
-    }
-  }
-  return null;
-}
-
-// Detect if message contains detailed trades data (general trade listing)
-function detectDetailedTrades(text: string): boolean {
-  // Skip if just checking/looking up
-  const isJustChecking = /I'll check|let me check|checking your|retrieving|looking up|I'll help you find|I'll find|looking that up/i.test(text);
-  if (isJustChecking && !/here are|detailed|total shares|total cost|found|have|trade/i.test(text)) return false;
-
-  // Check for detailed trade indicators - general trade listing patterns
-  const hasDetailedInfo =
-    // Detailed/all trades patterns
-    /detailed.*trades|total shares purchased|total cost.*\$|profit.?loss.*\$/i.test(text) ||
-    /current value.*\$/i.test(text) ||
-    // General trade listing patterns
-    /here\s+are\s+(your|all|the).*trades/i.test(text) ||
-    /showing\s+(your|all|the).*trades/i.test(text) ||
-    /found\s+\d+.*trades?\s+for/i.test(text) ||  // "found 8 trades for AAPL"
-    /you\s+have\s+\d+.*trades?\s+for/i.test(text) ||  // "you have 8 trades for Apple"
-    /\d+\s+(stock|option)\s+trades?\s+and\s+\d+/i.test(text) ||  // "5 stock trades and 3 option"
-    /trades?\s+for\s+\w+.*include/i.test(text) ||  // "trades for Apple include..."
-    /your\s+\w+\s+trades\s+include/i.test(text) ||  // "your Apple trades include..."
-    // Additional patterns for trade listing responses
-    /\d+\s+trades?\s+for\s+\w+/i.test(text) ||  // "8 trades for AAPL" or "15 trades for Apple"
-    /bought\s+\d+\s+shares/i.test(text) ||  // "bought 100 shares"
-    /sold\s+\d+\s+shares/i.test(text) ||  // "sold 50 shares"
-    /\d+\s+buy\s+trades?\s+and\s+\d+\s+sell/i.test(text) ||  // "5 buy trades and 3 sell"
-    /trades\s+include.*buy.*sell/i.test(text) ||  // "trades include...buy...sell"
-    /listing.*trades/i.test(text) ||  // "listing your trades"
-    /trade\s+history/i.test(text);  // "trade history"
-
-  return hasDetailedInfo;
-}
-
-// Detect if message contains trade stats results (not just "let me check")
-function detectTradeStats(text: string): { tradeType: 'buy' | 'sell' | 'all'; timePeriod?: string } | null {
-  // Skip messages that are just "checking" without actual price results
-  const isJustChecking = /I'll check|let me check|checking your|retrieving|looking up|I'll help you find|I'll find|to find your|looking that up/i.test(text);
-
-  // Check if message contains actual price data (either numeric or spelled out)
-  const hasActualResult =
-    /was\s+(?:\$[\d,]+|\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred)/i.test(text) ||
-    /(?:dollars?|cents?)\s+(?:and|per|for)/i.test(text) ||
-    /\$[\d,]+\.?\d*/i.test(text) ||
-    /highest price|lowest price|average price/i.test(text);
-
-  // If it's just a "checking" message without results, skip
-  if (isJustChecking && !hasActualResult) return null;
-
-  // Must have some actual price/result to show the card
-  if (!hasActualResult) return null;
-
-  const patterns = [
-    // Patterns for sell/sale results
-    /highest.*(?:sale|sell|sold)/i,
-    /(?:sale|sell|sold).*price/i,
-    /lowest.*(?:sale|sell|sold)/i,
-    // Patterns for buy/purchase results
-    /highest.*(?:buy|bought|purchase|paid)/i,
-    /lowest.*(?:buy|bought|purchase|paid)/i,
-    /(?:buy|bought|purchase|paid).*price/i,
-    /price.*(?:paid|bought)/i,
-    // General patterns
-    /average\s+(?:sell|buy|trade|sale|purchase)?\s*price/i,
-    /trade\s+statistics/i,
-    /highest\s+price.*\$/i,
-    /lowest\s+price.*\$/i,
-    /dollars?\s+(?:and|per)/i,
-    /cents?\s+(?:per|for)/i,
-    /statistics\s+for\s+\d{4}/i,
-    // Year-based statistics patterns (full year only)
-    /(?:this|in)\s+(?:\d{4}|year)/i,
-    /for\s+\d{4}/i,
-  ];
-
-  if (patterns.some(p => p.test(text))) {
-    // Determine trade type
-    let tradeType: 'buy' | 'sell' | 'all' = 'all';
-    if (/sold|sell|sale/i.test(text)) tradeType = 'sell';
-    else if (/bought|buy|purchase|paid/i.test(text)) tradeType = 'buy';
-
-    // Extract time period if present
-    let timePeriod: string | undefined;
-    const timePeriodMatch = text.match(/(?:last|past|this)\s+(?:month|week)|yesterday|today/i);
-    if (timePeriodMatch) {
-      timePeriod = timePeriodMatch[0].toLowerCase();
-    }
-
-    return { tradeType, timePeriod };
-  }
-  return null;
-}
-
-// Detect if message contains profitable trades results
-// This should be specific - only match when the response is dedicated to profitable trades analysis
-function detectProfitableTrades(text: string): boolean {
-  // Skip messages that are just "checking" without actual results
-  const isJustChecking = /I'll check|let me check|checking your|retrieving|looking up|I'll help you find|I'll find|to find your|looking that up/i.test(text);
-  if (isJustChecking) return false;
-
-  // Must explicitly be about profitable trades analysis - not just mentioning profit in passing
-  // Look for patterns that indicate a dedicated profitable trades response
-  const isProfitableTradesReport =
-    // Specific profitable trades patterns
-    /\d+\s+profitable\s+trades?/i.test(text) ||  // "1 profitable trade", "5 profitable trades"
-    /profitable\s+trades?\s+for\s+/i.test(text) || // "profitable trades for AAPL"
-    /total\s+profit\s+of\s+\$/i.test(text) ||  // "total profit of $X"
-    /here\s+are\s+your\s+profitable/i.test(text) || // "here are your profitable..."
-    /found\s+\d+\s+profitable/i.test(text) ||  // "found 3 profitable..."
-    /total\s+matched\s+trades/i.test(text) ||  // FIFO matching result
-    /profit.*from\s+matched/i.test(text) ||    // FIFO matched profit
-    // "Most profitable" patterns
-    /most\s+profitable\s+trade/i.test(text) ||  // "most profitable trade"
-    /your\s+most\s+profitable/i.test(text) ||   // "your most profitable..."
-    /biggest\s+profit/i.test(text) ||           // "biggest profit"
-    /largest\s+profit/i.test(text) ||           // "largest profit"
-    /highest\s+profit/i.test(text) ||           // "highest profit"
-    /profit\s+of\s+\$[\d,]+/i.test(text) ||     // "profit of $1,234"
-    /made\s+a\s+profit\s+of/i.test(text) ||     // "made a profit of"
-    /realized\s+(?:a\s+)?profit/i.test(text) || // "realized profit" or "realized a profit"
-    /netted\s+(?:a\s+)?profit/i.test(text);     // "netted a profit"
-
-  // Exclude general trade listing messages that happen to mention profit
-  const isGeneralTradeListing =
-    /here\s+are\s+(your|all|the)\s+.*trades/i.test(text) && !/profitable/i.test(text) ||
-    /showing\s+(your|all|the)\s+trades/i.test(text) ||
-    /you\s+have\s+\d+\s+(stock|option)\s+trades?/i.test(text);
-
-  if (isGeneralTradeListing) return false;
-
-  return isProfitableTradesReport;
-}
-
-// Detect if message contains time-based trades results
-function detectTimeBasedTrades(text: string): { timePeriod: string } | null {
-  // Skip messages that are just "checking" without actual results
-  const isJustChecking = /I'll check|let me check|checking your|retrieving|looking up|I'll help you find|I'll find|to find your|looking that up/i.test(text);
-
-  // Skip if this is a price statistics query (should show TradeStats card instead)
-  // This prevents "average price last month" from triggering TimeBasedTrades
-  const isPriceStatisticsQuery = /(?:highest|lowest|average|max|min)\s+(?:price|premium)|statistics\s+for\s+\d{4}|price\s+(?:was|is)\s+\$/i.test(text);
-  if (isPriceStatisticsQuery) return null;
-
-  // Pattern for spelled-out numbers (one through twenty)
-  const numberWords = '(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|\\d+)';
-
-  // Check for actual time-based results with trade counts
-  const hasTradeCount = /executed\s+\d+\s+trades?|you\s+(?:have|had)\s+\d+\s+trades?|\d+\s+trades?\s+(?:for|on|over|during|last|this|yesterday|today)|no trades found|\d+\s+total\s+trades?|here\s+are\s+(?:all\s+)?your\s+trades?|last\s+(?:five|ten|seven|\d+)\s+days?/i.test(text);
-
-  if (isJustChecking && !hasTradeCount) return null;
-  if (!hasTradeCount) return null;
-
-  // Time period patterns to detect - ordered from most specific to most general
-  const timePatterns = [
-    // "last N days" patterns with spelled-out or numeric numbers (highest priority)
-    { pattern: new RegExp(`(?:for|on|over|during|from)?\\s*(?:the\\s+)?((?:last|past)\\s+${numberWords}\\s+(?:trading\\s+)?days?)`, 'i'), period: null },
-    // Direct "N trades [time period]" patterns
-    { pattern: /\d+\s+trades?\s+(last\s+week|past\s+week)/i, period: 'last week' },
-    { pattern: /\d+\s+trades?\s+(this\s+week)/i, period: 'this week' },
-    { pattern: /\d+\s+trades?\s+(last\s+month|past\s+month)/i, period: 'last month' },
-    { pattern: /\d+\s+trades?\s+(this\s+month)/i, period: 'this month' },
-    { pattern: /\d+\s+trades?\s+(yesterday)/i, period: 'yesterday' },
-    { pattern: /\d+\s+trades?\s+(today)/i, period: 'today' },
-    // Patterns with prepositions
-    { pattern: /(?:for|on|over|during|from)\s+(today)/i, period: 'today' },
-    { pattern: /(?:for|on|over|during|from)\s+(yesterday)/i, period: 'yesterday' },
-    { pattern: /(?:for|on|over|during|from)\s+(?:the\s+)?(last\s+week|past\s+week)/i, period: 'last week' },
-    { pattern: /(?:for|on|over|during|from)\s+(?:the\s+)?(this\s+week)/i, period: 'this week' },
-    { pattern: /(?:for|on|over|during|from)\s+(?:the\s+)?(last\s+month|past\s+month)/i, period: 'last month' },
-    { pattern: /(?:for|on|over|during|from)\s+(?:the\s+)?(this\s+month)/i, period: 'this month' },
-    { pattern: /(?:for|on|over|during|from)\s+(?:the\s+)?(last\s+\d+\s+days?|past\s+\d+\s+days?)/i, period: null },
-    { pattern: /(?:for|on|over|during|from)\s+(?:the\s+)?(last\s+\d+\s+trading\s+days?)/i, period: null },
-    { pattern: /(?:on|for|from)\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)/i, period: null },
-    // Patterns without prepositions - "trades last week" style
-    { pattern: /trades?\s+(last\s+week|past\s+week)/i, period: 'last week' },
-    { pattern: /trades?\s+(this\s+week)/i, period: 'this week' },
-    { pattern: /trades?\s+(last\s+month|past\s+month)/i, period: 'last month' },
-    { pattern: /trades?\s+(this\s+month)/i, period: 'this month' },
-    { pattern: /trades?\s+(yesterday)/i, period: 'yesterday' },
-    { pattern: /trades?\s+(today)/i, period: 'today' },
-    // General fallback patterns
-    { pattern: /(\d+)\s+trading\s+days?/i, period: null },
-    { pattern: /(yesterday|today|last week|this week|last month|this month)/i, period: null },
-  ];
-
-  for (const { pattern, period } of timePatterns) {
-    const match = text.match(pattern);
-    if (match) {
-      const detectedPeriod = period || match[1].toLowerCase();
-      return { timePeriod: detectedPeriod };
-    }
-  }
-
-  return null;
-}
-
-// Detect if message contains average price results (specific single average price query)
-// This is for simple queries like "what was the average price I bought Apple for?"
-function detectAveragePrice(text: string): { tradeType: 'buy' | 'sell' | 'all'; timePeriod: string } | null {
-  // Skip messages that are just "checking" without actual results
-  const isJustChecking = /I'll check|let me check|checking your|retrieving|looking up|I'll help you find|I'll find|to find your|looking that up/i.test(text);
-  if (isJustChecking) return null;
-
-  // Check if this is specifically an average price response (not general stats)
-  // Look for patterns that indicate a focused average price response
-  const isAveragePriceResponse =
-    // "The average price was $X" or "average price for X was $Y"
-    /average\s+price\s+(?:for\s+\w+\s+)?(?:trades?\s+)?(?:last\s+(?:month|week)|this\s+(?:month|week|year))?\s*was\s+\$[\d,.]+/i.test(text) ||
-    // "average price of $X"
-    /average\s+(?:buy|sell|purchase|sale|trade)?\s*price\s+(?:of|is|was)\s+\$[\d,.]+/i.test(text) ||
-    // "$X average" or "averaged $X"
-    /averaged?\s+\$[\d,.]+/i.test(text) ||
-    // "paid an average of $X"
-    /paid\s+an\s+average\s+of\s+\$[\d,.]+/i.test(text);
-
-  if (!isAveragePriceResponse) return null;
-
-  // Check if this is a detailed stats response (should use TradeStats/TimePeriodStats instead)
-  // If it mentions highest AND lowest prices, it's a full stats response
-  const isDetailedStats = /highest\s+price/i.test(text) && /lowest\s+price/i.test(text);
-  if (isDetailedStats) return null;
-
-  // Determine trade type from context
-  let tradeType: 'buy' | 'sell' | 'all' = 'all';
-  // Check buy-related terms first (more specific patterns)
-  if (/(?:bought|buy|purchase|paid\s+for)/i.test(text) && !/(?:sold|sell|sale)/i.test(text)) {
-    tradeType = 'buy';
-  } else if (/(?:sold|sell|sale)/i.test(text) && !/(?:bought|buy|purchase)/i.test(text)) {
-    tradeType = 'sell';
-  }
-  // If both "purchases and sales" are mentioned, keep as 'all'
-
-  // Extract time period
-  let timePeriod = 'this year'; // default
-  const timePeriodMatch = text.match(/(?:last|past|this)\s+(?:month|week|year)/i);
-  if (timePeriodMatch) {
-    timePeriod = timePeriodMatch[0].toLowerCase();
-  } else if (/yesterday/i.test(text)) {
-    timePeriod = 'yesterday';
-  } else if (/today/i.test(text)) {
-    timePeriod = 'today';
-  }
-
-  return { tradeType, timePeriod };
-}
-
-// Detect advanced options query results (short/long calls/puts, filtered option trades)
-function detectAdvancedOptionsQuery(text: string): { tradeType?: 'buy' | 'sell'; callPut?: 'call' | 'put'; timePeriod?: string } | null {
-  // Skip messages that are just "checking" without actual results
-  const isJustChecking = /I'll check|let me check|checking your|retrieving|looking up/i.test(text);
-  if (isJustChecking && !/found|option trades?/i.test(text)) return null;
-
-  // Detect short/long call/put option trade listings
-  const isAdvancedOptions =
-    /(?:short|long)\s+(?:call|put)\s+options?/i.test(text) ||
-    /found\s+\d+\s+(?:option)?\s*trades?.*(?:call|put)/i.test(text) ||
-    /\d+\s+option\s+trades?\s+\(\d+\s+calls?,\s*\d+\s+puts?\)/i.test(text) ||
-    /(?:call|put)\s+options?\s+(?:on|for)\s+\w+/i.test(text);
-
-  if (!isAdvancedOptions) return null;
-
-  // Determine trade type
-  let tradeType: 'buy' | 'sell' | undefined;
-  if (/short|sold|sell/i.test(text)) tradeType = 'sell';
-  else if (/long|bought|buy/i.test(text)) tradeType = 'buy';
-
-  // Determine call/put
-  let callPut: 'call' | 'put' | undefined;
-  if (/\bcall\b/i.test(text) && !/\bput\b/i.test(text)) callPut = 'call';
-  else if (/\bput\b/i.test(text) && !/\bcall\b/i.test(text)) callPut = 'put';
-
-  // Extract time period
-  let timePeriod: string | undefined;
-  const periodMatch = text.match(/(?:last|past|this)\s+(?:\d+\s+)?(?:month|week|year|days?)/i);
-  if (periodMatch) timePeriod = periodMatch[0].toLowerCase();
-
-  return { tradeType, callPut, timePeriod };
-}
-
-// Parse highest/lowest strike data directly from agent text
-// This ensures UI card matches exactly what the agent said (no drift from separate API call)
-interface ParsedHighestStrikeData {
-  isHighest: boolean;
-  callPut: 'call' | 'put';
-  tradeType: 'buy' | 'sell';
-  strike: number;
-  date: string; // Keep as spoken date string
-  expiration: string; // Keep as spoken date string
-  contracts: number;
-  premium: number;
-  symbol: string;
-}
-
-function parseHighestStrikeFromText(text: string): ParsedHighestStrikeData | null {
-  // Skip messages that are just "checking" without actual results
-  const isJustChecking = /I'll check|let me check|checking your|retrieving|looking up/i.test(text);
-  if (isJustChecking && !/(?:highest|lowest|strike|premium|contracts?|bought|sold)/i.test(text)) return null;
-
-  // Detect highest/lowest strike responses
-  const highestMatch = /(?:highest|maximum|top)\s+strike.*(?:call|put)|(?:sold|bought)\s+(?:a\s+quantity\s+of|\d+\s+contracts?\s+of).*\$\d+\s+strike/i.test(text);
-  const lowestMatch = /(?:lowest|minimum|bottom)\s+strike.*(?:call|put)/i.test(text);
-
-  if (!highestMatch && !lowestMatch) return null;
-
-  // Parse strike price: "$220 strike" or "$192.5"
-  const strikeMatch = text.match(/\$(\d+(?:\.\d+)?)\s*strike/i) || text.match(/\$(\d+(?:\.\d+)?)/);
-  const strike = strikeMatch ? parseFloat(strikeMatch[1]) : 0;
-  if (!strike) return null;
-
-  const dateToken = '([A-Z][a-z]+\\s+\\d{1,2}(?:st|nd|rd|th)?,?\\s*\\d{4}|[A-Z][a-z]+\\s+\\d{1,2}(?:st|nd|rd|th)?|\\d{1,2}\\/\\d{1,2}\\/\\d{2,4})';
-  // Parse trade date: "on September 10, 2025", "trade date September 10", or "on 9/10/2025"
-  const dateMatch = text.match(new RegExp(`(?:on|trade\\s+date|traded)\\s+${dateToken}`, 'i'));
-  const dateStr = dateMatch ? dateMatch[1] : '';
-
-  // Parse expiration: "expiration on Oct 17", "expiring Oct 17", "expires on 10/17/2025"
-  const expMatch =
-    text.match(new RegExp(`(?:expir(?:ation|y|es|ing)|expires?)\\s+(?:on\\s+)?${dateToken}`, 'i')) ||
-    text.match(new RegExp(`(?:with\\s+)?expiration\\s+(?:on\\s+)?${dateToken}`, 'i'));
-  const expStr = expMatch ? expMatch[1] : '';
-
-  // Parse contracts: "15 contracts" or "sold 15 contracts"
-  const contractsMatch = text.match(/(\d+)\s+contracts?/i);
-  const contracts = contractsMatch ? parseInt(contractsMatch[1]) : 0;
-
-  // Parse premium: "$1416 in premium" or "collecting $1416"
-  const premiumMatch =
-    text.match(/premium\s+of\s+\$?\s*([\d,]+(?:\.\d+)?)/i) ||
-    text.match(/(?:collecting|collected|received|paid)\s+\$?\s*([\d,]+(?:\.\d+)?)/i) ||
-    text.match(/total\s+premium\s+(?:collected|paid)?\s*(?:was|of|:)?\s*\$?\s*([\d,]+(?:\.\d+)?)/i) ||
-    text.match(/\$?\s*([\d,]+(?:\.\d+)?)\s+(?:in\s+)?premium/i);
-  const premium = premiumMatch ? parseFloat(premiumMatch[1].replace(/,/g, '')) : 0;
-
-  // Determine call/put
-  let callPut: 'call' | 'put' = 'call';
-  if (/\bput\b/i.test(text) && !/\bcall\b/i.test(text)) callPut = 'put';
-
-  // Determine trade type
-  let tradeType: 'buy' | 'sell' = 'sell';
-  if (/\b(?:bought|purchased|buying)\b/i.test(text)) tradeType = 'buy';
-
-  // Extract symbol from text (company name or ticker)
-  let symbol = 'AAPL';
-  const symbolPatterns = [
-    { pattern: /Apple\s+Inc|Apple/i, ticker: 'AAPL' },
-    { pattern: /\bAAPL\b/, ticker: 'AAPL' },
-    { pattern: /Tesla/i, ticker: 'TSLA' },
-    { pattern: /\bTSLA\b/, ticker: 'TSLA' },
-    { pattern: /Google|Alphabet/i, ticker: 'GOOGL' },
-    { pattern: /\bGOOGL?\b/, ticker: 'GOOGL' },
-    { pattern: /Nvidia/i, ticker: 'NVDA' },
-    { pattern: /\bNVDA\b/, ticker: 'NVDA' },
-    { pattern: /\bSPY\b/, ticker: 'SPY' },
-  ];
-  for (const { pattern, ticker } of symbolPatterns) {
-    if (pattern.test(text)) {
-      symbol = ticker;
-      break;
-    }
-  }
-
-  return {
-    isHighest: highestMatch,
-    callPut,
-    tradeType,
-    strike,
-    date: dateStr,
-    expiration: expStr,
-    contracts,
-    premium,
-    symbol
-  };
-}
-
-function isCompleteHighestStrikeParse(parsed: ParsedHighestStrikeData): boolean {
-  return (
-    parsed.strike > 0 &&
-    parsed.contracts > 0 &&
-    parsed.premium > 0 &&
-    parsed.date.trim().length > 0 &&
-    parsed.expiration.trim().length > 0
-  );
-}
-
-// Detect total premium query results
-function detectTotalPremiumQuery(text: string): { tradeType: 'buy' | 'sell'; timePeriod: string } | null {
-  // Skip messages that are just "checking" without actual results
-  const isJustChecking = /I'll check|let me check|checking your|retrieving|looking up/i.test(text);
-  if (isJustChecking) return null;
-
-  // Detect total premium responses
-  const hasPremiumTotal = /(?:total\s+(?:of\s+)?\$[\d,]+.*(?:premium|options?))|(?:paid\s+a\s+total\s+of\s+\$[\d,]+)/i.test(text);
-  if (!hasPremiumTotal) return null;
-
-  // Determine trade type
-  let tradeType: 'buy' | 'sell' = 'buy';
-  if (/(?:collected|sold|selling|received)/i.test(text)) tradeType = 'sell';
-
-  // Extract time period
-  let timePeriod = 'last 12 months';
-  const periodMatch = text.match(/(?:last|past|over\s+the\s+last)\s+(?:\d+\s+)?(?:months?|weeks?|year)/i);
-  if (periodMatch) timePeriod = periodMatch[0].toLowerCase();
-
-  return { tradeType, timePeriod };
-}
-
-// Detect "last/most recent" option trade query results (single trade only)
-// This should NOT match bulk queries like "all options last month"
-function detectLastOptionQuery(text: string): { tradeType: 'buy' | 'sell'; callPut: 'call' | 'put' } | null {
-  // Skip messages that are just "checking" without actual results
-  const isJustChecking = /I'll check|let me check|checking your|retrieving|looking up/i.test(text);
-  if (isJustChecking && !/bought|sold|total value/i.test(text)) return null;
-
-  // IMPORTANT: Skip if this is a bulk/all trades query (multiple trades)
-  // Check for patterns indicating multiple trades across a time period
-  const isBulkQuery = /across\s+\d+\s+trades/i.test(text) ||
-                      /\d+\s+trades?\s+(?:for|on|total)/i.test(text) ||
-                      /covering\s+[\d,]+\s+shares\s+across/i.test(text);
-  if (isBulkQuery) return null;
-
-  // Only match explicit "last/most recent/latest" single trade queries
-  // NOT bulk queries like "You sold 64 call options last month"
-  const hasLastOption =
-    /(?:last|most\s+recent|latest)\s+(?:call|put)\s+options?/i.test(text) ||
-    /your\s+(?:last|most\s+recent|latest)\s+(?:call|put)/i.test(text) ||
-    /the\s+(?:last|most\s+recent|latest)\s+(?:call|put)\s+option/i.test(text);
-
-  if (!hasLastOption) return null;
-
-  // Determine trade type
-  let tradeType: 'buy' | 'sell' = 'buy';
-  if (/\bsold\b/i.test(text)) tradeType = 'sell';
-
-  // Determine call/put
-  let callPut: 'call' | 'put' = 'call';
-  if (/\bput\b/i.test(text) && !/\bcall\b/i.test(text)) callPut = 'put';
-
-  return { tradeType, callPut };
-}
-
-// Detect "all trades" queries that mention BOTH stocks AND options
-// This must run BEFORE detectBulkOptionsQuery to prevent options-only rendering
-function detectAllTradesQuery(text: string): boolean {
-  // Skip messages that are just "checking" without actual results
-  const isJustChecking = /I'll check|let me check|checking your|retrieving|looking up/i.test(text);
-  if (isJustChecking) return false;
-
-  // Check if message mentions BOTH stock trades AND option trades
-  // Pattern: "X stock trades and Y option trades" or "X stock and Y option trades"
-  const hasBothStocksAndOptions = /\d+\s+stock\s+trades?\s+and\s+\d+\s+option\s+trades?/i.test(text) ||
-                                   /\d+\s+stock\s+and\s+\d+\s+option\s+trades?/i.test(text) ||
-                                   /includes?\s+\d+\s+stock\s+trades?\s+and\s+\d+\s+option\s+trades?/i.test(text);
-
-  console.log('🔍 detectAllTradesQuery:', hasBothStocksAndOptions, text.substring(0, 150));
-  return hasBothStocksAndOptions;
-}
-
-// Detect bulk option trade queries (show ALL trades, not just last one)
-// Triggers for queries like "show all short call options on Tesla last month"
-function detectBulkOptionsQuery(text: string): { tradeType?: 'buy' | 'sell'; callPut?: 'call' | 'put'; timePeriod?: string } | null {
-  // Skip messages that are just "checking" without actual results
-  const isJustChecking = /I'll check|let me check|checking your|retrieving|looking up/i.test(text);
-  if (isJustChecking) return null;
-
-  // Must have multiple trades pattern - check various forms of bulk trade responses
-  // 1. "across N trades" - explicitly mentions multiple trades
-  // 2. "covering N shares across" - mentions shares covered
-  // 3. "you sold N call option contracts" - mentions total contracts traded
-  // 4. "N option trades" or "N call/put trades" - mentions trade count (but NOT in "stock trades and option trades" summaries)
-  // 5. "total premium of $X" with contracts mention - bulk sale/purchase
-
-  // Check if this is a portfolio summary with both stock and option trades
-  // Patterns like "5 stock trades and 3 option trades" should NOT trigger bulk options
-  // Must cover all variants from detectAllTradesQuery
-  const isPortfolioSummary = /\d+\s+stock\s+trades?\s+and\s+\d+\s+option\s+trades?/i.test(text) ||
-                             /\d+\s+stock\s+and\s+\d+\s+option\s+trades?/i.test(text) ||
-                             /includes?\s+\d+\s+stock\s+trades?\s+and\s+\d+\s+option\s+trades?/i.test(text) ||
-                             /executed\s+\d+\s+trades?\s+(?:yesterday|today|last\s+week|this\s+week|last\s+month)/i.test(text);
-
-  const hasBulkTrades = !isPortfolioSummary && (
-                        /across\s+\d+\s+trades/i.test(text) ||
-                        /covering\s+[\d,]+\s+shares\s+across/i.test(text) ||
-                        /you\s+(?:bought|sold)\s+\d+\s+(?:call|put)\s+option\s+contracts/i.test(text) ||
-                        /\d+\s+(?:call|put)\s+option\s+contracts/i.test(text) ||
-                        /total\s+premium\s+of\s+\$[\d,]+.*contracts/i.test(text) ||
-                        /collecting\s+total\s+premium/i.test(text) ||
-                        /\d+\s+option\s+trades/i.test(text));
-
-  console.log('🔍 detectBulkOptionsQuery checking:', text.substring(0, 150));
-  console.log('🔍 hasBulkTrades patterns:', {
-    isPortfolioSummary,
-    acrossNTrades: /across\s+\d+\s+trades/i.test(text),
-    coveringShares: /covering\s+[\d,]+\s+shares\s+across/i.test(text),
-    youSoldContracts: /you\s+(?:bought|sold)\s+\d+\s+(?:call|put)\s+option\s+contracts/i.test(text),
-    NContracts: /\d+\s+(?:call|put)\s+option\s+contracts/i.test(text),
-    totalPremiumContracts: /total\s+premium\s+of\s+\$[\d,]+.*contracts/i.test(text),
-    collectingTotalPremium: /collecting\s+total\s+premium/i.test(text),
-    NOptionTrades: /\d+\s+option\s+trades/i.test(text),
-  });
-  console.log('🔍 hasBulkTrades result:', hasBulkTrades, '(skipped if isPortfolioSummary)');
-
-  if (!hasBulkTrades) return null;
-
-  // Determine trade type
-  let tradeType: 'buy' | 'sell' | undefined;
-  if (/\bsold\b|collecting/i.test(text)) tradeType = 'sell';
-  else if (/\bbought\b|paying/i.test(text)) tradeType = 'buy';
-
-  // Determine call/put
-  let callPut: 'call' | 'put' | undefined;
-  if (/\bcall\b/i.test(text) && !/\bput\b/i.test(text)) callPut = 'call';
-  else if (/\bput\b/i.test(text) && !/\bcall\b/i.test(text)) callPut = 'put';
-
-  // Extract time period
-  let timePeriod: string | undefined;
-  const periodMatch = text.match(/(?:last|past|this)\s+(?:month|week|year)/i);
-  if (periodMatch) timePeriod = periodMatch[0].toLowerCase();
-
-  return { tradeType, callPut, timePeriod };
-}
-
-// Detect options expiring query results
-// NOTE: We intentionally do NOT extract tradeType here because the webhook queries ALL options
-// (both bought and sold) but describes them using "bought" or "sold" language based on the majority.
-// If we extracted tradeType from the response text, the UI would filter incorrectly.
-function detectExpiringOptionsQuery(text: string): { expiration: string; tradeType?: 'buy' | 'sell' } | null {
-  // Skip messages that are just "checking" without actual results
-  const isJustChecking = /I'll check|let me check|checking your|retrieving|looking up/i.test(text);
-  if (isJustChecking && !/expiring|positions?/i.test(text)) return null;
-
-  // Detect expiring options responses
-  // Patterns:
-  // - "options expiring tomorrow" / "option contracts expiring tomorrow"
-  // - "expiring tomorrow...options"
-  // - "226 option contracts expiring tomorrow"
-  // - "contracts expiring tomorrow"
-  const hasExpiringOptions =
-    /options?\s+(?:contracts?\s+)?expiring\s+(?:tomorrow|this\s+week|this\s+month)/i.test(text) ||
-    /contracts?\s+expiring\s+(?:tomorrow|this\s+week|this\s+month)/i.test(text) ||
-    /expiring\s+(?:tomorrow|this\s+week|this\s+month).*options?/i.test(text) ||
-    /\d+\s+(?:options?|positions?|contracts?)\s+expir/i.test(text);
-
-  if (!hasExpiringOptions) return null;
-
-  // Extract expiration period
-  let expiration = 'tomorrow';
-  if (/this\s+week/i.test(text)) expiration = 'this week';
-  else if (/this\s+month/i.test(text)) expiration = 'this month';
-
-  // DO NOT extract tradeType - the webhook returns ALL expiring options regardless of buy/sell
-  // The response text may say "that you bought" based on majority, but we want ALL options
-  return { expiration, tradeType: undefined };
-}
-
-// Detect account balance query results
-function detectAccountBalanceQuery(text: string): { queryType: AccountQueryType; timePeriod?: string } | null {
-  // Skip messages that are just "checking" without actual results
-  const isJustChecking = /I'll check|let me check|checking your|retrieving|looking up/i.test(text);
-  if (isJustChecking && !/balance|equity|buying power|margin/i.test(text)) return null;
-
-  // Must have actual balance data (currency amounts)
-  const hasBalanceData = /\$[\d,]+\.?\d*/i.test(text);
-  if (!hasBalanceData) return null;
-
-  // Extract time period if present
-  let timePeriod: string | undefined;
-  const periodMatch = text.match(/(?:for|during|in)\s+(?:the\s+)?(?:last|past|this)\s+(?:month|week|year)/i);
-  if (periodMatch) timePeriod = periodMatch[0].toLowerCase();
-
-  // Detect query type based on patterns
-  // IMPORTANT: Check account_summary FIRST since it contains multiple fields (cash, equity, buying power, etc.)
-  // If we detect "account summary" or multiple balance fields mentioned together, it's a full summary
-  const hasAccountSummary = /account\s+summary/i.test(text);
-  const hasMultipleFields = (
-    /cash\s+balance/i.test(text) &&
-    /account\s+equity/i.test(text) &&
-    /buying\s+power/i.test(text)
-  );
-  if (hasAccountSummary || hasMultipleFields) {
-    return { queryType: 'account_summary', timePeriod };
-  }
-
-  // Cash + equity patterns (but not a full account summary)
-  if (/cash\s+balance/i.test(text) && /account\s+equity/i.test(text)) {
-    return { queryType: 'cash_and_equity', timePeriod };
-  }
-
-  // Margin patterns (check before market value since margin responses may mention stock values)
-  if (/overnight\s+margin|house\s+requirement|margin\s+(?:status|requirement)|fed(?:eral)?\s+requirement/i.test(text)) {
-    return { queryType: 'overnight_margin', timePeriod };
-  }
-
-  // Market value patterns (check before cash/buying power since it mentions stock/options long/short)
-  if (/market\s+value.*position|position.*market\s+value/i.test(text)) {
-    return { queryType: 'market_value', timePeriod };
-  }
-  // Also detect when response lists stock AND option long/short values together
-  if (/stock\s+long.*stock\s+short|options?\s+long.*options?\s+short/i.test(text)) {
-    return { queryType: 'market_value', timePeriod };
-  }
-
-  // Debit balance patterns (check before cash since "debit balance" is more specific)
-  if (/debit\s+balance/i.test(text)) {
-    return { queryType: 'debit_balances', timePeriod };
-  }
-
-  // Credit balance patterns
-  if (/credit\s+balance/i.test(text)) {
-    return { queryType: 'credit_balances', timePeriod };
-  }
-
-  // Buying power patterns
-  if (/buying\s+power|day\s+trading\s+(?:bp|buying\s+power)/i.test(text)) {
-    return { queryType: 'buying_power', timePeriod };
-  }
-
-  // NLV patterns
-  if (/\bNLV\b|net\s+liquidation/i.test(text)) {
-    return { queryType: 'nlv', timePeriod };
-  }
-
-  // Cash balance patterns (checked last among specific queries)
-  if (/cash\s+balance|available\s+(?:cash|funds)|can\s+(?:you\s+)?withdraw/i.test(text)) {
-    return { queryType: 'cash_balance', timePeriod };
-  }
-
-  return null;
-}
-
-// Detect fees and commissions query results
-function detectFeesQuery(text: string): { feeType: FeeType; symbol?: string; timePeriod?: string } | null {
-  // Skip messages that are just "checking" without actual results
-  const isJustChecking = /I'll check|let me check|checking your|retrieving|looking up/i.test(text);
-  if (isJustChecking && !/commission|interest|locate\s+fee/i.test(text)) return null;
-
-  // Must have actual fee data (currency amounts)
-  const hasAmount = /\$[\d,]+\.?\d*/i.test(text);
-  if (!hasAmount) return null;
-
-  // Extract time period
-  let timePeriod: string | undefined;
-  const periodMatch = text.match(/(?:for|during|in)\s+(?:the\s+)?(?:month\s+of\s+)?(?:january|february|march|april|may|june|july|august|september|october|november|december|last|past|this)\s*(?:month|week|year)?/i);
-  if (periodMatch) timePeriod = periodMatch[0].toLowerCase();
-
-  // Extract symbol for locate fees
-  let symbol: string | undefined;
-  const symbolMatch = text.match(/(?:for\s+(?:stock\s+)?|borrowing\s+)([A-Z]{2,5})\b/i);
-  if (symbolMatch) symbol = symbolMatch[1].toUpperCase();
-
-  // Detect fee type
-  // Commission patterns
-  if (/commission(?:s)?(?:\s+you\s+paid|\s+paid|\s+total)/i.test(text)) {
-    return { feeType: 'commission', timePeriod };
-  }
-
-  // Credit interest patterns
-  if (/credit\s+interest|interest\s+(?:earned|credit)/i.test(text)) {
-    return { feeType: 'credit_interest', timePeriod };
-  }
-
-  // Short interest patterns (borrow fees for shorting stocks) - must check BEFORE debit_interest
-  if (/short\s+interest/i.test(text)) {
-    return { feeType: 'short_interest', symbol, timePeriod };
-  }
-
-  // Debit interest patterns (margin interest charges)
-  if (/debit\s+interest|interest\s+(?:paid|you\s+paid)|margin\s+interest|debit\s+balance\s+charge/i.test(text)) {
-    return { feeType: 'debit_interest', timePeriod };
-  }
-
-  // Locate fee patterns
-  if (/locate\s+fee|borrow(?:ing)?\s+(?:stock|fee)|stock\s+borrow/i.test(text)) {
-    return { feeType: 'locate_fee', symbol, timePeriod };
-  }
-
-  return null;
-}
+// NOTE: ALL regex-based detection/parsing functions have been REMOVED.
+// We use LLM-only architecture for intent detection and entity extraction.
+// - Intent classification: LLM classifier at /api/classify-intent
+// - Entity extraction: LLM extracts symbol, timePeriod, dateFilter, etc.
+// - UI data: Tool functions set toolUIDataRef.current with structured webhook data
+// - No text parsing: Webhooks return structured uiData, no need to parse agent text
 
 const UnifiedAssistant: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -1642,6 +865,9 @@ const UnifiedAssistant: React.FC = () => {
   // UI data set directly by client tools - bypasses pattern matching for reliable rendering
   // This ensures voice response and UI card use the SAME data (no drift)
   const toolUIDataRef = useRef<TradeUIData | null>(null);
+  // Promise that resolves when the LLM classifier completes (for voice mode)
+  // Tool functions await this to ensure dateFilter/entities are available
+  const pendingLLMClassifierPromiseRef = useRef<Promise<QueryIntent | null> | null>(null);
 
   function isIdleNudgeMessage(text: string): boolean {
     const trimmed = text.trim();
@@ -1709,6 +935,18 @@ const UnifiedAssistant: React.FC = () => {
       );
     };
 
+    // Helper: Await LLM classifier if it's still running (fixes race condition)
+    // Tool functions call this to ensure dateFilter is available before making API calls
+    const awaitLLMClassifier = async (): Promise<QueryIntent | null> => {
+      if (pendingLLMClassifierPromiseRef.current) {
+        console.log('⏳ [Tool] Awaiting LLM classifier...');
+        const result = await pendingLLMClassifierPromiseRef.current;
+        console.log('✅ [Tool] LLM classifier complete:', result ? `${result.cardType} | dateFilter: ${JSON.stringify(result.dateFilter)}` : 'null');
+        return result;
+      }
+      return pendingQueryIntentRef.current;
+    };
+
     const get_trade_summary = async (parameters: Record<string, unknown>) => {
       // UNIFIED INTENT: "How many trades" and "Show my trades" are the same intent
       // Both now route to detailed-trades endpoint for consistent UI
@@ -1716,16 +954,33 @@ const UnifiedAssistant: React.FC = () => {
       console.log('📊 [Trade Summary Tool] Parameters:', JSON.stringify(parameters, null, 2));
       console.log('📊 [Trade Summary Tool] Note: Routing to detailed-trades for unified experience');
 
-      const symbol = getToolSymbol(parameters);
-      const timePeriod = getString(parameters, 'time_period');
-      const dateFilter = parameters.date_filter as Record<string, unknown> | undefined;
+      // CRITICAL: Await LLM classifier to get dateFilter (fixes race condition)
+      const llmIntent = await awaitLLMClassifier();
+
+      // CRITICAL: Use LLM classifier's values when ElevenLabs doesn't provide them
+      const rawSymbol = getToolSymbol(parameters);
+      const llmSymbol = llmIntent?.symbol;
+      const symbol = llmSymbol || rawSymbol;
+
+      const rawTimePeriod = getString(parameters, 'time_period');
+      const llmTimePeriod = llmIntent?.timePeriod;
+      const timePeriod = rawTimePeriod || llmTimePeriod;
+
+      const rawDateFilter = parameters.date_filter as Record<string, unknown> | undefined;
+      const llmDateFilter = llmIntent?.dateFilter;
+      const dateFilter = rawDateFilter || llmDateFilter;
+
+      console.log('📊 [Trade Summary Tool] Raw symbol:', rawSymbol, '| LLM symbol:', llmSymbol, '| Using:', symbol);
+      console.log('📊 [Trade Summary Tool] Raw timePeriod:', rawTimePeriod, '| LLM timePeriod:', llmTimePeriod, '| Using:', timePeriod);
+      console.log('📊 [Trade Summary Tool] Raw dateFilter:', rawDateFilter, '| LLM dateFilter:', llmDateFilter);
 
       // SINGLE FETCH: Use detailed-trades endpoint which returns full data + counts
       const voicePayload = await postJson('/api/elevenlabs/detailed-trades', { symbol, time_period: timePeriod, date_filter: dateFilter });
 
       // Store UI data as 'detailed' type for TradesTable rendering
+      // CRITICAL: Include timePeriod and dateFilter for proper date filtering in UI
       if (voicePayload && typeof voicePayload === 'object' && 'uiData' in voicePayload) {
-        toolUIDataRef.current = { type: 'detailed', symbol: symbol || '', data: voicePayload.uiData };
+        toolUIDataRef.current = { type: 'detailed', symbol: symbol || '', data: voicePayload.uiData, timePeriod, dateFilter: dateFilter as TradeUIData['dateFilter'] };
         console.log('📊 [Trade Summary Tool] Set toolUIDataRef (detailed type) from voice response:', toolUIDataRef.current);
       }
 
@@ -1737,24 +992,33 @@ const UnifiedAssistant: React.FC = () => {
       console.log('📊 [Detailed Trades Tool] ================================');
       console.log('📊 [Detailed Trades Tool] Parameters:', JSON.stringify(parameters, null, 2));
 
-      // CRITICAL: Use LLM-corrected symbol from intent classifier if available
-      const rawSymbol = getToolSymbol(parameters);
-      const llmSymbol = pendingQueryIntentRef.current?.symbol;
-      const symbol = llmSymbol || rawSymbol;
-      const timePeriod = getString(parameters, 'time_period');
-      const dateFilter = parameters.date_filter as Record<string, unknown> | undefined;
+      // CRITICAL: Await LLM classifier to get dateFilter (fixes race condition)
+      const llmIntent = await awaitLLMClassifier();
 
-      console.log('📊 [Detailed Trades] Raw symbol:', rawSymbol);
-      console.log('📊 [Detailed Trades] LLM-corrected symbol:', llmSymbol);
-      console.log('📊 [Detailed Trades] Using symbol:', symbol);
-      console.log('📊 [Detailed Trades] Time period:', timePeriod);
+      // CRITICAL: Use LLM classifier's values when ElevenLabs doesn't provide them
+      const rawSymbol = getToolSymbol(parameters);
+      const llmSymbol = llmIntent?.symbol;
+      const symbol = llmSymbol || rawSymbol;
+
+      const rawTimePeriod = getString(parameters, 'time_period');
+      const llmTimePeriod = llmIntent?.timePeriod;
+      const timePeriod = rawTimePeriod || llmTimePeriod;
+
+      const rawDateFilter = parameters.date_filter as Record<string, unknown> | undefined;
+      const llmDateFilter = llmIntent?.dateFilter;
+      const dateFilter = rawDateFilter || llmDateFilter;
+
+      console.log('📊 [Detailed Trades] Raw symbol:', rawSymbol, '| LLM symbol:', llmSymbol, '| Using:', symbol);
+      console.log('📊 [Detailed Trades] Raw timePeriod:', rawTimePeriod, '| LLM timePeriod:', llmTimePeriod, '| Using:', timePeriod);
+      console.log('📊 [Detailed Trades] Raw dateFilter:', rawDateFilter, '| LLM dateFilter:', llmDateFilter);
 
       // SINGLE FETCH: Voice endpoint returns BOTH response AND uiData
       const voicePayload = await postJson('/api/elevenlabs/detailed-trades', { symbol, time_period: timePeriod, date_filter: dateFilter });
 
       // Store UI data from voice response (guaranteed sync)
+      // CRITICAL: Include timePeriod and dateFilter for proper date filtering in UI
       if (voicePayload && typeof voicePayload === 'object' && 'uiData' in voicePayload) {
-        toolUIDataRef.current = { type: 'detailed', symbol: symbol || '', data: voicePayload.uiData };
+        toolUIDataRef.current = { type: 'detailed', symbol: symbol || '', data: voicePayload.uiData, timePeriod, dateFilter: dateFilter as TradeUIData['dateFilter'] };
         console.log('📊 [Detailed Trades Tool] Set toolUIDataRef from voice response:', toolUIDataRef.current);
       }
 
@@ -1766,12 +1030,30 @@ const UnifiedAssistant: React.FC = () => {
       console.log('📊 [Trade Stats Tool] ================================');
       console.log('📊 [Trade Stats Tool] Parameters:', JSON.stringify(parameters, null, 2));
 
-      const symbol = getToolSymbol(parameters);
-      const tradeType = getString(parameters, 'trade_type');
-      const timePeriod = getString(parameters, 'time_period');
+      // CRITICAL: Await LLM classifier to get dateFilter (fixes race condition)
+      const llmIntent = await awaitLLMClassifier();
+
+      // CRITICAL: Use LLM classifier's values when ElevenLabs doesn't provide them
+      const rawSymbol = getToolSymbol(parameters);
+      const llmSymbol = llmIntent?.symbol;
+      const symbol = llmSymbol || rawSymbol;
+
+      const rawTradeType = getString(parameters, 'trade_type');
+      const llmTradeType = llmIntent?.tradeType;
+      const tradeType = rawTradeType || llmTradeType;
+
+      const rawTimePeriod = getString(parameters, 'time_period');
+      const llmTimePeriod = llmIntent?.timePeriod;
+      const timePeriod = rawTimePeriod || llmTimePeriod;
+
+      const rawDateFilter = parameters.date_filter as Record<string, unknown> | undefined;
+      const llmDateFilter = llmIntent?.dateFilter;
+      const dateFilter = rawDateFilter || llmDateFilter;
+
+      console.log('📊 [Trade Stats] Using symbol:', symbol, '| timePeriod:', timePeriod, '| dateFilter:', dateFilter);
 
       // SINGLE FETCH: Voice endpoint returns BOTH response AND uiData
-      const voicePayload = await postJson('/api/elevenlabs/trade-stats', { symbol, trade_type: tradeType, time_period: timePeriod });
+      const voicePayload = await postJson('/api/elevenlabs/trade-stats', { symbol, trade_type: tradeType, time_period: timePeriod, date_filter: dateFilter });
 
       // Store UI data from voice response (guaranteed sync)
       // Transform webhook format to UI expected format
@@ -1815,11 +1097,26 @@ const UnifiedAssistant: React.FC = () => {
       console.log('📊 [Profitable Trades Tool] ================================');
       console.log('📊 [Profitable Trades Tool] Parameters:', JSON.stringify(parameters, null, 2));
 
-      const symbol = getToolSymbol(parameters);
-      const timePeriod = getString(parameters, 'time_period');
+      // CRITICAL: Await LLM classifier to get dateFilter (fixes race condition)
+      const llmIntent = await awaitLLMClassifier();
+
+      // CRITICAL: Use LLM classifier's values when ElevenLabs doesn't provide them
+      const rawSymbol = getToolSymbol(parameters);
+      const llmSymbol = llmIntent?.symbol;
+      const symbol = llmSymbol || rawSymbol;
+
+      const rawTimePeriod = getString(parameters, 'time_period');
+      const llmTimePeriod = llmIntent?.timePeriod;
+      const timePeriod = rawTimePeriod || llmTimePeriod;
+
+      const rawDateFilter = parameters.date_filter as Record<string, unknown> | undefined;
+      const llmDateFilter = llmIntent?.dateFilter;
+      const dateFilter = rawDateFilter || llmDateFilter;
+
+      console.log('📊 [Profitable Trades] Using symbol:', symbol, '| timePeriod:', timePeriod, '| dateFilter:', dateFilter);
 
       // SINGLE FETCH: Voice endpoint returns BOTH response AND uiData
-      const voicePayload = await postJson('/api/elevenlabs/profitable-trades', { symbol, time_period: timePeriod });
+      const voicePayload = await postJson('/api/elevenlabs/profitable-trades', { symbol, time_period: timePeriod, date_filter: dateFilter });
 
       // Store UI data from voice response (guaranteed sync)
       // Transform webhook format to UI expected format
@@ -1843,21 +1140,29 @@ const UnifiedAssistant: React.FC = () => {
       console.log('📊 [Time Based Trades Tool] ================================');
       console.log('📊 [Time Based Trades Tool] Parameters:', JSON.stringify(parameters, null, 2));
 
-      // CRITICAL: Use LLM-corrected symbol from intent classifier if available
+      // CRITICAL: Await LLM classifier to get dateFilter (fixes race condition)
+      const llmIntent = await awaitLLMClassifier();
+
+      // CRITICAL: Use LLM classifier's values when ElevenLabs doesn't provide them
       const rawSymbol = getToolSymbol(parameters);
-      const llmSymbol = pendingQueryIntentRef.current?.symbol;
+      const llmSymbol = llmIntent?.symbol;
       const symbol = llmSymbol || rawSymbol;
 
-      console.log('📊 [Time Based Trades] Raw symbol:', rawSymbol);
-      console.log('📊 [Time Based Trades] LLM-corrected symbol:', llmSymbol);
-      console.log('📊 [Time Based Trades] Using symbol:', symbol);
+      const rawTimePeriod = getString(parameters, 'time_period');
+      const llmTimePeriod = llmIntent?.timePeriod;
+      const timePeriod = rawTimePeriod || llmTimePeriod;
 
-      const timePeriod = getString(parameters, 'time_period');
+      const rawDateFilter = parameters.date_filter as Record<string, unknown> | undefined;
+      const llmDateFilter = llmIntent?.dateFilter;
+      const dateFilter = rawDateFilter || llmDateFilter;
+
       const calculation = getString(parameters, 'calculation');
       const tradeType = getString(parameters, 'trade_type');
 
+      console.log('📊 [Time Based Trades] Using symbol:', symbol, '| timePeriod:', timePeriod, '| dateFilter:', dateFilter);
+
       // SINGLE FETCH: Voice endpoint returns BOTH response AND uiData
-      const voicePayload = await postJson('/api/elevenlabs/time-trades', { symbol, time_period: timePeriod, calculation, trade_type: tradeType });
+      const voicePayload = await postJson('/api/elevenlabs/time-trades', { symbol, time_period: timePeriod, calculation, trade_type: tradeType, date_filter: dateFilter });
 
       // Store UI data from voice response (guaranteed sync)
       if (voicePayload && typeof voicePayload === 'object' && 'uiData' in voicePayload) {
@@ -1873,18 +1178,42 @@ const UnifiedAssistant: React.FC = () => {
       console.log('📊 [Advanced Trades Tool] ================================');
       console.log('📊 [Advanced Trades Tool] Parameters:', JSON.stringify(parameters, null, 2));
 
-      const symbol = getToolSymbol(parameters);
+      // CRITICAL: Await LLM classifier to get dateFilter (fixes race condition)
+      const llmIntent = await awaitLLMClassifier();
+
+      // CRITICAL: Use LLM classifier's values when ElevenLabs doesn't provide them
+      const rawSymbol = getToolSymbol(parameters);
+      const llmSymbol = llmIntent?.symbol;
+      const symbol = llmSymbol || rawSymbol;
+
+      const rawTradeType = getString(parameters, 'trade_type');
+      const llmTradeType = llmIntent?.tradeType;
+      const tradeType = rawTradeType || llmTradeType;
+
+      const rawCallPut = getString(parameters, 'call_put');
+      const llmCallPut = llmIntent?.callPut;
+      const callPut = rawCallPut || llmCallPut;
+
+      const rawTimePeriod = getString(parameters, 'time_period');
+      const llmTimePeriod = llmIntent?.timePeriod;
+      const timePeriod = rawTimePeriod || llmTimePeriod;
+
+      const rawDateFilter = parameters.date_filter as Record<string, unknown> | undefined;
+      const llmDateFilter = llmIntent?.dateFilter;
+      const dateFilter = rawDateFilter || llmDateFilter;
+
       const securityType = getString(parameters, 'security_type');
-      const tradeType = getString(parameters, 'trade_type');
-      const callPut = getString(parameters, 'call_put');
       const fromDate = getString(parameters, 'from_date');
       const toDate = getString(parameters, 'to_date');
-      const expiration = getString(parameters, 'expiration');
+      const expiration = getString(parameters, 'expiration') || llmIntent?.expiration;
+
+      console.log('📊 [Advanced Trades] Using symbol:', symbol, '| timePeriod:', timePeriod, '| dateFilter:', dateFilter);
 
       // SINGLE FETCH: Voice endpoint returns BOTH response AND uiData
       const voicePayload = await postJson('/api/elevenlabs/advanced-query', {
         symbol, security_type: securityType, trade_type: tradeType, call_put: callPut,
         from_date: fromDate, to_date: toDate, expiration,
+        time_period: timePeriod, date_filter: dateFilter,
         strike: parameters['strike'], aggregation: getString(parameters, 'aggregation'),
         limit: parameters['limit'], order_by: getString(parameters, 'order_by'),
       });
@@ -1909,11 +1238,27 @@ const UnifiedAssistant: React.FC = () => {
     const get_account_balance = async (parameters: Record<string, unknown>) => {
       console.log('💰 [Account Balance Tool] ================================');
       console.log('💰 [Account Balance Tool] Parameters:', JSON.stringify(parameters, null, 2));
-      const queryType = getString(parameters, 'query_type');
-      const timePeriod = getString(parameters, 'time_period');
+
+      // CRITICAL: Await LLM classifier to get dateFilter (fixes race condition)
+      const llmIntent = await awaitLLMClassifier();
+
+      // CRITICAL: Use LLM classifier's values when ElevenLabs doesn't provide them
+      const rawQueryType = getString(parameters, 'query_type');
+      const llmQueryType = llmIntent?.accountQueryType;
+      const queryType = rawQueryType || llmQueryType;
+
+      const rawTimePeriod = getString(parameters, 'time_period');
+      const llmTimePeriod = llmIntent?.timePeriod;
+      const timePeriod = rawTimePeriod || llmTimePeriod;
+
+      const rawDateFilter = parameters.date_filter as Record<string, unknown> | undefined;
+      const llmDateFilter = llmIntent?.dateFilter;
+      const dateFilter = rawDateFilter || llmDateFilter;
+
+      console.log('💰 [Account Balance] Using queryType:', queryType, '| timePeriod:', timePeriod, '| dateFilter:', dateFilter);
 
       // SINGLE FETCH: Voice endpoint returns BOTH response AND uiData
-      const voicePayload = await postJson('/api/elevenlabs/account-balance', { query_type: queryType, time_period: timePeriod });
+      const voicePayload = await postJson('/api/elevenlabs/account-balance', { query_type: queryType, time_period: timePeriod, date_filter: dateFilter });
 
       // Store UI data from voice response (guaranteed sync)
       if (voicePayload && typeof voicePayload === 'object' && 'uiData' in voicePayload) {
@@ -1935,21 +1280,33 @@ const UnifiedAssistant: React.FC = () => {
     const get_fees = async (parameters: Record<string, unknown>) => {
       console.log('💸 [Fees Tool] ================================');
       console.log('💸 [Fees Tool] Parameters:', JSON.stringify(parameters, null, 2));
-      const feeType = getString(parameters, 'fee_type');
-      const timePeriod = getString(parameters, 'time_period');
+
+      // CRITICAL: Await LLM classifier to get dateFilter (fixes race condition)
+      const llmIntent = await awaitLLMClassifier();
+
+      // CRITICAL: Use LLM classifier's values when ElevenLabs doesn't provide them
+      const rawFeeType = getString(parameters, 'fee_type');
+      const llmFeeType = llmIntent?.feeType;
+      const feeType = rawFeeType || llmFeeType;
+
+      const rawTimePeriod = getString(parameters, 'time_period');
+      const llmTimePeriod = llmIntent?.timePeriod;
+      const timePeriod = rawTimePeriod || llmTimePeriod;
+
+      const rawDateFilter = parameters.date_filter as Record<string, unknown> | undefined;
+      const llmDateFilter = llmIntent?.dateFilter;
+      const dateFilter = rawDateFilter || llmDateFilter;
 
       // CRITICAL: Use LLM-corrected symbol from intent classifier if available
       // This fixes speech-to-text errors like "M10" → "MTEN"
       const rawSymbol = getToolSymbol(parameters);
-      const llmSymbol = pendingQueryIntentRef.current?.symbol;
+      const llmSymbol = llmIntent?.symbol;
       const symbol = llmSymbol || rawSymbol;
 
-      console.log('💸 [Fees Tool] Raw symbol from ElevenLabs:', rawSymbol);
-      console.log('💸 [Fees Tool] LLM-corrected symbol:', llmSymbol);
-      console.log('💸 [Fees Tool] Using symbol:', symbol);
+      console.log('💸 [Fees Tool] Using symbol:', symbol, '| feeType:', feeType, '| timePeriod:', timePeriod, '| dateFilter:', dateFilter);
 
       // SINGLE FETCH: Voice endpoint returns BOTH response AND uiData
-      const voicePayload = await postJson('/api/elevenlabs/fees', { fee_type: feeType, time_period: timePeriod, symbol });
+      const voicePayload = await postJson('/api/elevenlabs/fees', { fee_type: feeType, time_period: timePeriod, symbol, date_filter: dateFilter });
 
       // Store UI data from voice response (guaranteed sync)
       if (voicePayload && typeof voicePayload === 'object' && 'uiData' in voicePayload) {
@@ -1975,12 +1332,37 @@ const UnifiedAssistant: React.FC = () => {
       console.log('📈 [Options Tool] ================================');
       console.log('📈 [Options Tool] Parameters:', JSON.stringify(parameters, null, 2));
 
+      // CRITICAL: Await LLM classifier to get dateFilter (fixes race condition)
+      const llmIntent = await awaitLLMClassifier();
+
+      // CRITICAL: Use LLM classifier's values when ElevenLabs doesn't provide them
       const queryType = getString(parameters, 'query_type') || 'bulk';
-      const symbol = getToolSymbol(parameters);
-      const callPut = getString(parameters, 'call_put');
-      const tradeType = getString(parameters, 'trade_type');
-      const timePeriod = getString(parameters, 'time_period');
-      const expiration = getString(parameters, 'expiration');
+
+      const rawSymbol = getToolSymbol(parameters);
+      const llmSymbol = llmIntent?.symbol;
+      const symbol = llmSymbol || rawSymbol;
+
+      const rawCallPut = getString(parameters, 'call_put');
+      const llmCallPut = llmIntent?.callPut;
+      const callPut = rawCallPut || llmCallPut;
+
+      const rawTradeType = getString(parameters, 'trade_type');
+      const llmTradeType = llmIntent?.tradeType;
+      const tradeType = rawTradeType || llmTradeType;
+
+      const rawTimePeriod = getString(parameters, 'time_period');
+      const llmTimePeriod = llmIntent?.timePeriod;
+      const timePeriod = rawTimePeriod || llmTimePeriod;
+
+      const rawDateFilter = parameters.date_filter as Record<string, unknown> | undefined;
+      const llmDateFilter = llmIntent?.dateFilter;
+      const dateFilter = rawDateFilter || llmDateFilter;
+
+      const rawExpiration = getString(parameters, 'expiration');
+      const llmExpiration = llmIntent?.expiration;
+      const expiration = rawExpiration || llmExpiration;
+
+      console.log('📈 [Options] Using symbol:', symbol, '| timePeriod:', timePeriod, '| dateFilter:', dateFilter);
 
       // SINGLE FETCH: Voice endpoint returns BOTH response AND uiData
       const voicePayload = await postJson('/api/elevenlabs/options', {
@@ -1990,12 +1372,23 @@ const UnifiedAssistant: React.FC = () => {
         trade_type: tradeType,
         time_period: timePeriod,
         expiration,
+        date_filter: dateFilter,
       });
 
       // Store UI data from voice response (guaranteed sync)
+      // Map queryType to specific UI types for renderTradeUI
       if (voicePayload && typeof voicePayload === 'object' && 'uiData' in voicePayload) {
+        const typeMap: Record<string, TradeUIData['type']> = {
+          'highest_strike': 'highest-strike',
+          'total_premium': 'total-premium',
+          'last': 'last-option',
+          'expiring': 'expiring-options',
+          'bulk': 'advanced-options',
+        };
+        const uiType = typeMap[queryType] || 'advanced-options';
+
         toolUIDataRef.current = {
-          type: 'options',
+          type: uiType,
           queryType,
           symbol: symbol || '',
           callPut: callPut as 'call' | 'put' | undefined,
@@ -2087,10 +1480,8 @@ const UnifiedAssistant: React.FC = () => {
         }
         lastProcessedTextMessageRef.current = { content: assistantContent, timestamp: now };
 
-        // For assistant messages, check if we should render trade UI
-        const symbol = extractSymbolOrCompany(assistantContent);
+        // For assistant messages, log the message (symbol comes from LLM classifier, not regex)
         console.log('🔍 [Text Mode] Message:', assistantContent.substring(0, 150));
-        console.log('🔍 [Text Mode] Extracted symbol:', symbol);
 
         const newMessageId = `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
         const newMessage: TranscriptMessage = {
@@ -2134,25 +1525,10 @@ const UnifiedAssistant: React.FC = () => {
             pendingQueryIntentRef.current = null;
             pendingTradeUIRequestRef.current = null;
 
-            // SPECIAL CASE: highest-strike must match assistant narrative (dates), so parse from text first
-            if (pendingIntent.cardType === 'highest-strike') {
-              const parsedStrike = parseHighestStrikeFromText(message.message);
-              if (parsedStrike && isCompleteHighestStrikeParse(parsedStrike)) {
-                if (pendingIntent.symbol) parsedStrike.symbol = pendingIntent.symbol;
-                tradeUI = {
-                  type: 'highest-strike',
-                  symbol: parsedStrike.symbol,
-                  tradeType: parsedStrike.tradeType,
-                  callPut: parsedStrike.callPut,
-                  data: {
-                    parsedFromText: true,
-                    ...parsedStrike,
-                  }
-                };
-              }
-            }
+            // NOTE: highest-strike and other option types are now handled by tool functions
+            // setting toolUIDataRef.current with the correct type. No text parsing needed.
 
-            // Otherwise, prefer the prefetched trade UI if available
+            // Prefer the prefetched trade UI if available
             if (!tradeUI && pendingTradeUIRequest) {
               const data = await pendingTradeUIRequest;
               if (data) tradeUI = data;
@@ -2171,6 +1547,7 @@ const UnifiedAssistant: React.FC = () => {
                   expiration: pendingIntent.expiration,
                   accountQueryType: pendingIntent.accountQueryType,
                   feeType: pendingIntent.feeType,
+                  dateFilter: pendingIntent.dateFilter,
                 }
               );
               if (data) {
@@ -2182,121 +1559,11 @@ const UnifiedAssistant: React.FC = () => {
             }
           }
 
-          // FALLBACK: Regex-based detection on agent's response
-          // Skip fallback if an intent-based card was recently rendered (within 5 seconds)
-          // This prevents subsequent message chunks from ElevenLabs from triggering wrong cards
-          const timeSinceIntentCard = Date.now() - lastIntentCardRenderedAtRef.current;
-          const skipFallback = timeSinceIntentCard < 5000;
-          if (skipFallback && !tradeUI) {
-            console.log('🔍 [Text Mode] Skipping fallback - intent card rendered', timeSinceIntentCard, 'ms ago');
-          }
-          if (!tradeUI && !skipFallback) {
-            // Check for account balance queries FIRST (highest priority)
-            const accountMatch = detectAccountBalanceQuery(message.message);
-            console.log('🔍 [Text Mode] Account balance match:', accountMatch);
-            if (accountMatch) {
-              console.log('🔍 [Text Mode] Account balance query detected:', accountMatch.queryType);
-              const data = await fetchTradeData('', 'account-balance', undefined, accountMatch.timePeriod, { accountQueryType: accountMatch.queryType });
-              console.log('🔍 [Text Mode] Account balance data:', data);
-              if (data) tradeUI = data;
-            }
-          }
-          if (!tradeUI && !skipFallback) {
-            const feesMatch = detectFeesQuery(message.message);
-            console.log('🔍 [Text Mode] Fees match:', feesMatch);
-            if (feesMatch) {
-              console.log('🔍 [Text Mode] Fees query detected:', feesMatch.feeType);
-              const data = await fetchTradeData(feesMatch.symbol || '', 'fees', undefined, feesMatch.timePeriod, { feeType: feesMatch.feeType });
-              console.log('🔍 [Text Mode] Fees data:', data);
-              if (data) tradeUI = data;
-            }
-          }
-          if (!tradeUI && !skipFallback) {
-            const expiringMatch = detectExpiringOptionsQuery(message.message);
-            if (expiringMatch) {
-              const data = await fetchTradeData(symbol || '', 'expiring-options', expiringMatch.tradeType, undefined, { expiration: expiringMatch.expiration });
-              if (data) tradeUI = data;
-            }
-          }
-          if (!tradeUI && !skipFallback && detectAllTradesQuery(message.message) && symbol) {
-            const data = await fetchTradeData(symbol, 'detailed');
-            if (data) tradeUI = data;
-          }
-          if (!tradeUI && !skipFallback) {
-            const bulkOptionsMatch = detectBulkOptionsQuery(message.message);
-            if (bulkOptionsMatch) {
-              const data = await fetchTradeData(symbol || '', 'advanced-options', bulkOptionsMatch.tradeType, bulkOptionsMatch.timePeriod, { callPut: bulkOptionsMatch.callPut });
-              if (data) tradeUI = data;
-            } else {
-              const lastOptionMatch = detectLastOptionQuery(message.message);
-              if (lastOptionMatch && symbol) {
-                const data = await fetchTradeData(symbol, 'last-option', lastOptionMatch.tradeType, undefined, { callPut: lastOptionMatch.callPut });
-                if (data) tradeUI = data;
-              }
-            }
-          }
-          if (!tradeUI && !skipFallback) {
-            const parsedStrike = parseHighestStrikeFromText(message.message);
-            if (parsedStrike && isCompleteHighestStrikeParse(parsedStrike)) {
-              console.log('🎯 [Text Parse] Using parsed highest-strike data from agent text:', parsedStrike);
-              tradeUI = {
-                type: 'highest-strike',
-                symbol: parsedStrike.symbol,
-                tradeType: parsedStrike.tradeType,
-                callPut: parsedStrike.callPut,
-                data: {
-                  parsedFromText: true,
-                  ...parsedStrike
-                }
-              };
-            } else {
-              const premiumMatch = detectTotalPremiumQuery(message.message);
-              if (premiumMatch) {
-                const data = await fetchTradeData(symbol || '', 'total-premium', premiumMatch.tradeType, premiumMatch.timePeriod);
-                if (data) tradeUI = data;
-              } else {
-                const advancedMatch = detectAdvancedOptionsQuery(message.message);
-                if (advancedMatch) {
-                  const data = await fetchTradeData(symbol || '', 'advanced-options', advancedMatch.tradeType, advancedMatch.timePeriod, { callPut: advancedMatch.callPut });
-                  if (data) tradeUI = data;
-                } else {
-                  const timeMatch = detectTimeBasedTrades(message.message);
-                  if (timeMatch) {
-                    const isPortfolioQuery = isPortfolioWideQuery(message.message);
-                    const isDayOfWeekQuery = /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(timeMatch.timePeriod);
-                    const timeSymbol = (isPortfolioQuery || (isDayOfWeekQuery && !symbol)) ? null : symbol;
-                    const data = await fetchTradeData(timeSymbol || '', 'time-based', undefined, timeMatch.timePeriod);
-                    if (data) tradeUI = data;
-                  } else if (symbol) {
-                    const avgPriceMatch = detectAveragePrice(message.message);
-                    if (avgPriceMatch) {
-                      const data = await fetchTradeData(symbol, 'average-price', avgPriceMatch.tradeType, avgPriceMatch.timePeriod);
-                      if (data) tradeUI = data;
-                    } else {
-                      const statsMatch = detectTradeStats(message.message);
-                      if (statsMatch) {
-                        const data = await fetchTradeData(symbol, 'stats', statsMatch.tradeType, statsMatch.timePeriod);
-                        if (data) tradeUI = data;
-                      } else if (detectProfitableTrades(message.message)) {
-                        const data = await fetchTradeData(symbol, 'profitable');
-                        if (data) tradeUI = data;
-                      } else if (detectDetailedTrades(message.message)) {
-                        const data = await fetchTradeData(symbol, 'detailed');
-                        if (data) tradeUI = data;
-                      } else {
-                        // Unified: "how many trades" and "show trades" are the same intent
-                        // Both route to 'detailed' which returns full trade list + counts
-                        const summaryMatch = detectTradeSummary(message.message);
-                        if (summaryMatch) {
-                          const data = await fetchTradeData(symbol, 'detailed');
-                          if (data) tradeUI = data;
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
+          // NOTE: Regex-based fallbacks have been REMOVED.
+          // The LLM classifier + pendingIntent is the single source of truth for text mode.
+          // If pendingIntent didn't provide data, there's no fallback.
+          if (!tradeUI) {
+            console.log('⚠️ [Text Mode] No UI data available - LLM intent classification did not match');
           }
 
           if (tradeUI) {
@@ -2779,7 +2046,7 @@ const UnifiedAssistant: React.FC = () => {
         });
         const voicePayload = await res.json();
         const uiData = voicePayload?.uiData || voicePayload;
-        return { type, symbol, timePeriod, data: uiData };
+        return { type, symbol, timePeriod, dateFilter: extraParams?.dateFilter as TradeUIData['dateFilter'], data: uiData };
       } else if (type === 'options') {
         // SINGLE FETCH: Use voice endpoint with uiData
         endpoint = '/api/elevenlabs/options';
@@ -3024,31 +2291,34 @@ const UnifiedAssistant: React.FC = () => {
 
             // LLM classifier (async) - for logging and card type inference only
             // No fetchTradeData calls - webhook uiData is the data source
-            void (async () => {
+            // CRITICAL: Store the Promise so tool functions can await it for dateFilter
+            const classifierPromise = (async (): Promise<QueryIntent | null> => {
               console.log('🤖 [LLM-ONLY] ================================');
               console.log('🤖 [LLM-ONLY] Query:', userQuery);
               console.log('🤖 [LLM-ONLY] Classifying intent (no prefetch - using webhook uiData)...');
 
               const llmIntent = await classifyIntentViaAPI(userQuery);
 
-              if (pendingVoiceIntentTokenRef.current !== token) return;
+              if (pendingVoiceIntentTokenRef.current !== token) return null;
 
               if (llmIntent) {
-                console.log('🤖 [LLM-ONLY] ✅ Intent:', llmIntent.cardType, '| symbol:', llmIntent.symbol, '| timePeriod:', llmIntent.timePeriod);
+                console.log('🤖 [LLM-ONLY] ✅ Intent:', llmIntent.cardType, '| symbol:', llmIntent.symbol, '| timePeriod:', llmIntent.timePeriod, '| dateFilter:', JSON.stringify(llmIntent.dateFilter));
                 // Store intent for card type inference (used if toolUIDataRef not set)
                 pendingQueryIntentRef.current = llmIntent;
+                return llmIntent;
               } else {
                 console.log('🤖 [LLM-ONLY] ❌ No intent detected');
+                return null;
               }
             })();
+            pendingLLMClassifierPromiseRef.current = classifierPromise;
           }
         }
 
         // For assistant messages, compute trade UI asynchronously so the text renders first
         if (role === 'assistant') {
-          const symbol = extractSymbolOrCompany(assistantContent);
+          // Symbol comes from LLM classifier, not regex extraction
           console.log('🔍 [Voice Mode] Message:', assistantContent.substring(0, 100));
-          console.log('🔍 [Voice Mode] Extracted symbol:', symbol);
 
           void (async () => {
             if (suppressNextTradeUICardRef.current) {
@@ -3056,6 +2326,13 @@ const UnifiedAssistant: React.FC = () => {
               return;
             }
             let tradeUI: TradeUIData | undefined;
+
+            // DEBUG: Log the state of toolUIDataRef.current
+            console.log('🔍 [Voice Mode] toolUIDataRef.current:', toolUIDataRef.current ? 'SET' : 'NULL');
+            if (toolUIDataRef.current) {
+              console.log('🔍 [Voice Mode] toolUIDataRef type:', toolUIDataRef.current.type);
+              console.log('🔍 [Voice Mode] toolUIDataRef data has trades:', !!(toolUIDataRef.current.data as { trades?: unknown[] })?.trades);
+            }
 
             // HIGHEST PRIORITY: Use UI data set directly by client tools (single source of truth)
             if (toolUIDataRef.current) {
@@ -3076,24 +2353,8 @@ const UnifiedAssistant: React.FC = () => {
               pendingQueryIntentRef.current = null;
               pendingTradeUIRequestRef.current = null;
 
-	              if (pendingIntent.cardType === 'highest-strike' && !pendingTradeUIRequest) {
-	                console.log('🎯 [Voice Intent-Based] highest-strike detected - using text parsing fallback');
-	                const parsedStrike = parseHighestStrikeFromText(message.message);
-	                if (parsedStrike && isCompleteHighestStrikeParse(parsedStrike)) {
-	                  if (pendingIntent.symbol) parsedStrike.symbol = pendingIntent.symbol;
-	                  console.log('🎯 [Voice Intent-Based] Parsed highest-strike from text:', parsedStrike);
-	                  tradeUI = {
-	                    type: 'highest-strike',
-	                    symbol: parsedStrike.symbol,
-	                    tradeType: parsedStrike.tradeType,
-	                    callPut: parsedStrike.callPut,
-	                    data: {
-	                      parsedFromText: true,
-	                      ...parsedStrike
-	                    }
-	                  };
-	                }
-	              }
+              // NOTE: highest-strike and other option types are now handled by tool functions
+              // setting toolUIDataRef.current with the correct type. No text parsing needed.
 
               // NOTE: In new LLM-only architecture, pendingTradeUIRequest is null
               // (we don't prefetch in voice mode - webhook uiData is the source)
@@ -3117,6 +2378,7 @@ const UnifiedAssistant: React.FC = () => {
                     expiration: pendingIntent.expiration,
                     accountQueryType: pendingIntent.accountQueryType,
                     feeType: pendingIntent.feeType,
+                    dateFilter: pendingIntent.dateFilter,
                   }
                 );
                 if (data) {
@@ -3128,127 +2390,12 @@ const UnifiedAssistant: React.FC = () => {
               }
             }
 
-            // FALLBACK: Regex-based detection on agent's response (for follow-up questions)
-            // Skip fallback if an intent-based card was recently rendered (within 5 seconds)
-            const voiceTimeSinceIntentCard = Date.now() - lastIntentCardRenderedAtRef.current;
-            const voiceSkipFallback = voiceTimeSinceIntentCard < 5000;
-            if (voiceSkipFallback && !tradeUI) {
-              console.log('🔍 [Voice Mode] Skipping fallback - intent card rendered', voiceTimeSinceIntentCard, 'ms ago');
-            }
-            if (!tradeUI && !voiceSkipFallback) {
-              const accountMatch = detectAccountBalanceQuery(message.message);
-              if (accountMatch) {
-                console.log('🔍 Account balance query detected:', accountMatch.queryType);
-                const data = await fetchTradeData('', 'account-balance', undefined, accountMatch.timePeriod, { accountQueryType: accountMatch.queryType });
-                if (data) tradeUI = data;
-              }
-            }
-            if (!tradeUI && !voiceSkipFallback) {
-              const feesMatch = detectFeesQuery(message.message);
-              if (feesMatch) {
-                console.log('🔍 Fees query detected:', feesMatch.feeType);
-                const data = await fetchTradeData(feesMatch.symbol || '', 'fees', undefined, feesMatch.timePeriod, { feeType: feesMatch.feeType });
-                if (data) tradeUI = data;
-              }
-            }
-            if (!tradeUI && !voiceSkipFallback) {
-              const expiringMatch = detectExpiringOptionsQuery(message.message);
-              if (expiringMatch) {
-                console.log('🔍 Expiring options detected:', expiringMatch.expiration);
-                const data = await fetchTradeData(symbol || '', 'expiring-options', expiringMatch.tradeType, undefined, { expiration: expiringMatch.expiration });
-                if (data) tradeUI = data;
-              }
-            }
-            if (!tradeUI && !voiceSkipFallback && detectAllTradesQuery(message.message) && symbol) {
-              console.log('🔍 All trades query detected (both stocks and options)');
-              const data = await fetchTradeData(symbol, 'detailed');
-              if (data) tradeUI = data;
-            }
-            if (!tradeUI && !voiceSkipFallback) {
-              const bulkOptionsMatch = detectBulkOptionsQuery(message.message);
-              if (bulkOptionsMatch) {
-                console.log('🔍 Bulk options query detected:', bulkOptionsMatch);
-                const data = await fetchTradeData(symbol || '', 'advanced-options', bulkOptionsMatch.tradeType, bulkOptionsMatch.timePeriod, { callPut: bulkOptionsMatch.callPut });
-                if (data) tradeUI = data;
-              } else {
-                const lastOptionMatch = detectLastOptionQuery(message.message);
-                if (lastOptionMatch && symbol) {
-                  console.log('🔍 Last option trade detected:', lastOptionMatch);
-                  const data = await fetchTradeData(symbol, 'last-option', lastOptionMatch.tradeType, undefined, { callPut: lastOptionMatch.callPut });
-                  if (data) tradeUI = data;
-                }
-              }
-            }
-            if (!tradeUI && !voiceSkipFallback) {
-              const parsedStrike = parseHighestStrikeFromText(message.message);
-              if (parsedStrike && isCompleteHighestStrikeParse(parsedStrike)) {
-                console.log('🎯 [Voice Text Parse] Using parsed highest-strike data from agent text:', parsedStrike);
-                tradeUI = {
-                  type: 'highest-strike',
-                  symbol: parsedStrike.symbol,
-                  tradeType: parsedStrike.tradeType,
-                  callPut: parsedStrike.callPut,
-                  data: {
-                    parsedFromText: true,
-                    ...parsedStrike
-                  }
-                };
-              } else {
-                const premiumMatch = detectTotalPremiumQuery(message.message);
-                if (premiumMatch) {
-                  console.log('🔍 Total premium detected:', premiumMatch);
-                  const data = await fetchTradeData(symbol || '', 'total-premium', premiumMatch.tradeType, premiumMatch.timePeriod);
-                  if (data) tradeUI = data;
-                } else {
-                  const advancedMatch = detectAdvancedOptionsQuery(message.message);
-                  if (advancedMatch) {
-                    console.log('🔍 Advanced options query detected:', advancedMatch);
-                    const data = await fetchTradeData(symbol || '', 'advanced-options', advancedMatch.tradeType, advancedMatch.timePeriod, { callPut: advancedMatch.callPut });
-                    if (data) tradeUI = data;
-                  } else {
-                    const timeMatch = detectTimeBasedTrades(message.message);
-                    if (timeMatch) {
-                      console.log('🔍 Time-based trades detected:', timeMatch.timePeriod);
-                      const isPortfolioQuery = isPortfolioWideQuery(message.message);
-                      const isDayOfWeekQuery = /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(timeMatch.timePeriod);
-                      const timeSymbol = (isPortfolioQuery || (isDayOfWeekQuery && !symbol)) ? null : symbol;
-                      console.log('🔍 Portfolio-wide query:', isPortfolioQuery, 'Day-of-week:', isDayOfWeekQuery, 'Using symbol:', timeSymbol);
-                      const data = await fetchTradeData(timeSymbol || '', 'time-based', undefined, timeMatch.timePeriod);
-                      console.log('🔍 Fetched time-based data:', data);
-                      if (data) tradeUI = data;
-                    } else if (symbol) {
-                      const avgPriceMatch = detectAveragePrice(message.message);
-                      if (avgPriceMatch) {
-                        console.log('🔍 Average price detected:', avgPriceMatch.tradeType, avgPriceMatch.timePeriod);
-                        const data = await fetchTradeData(symbol, 'average-price', avgPriceMatch.tradeType, avgPriceMatch.timePeriod);
-                        console.log('🔍 Fetched average price data:', data);
-                        if (data) tradeUI = data;
-                      } else {
-                        const statsMatch = detectTradeStats(message.message);
-                        if (statsMatch) {
-                          const data = await fetchTradeData(symbol, 'stats', statsMatch.tradeType, statsMatch.timePeriod);
-                          if (data) tradeUI = data;
-                        } else if (detectProfitableTrades(message.message)) {
-                          console.log('🔍 Profitable trades detected');
-                          const data = await fetchTradeData(symbol, 'profitable');
-                          if (data) tradeUI = data;
-                        } else if (detectDetailedTrades(message.message)) {
-                          console.log('🔍 Detailed trades detected');
-                          const data = await fetchTradeData(symbol, 'detailed');
-                          if (data) tradeUI = data;
-                        } else {
-                          // Unified: "how many trades" and "show trades" are the same intent
-                          const summaryMatch = detectTradeSummary(message.message);
-                          if (summaryMatch) {
-                            const data = await fetchTradeData(symbol, 'detailed');
-                            if (data) tradeUI = data;
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
+            // NOTE: Regex-based fallbacks have been REMOVED.
+            // The LLM classifier + tool function architecture is the single source of truth.
+            // If toolUIDataRef.current is not set, the tool function didn't run or failed.
+            // No secondary fetches based on regex parsing of agent responses.
+            if (!tradeUI) {
+              console.log('⚠️ [Voice Mode] No UI data available - toolUIDataRef was not set by tool function');
             }
 
             // SYMBOL CORRECTION: For fees queries, extract symbol from agent's response using LLM
@@ -3368,129 +2515,16 @@ const UnifiedAssistant: React.FC = () => {
       const res = await fetch(`/api/messages?conversation_id=${conversationId}`);
       const data = await res.json();
       if (data.messages) {
-        // Load messages into unified transcript, detecting trade UI for assistant messages
-        const loadedMessages: TranscriptMessage[] = await Promise.all(
-          data.messages.map(async (msg: { id: string; role: string; content: string; created_at: string }) => {
-            const baseMessage: TranscriptMessage = {
-              id: msg.id,
-              role: msg.role as 'user' | 'assistant',
-              content: msg.content,
-              timestamp: new Date(msg.created_at),
-            };
-
-            // For assistant messages, check if we should render trade UI
-            if (msg.role === 'assistant') {
-              const symbol = extractSymbolOrCompany(msg.content);
-
-              // Check for account balance queries FIRST (highest priority)
-              const accountMatch = detectAccountBalanceQuery(msg.content);
-              if (accountMatch) {
-                const tradeData = await fetchTradeData('', 'account-balance', undefined, accountMatch.timePeriod, { accountQueryType: accountMatch.queryType });
-                if (tradeData) {
-                  baseMessage.tradeUI = tradeData;
-                }
-              }
-              // Check for fees/commissions queries
-              if (!baseMessage.tradeUI) {
-                const feesMatch = detectFeesQuery(msg.content);
-                if (feesMatch) {
-                  const tradeData = await fetchTradeData(feesMatch.symbol || '', 'fees', undefined, feesMatch.timePeriod, { feeType: feesMatch.feeType });
-                  if (tradeData) {
-                    baseMessage.tradeUI = tradeData;
-                  }
-                }
-              }
-              // Check for expiring options (high priority for "expiring tomorrow" queries)
-              // Must check before bulk options since expiring responses also contain "across N trades"
-              if (!baseMessage.tradeUI) {
-                const expiringMatch = detectExpiringOptionsQuery(msg.content);
-                if (expiringMatch) {
-                  const tradeData = await fetchTradeData(symbol || '', 'expiring-options', expiringMatch.tradeType, undefined, { expiration: expiringMatch.expiration });
-                  if (tradeData) {
-                    baseMessage.tradeUI = tradeData;
-                  }
-                }
-              }
-              // Check for ALL TRADES (both stocks AND options) - must come BEFORE bulk options
-              // This prevents "15 stock trades and 11 option trades" from showing only options
-              if (!baseMessage.tradeUI && detectAllTradesQuery(msg.content) && symbol) {
-                const tradeData = await fetchTradeData(symbol, 'detailed');
-                if (tradeData) {
-                  baseMessage.tradeUI = tradeData;
-                }
-              }
-              // Check for BULK option trades (e.g., "show all short calls on Tesla last month")
-              if (!baseMessage.tradeUI) {
-                const bulkOptionsMatch = detectBulkOptionsQuery(msg.content);
-                if (bulkOptionsMatch) {
-                  const tradeData = await fetchTradeData(symbol || '', 'advanced-options', bulkOptionsMatch.tradeType, bulkOptionsMatch.timePeriod, { callPut: bulkOptionsMatch.callPut });
-                  if (tradeData) {
-                    baseMessage.tradeUI = tradeData;
-                  }
-                }
-                // Check for time-based trades
-                else {
-                  const timeMatch = detectTimeBasedTrades(msg.content);
-                  if (timeMatch) {
-                    // For time-based queries, check if it's portfolio-wide:
-                    // 1. Multiple symbols mentioned in response
-                    // 2. Day-of-week queries with NO symbol are portfolio-wide
-                    const isPortfolioQuery = isPortfolioWideQuery(msg.content);
-                    const isDayOfWeekQuery = /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(timeMatch.timePeriod);
-                    // Only use null symbol if portfolio-wide OR (day-of-week AND no symbol detected)
-                    const timeSymbol = (isPortfolioQuery || (isDayOfWeekQuery && !symbol)) ? null : symbol;
-                    const tradeData = await fetchTradeData(timeSymbol || '', 'time-based', undefined, timeMatch.timePeriod);
-                    if (tradeData) {
-                      baseMessage.tradeUI = tradeData;
-                    }
-                  }
-                }
-              }
-              if (!baseMessage.tradeUI && symbol) {
-                // Check for average price queries first (simple average, not full stats)
-                const avgPriceMatch = detectAveragePrice(msg.content);
-                if (avgPriceMatch) {
-                  const tradeData = await fetchTradeData(symbol, 'average-price', avgPriceMatch.tradeType, avgPriceMatch.timePeriod);
-                  if (tradeData) {
-                    baseMessage.tradeUI = tradeData;
-                  }
-                } else {
-                  // Check other detection in order of priority:
-                  // 1. Trade stats (specific price queries with high/low/avg)
-                  // 2. Profitable trades (specific profit analysis) - check BEFORE detailed
-                  // 3. Detailed trades (general trade listing)
-                  // 4. Trade summary (count overview)
-                  const statsMatch = detectTradeStats(msg.content);
-                  if (statsMatch) {
-                    const tradeData = await fetchTradeData(symbol, 'stats', statsMatch.tradeType, statsMatch.timePeriod);
-                    if (tradeData) {
-                      baseMessage.tradeUI = tradeData;
-                    }
-                  } else if (detectProfitableTrades(msg.content)) {
-                    const tradeData = await fetchTradeData(symbol, 'profitable');
-                    if (tradeData) {
-                      baseMessage.tradeUI = tradeData;
-                    }
-                  } else if (detectDetailedTrades(msg.content)) {
-                    const tradeData = await fetchTradeData(symbol, 'detailed');
-                    if (tradeData) {
-                      baseMessage.tradeUI = tradeData;
-                    }
-                  } else {
-                    // Unified: "how many trades" and "show trades" are the same intent
-                    const summaryMatch = detectTradeSummary(msg.content);
-                    if (summaryMatch) {
-                      const tradeData = await fetchTradeData(symbol, 'detailed');
-                      if (tradeData) {
-                        baseMessage.tradeUI = tradeData;
-                      }
-                    }
-                  }
-                }
-              }
-            }
-
-            return baseMessage;
+        // Load messages into unified transcript
+        // NOTE: Historical messages display as text only (no UI cards).
+        // We use LLM-only architecture for intent detection, and tradeUI data
+        // is not persisted to the database. Users can re-ask questions to get UI cards.
+        const loadedMessages: TranscriptMessage[] = data.messages.map(
+          (msg: { id: string; role: string; content: string; created_at: string }) => ({
+            id: msg.id,
+            role: msg.role as 'user' | 'assistant',
+            content: msg.content,
+            timestamp: new Date(msg.created_at),
           })
         );
         setTranscript(loadedMessages);
@@ -3890,6 +2924,7 @@ const UnifiedAssistant: React.FC = () => {
 		            expiration: intent.expiration,
 		            accountQueryType: intent.accountQueryType,
 		            feeType: intent.feeType,
+		            dateFilter: intent.dateFilter,
 		          }
 		        )
 		      : null;
@@ -3945,21 +2980,27 @@ const UnifiedAssistant: React.FC = () => {
 
   // Render trade UI component based on data
   const renderTradeUI = (tradeUI: TradeUIData) => {
-    const { type, symbol, data } = tradeUI;
+    const { type, symbol, data, timePeriod, dateFilter } = tradeUI;
 
     if (type === 'summary') {
-      // Parse from the response data
-      const responseData = data as { response?: string };
-      const text = responseData.response || '';
-      const summaryMatch = detectTradeSummary(text);
+      // Use structured uiData from webhook (no regex parsing needed)
+      const summaryData = data as {
+        symbol?: string;
+        stockTrades?: number;
+        optionTrades?: number;
+        totalTrades?: number;
+        buyTrades?: number;
+        sellTrades?: number;
+      };
 
-      if (summaryMatch) {
+      // Webhook returns structured data with stockTrades/optionTrades
+      if (summaryData.stockTrades !== undefined || summaryData.optionTrades !== undefined) {
         return (
           <div style={{ marginTop: '12px' }}>
             <TradeSummary
-              symbol={symbol}
-              stockCount={summaryMatch.stockTrades}
-              optionCount={summaryMatch.optionTrades}
+              symbol={summaryData.symbol || symbol}
+              stockCount={summaryData.stockTrades || 0}
+              optionCount={summaryData.optionTrades || 0}
             />
           </div>
         );
@@ -4001,12 +3042,52 @@ const UnifiedAssistant: React.FC = () => {
           </div>
         );
       }
-      // For detailed trades, we need to fetch the full data with trades array
-      // The API returns a text response, but we need to call a different endpoint
-      // that returns structured data for the table
+      // Use the already-fetched uiData from the tool function
+      // The tool function calls /api/elevenlabs/detailed-trades which returns both response + uiData
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const uiDataFromTool = data as any;
+
+      // If we have trades data, render TradesTable directly (no additional fetch)
+      if (uiDataFromTool?.trades && Array.isArray(uiDataFromTool.trades)) {
+        // Map API response to Trade[] format expected by TradesTable
+        // Add dummy TradeID and GrossAmount for compatibility
+        const trades = uiDataFromTool.trades.map((t: Record<string, unknown>, idx: number) => ({
+          TradeID: idx + 1,
+          Date: t.Date || '',
+          Symbol: t.Symbol || '',
+          SecurityType: t.SecurityType || '',
+          TradeType: t.TradeType || '',
+          StockTradePrice: t.StockTradePrice || '0',
+          StockShareQty: t.StockShareQty || '0',
+          OptionContracts: t.OptionContracts || '0',
+          OptionTradePremium: t.OptionTradePremium || '0',
+          GrossAmount: t.NetAmount || '0', // Use NetAmount as fallback for GrossAmount
+          NetAmount: t.NetAmount || '0',
+          Strike: t.Strike,
+          Expiration: t.Expiration,
+          'Call/Put': t['Call/Put'],
+        }));
+
+        return (
+          <div style={{ marginTop: '12px' }}>
+            <TradesTable
+              trades={trades}
+              summary={{
+                totalShares: uiDataFromTool.totalShares || 0,
+                totalCost: uiDataFromTool.totalValue || 0,
+                currentValue: 0,
+                symbol: uiDataFromTool.symbol || symbol,
+              }}
+            />
+          </div>
+        );
+      }
+
+      // Fallback: If no trades data, use DetailedTradesLoader (should be rare)
+      // CRITICAL: Pass timePeriod and dateFilter to get correct date-filtered results
       return (
         <div style={{ marginTop: '12px' }}>
-          <DetailedTradesLoader symbol={symbol} />
+          <DetailedTradesLoader symbol={symbol} timePeriod={timePeriod} dateFilter={dateFilter} />
         </div>
       );
     }
@@ -4288,29 +3369,7 @@ const UnifiedAssistant: React.FC = () => {
     if (type === 'highest-strike') {
       console.log('🎨 Rendering highest strike card with data:', data);
 
-      // Check if data was parsed from agent's text response (ensures UI matches exactly what agent said)
-      const parsedData = data as { parsedFromText?: boolean } & ParsedHighestStrikeData;
-      if (parsedData.parsedFromText) {
-        console.log('🎯 [Render] Using parsed text data for highest-strike card');
-        return (
-          <div style={{ marginTop: '12px' }}>
-            <HighestStrikeCard
-              symbol={parsedData.symbol}
-              strike={parsedData.strike}
-              callPut={parsedData.callPut === 'call' ? 'Call' : 'Put'}
-              tradeType={parsedData.tradeType}
-              date={parsedData.date}
-              expiration={parsedData.expiration}
-              contracts={parsedData.contracts}
-              premium={parsedData.premium}
-              isHighest={parsedData.isHighest}
-              datePreformatted={true}
-            />
-          </div>
-        );
-      }
-
-      // Fallback: Use API data (legacy path)
+      // Use structured API data from webhook (no text parsing needed)
       const strikeData = data as {
         trades: Array<{
           TradeID: number;
@@ -5595,7 +4654,17 @@ const UnifiedAssistant: React.FC = () => {
 };
 
 // Component to load detailed trades data
-function DetailedTradesLoader({ symbol }: { symbol: string }) {
+function DetailedTradesLoader({ symbol, timePeriod, dateFilter }: {
+  symbol: string;
+  timePeriod?: string;
+  dateFilter?: {
+    type: 'range' | 'discrete' | 'relative';
+    startDate?: string;
+    endDate?: string;
+    dates?: string[];
+    description?: string;
+  };
+}) {
   const [tradesData, setTradesData] = useState<{
     trades: Array<{
       TradeID: number;
@@ -5626,10 +4695,11 @@ function DetailedTradesLoader({ symbol }: { symbol: string }) {
     const fetchData = async () => {
       try {
         // SINGLE FETCH: Use voice endpoint with uiData
+        // CRITICAL: Pass time_period and date_filter to get correct date-filtered results
         const res = await fetch('/api/elevenlabs/detailed-trades', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ symbol }),
+          body: JSON.stringify({ symbol, time_period: timePeriod, date_filter: dateFilter }),
         });
         const voicePayload = await res.json();
         const uiData = voicePayload?.uiData;
@@ -5643,7 +4713,7 @@ function DetailedTradesLoader({ symbol }: { symbol: string }) {
       }
     };
     fetchData();
-  }, [symbol]);
+  }, [symbol, timePeriod, dateFilter]);
 
   if (loading) {
     return (

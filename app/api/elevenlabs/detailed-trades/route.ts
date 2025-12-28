@@ -131,14 +131,19 @@ export async function POST(req: NextRequest) {
 
     // Apply date filters
     if (resolvedType === 'discrete' && dates && dates.length > 0) {
+      console.log(`🔍 [DEBUG] Applying discrete date filter: ${dates.join(', ')}`);
       query = query.in('Date', dates);
     } else if (startDate && endDate) {
+      console.log(`🔍 [DEBUG] Applying range date filter: ${startDate} to ${endDate}`);
       query = query.gte('Date', startDate).lte('Date', endDate);
+    } else {
+      console.log(`🔍 [DEBUG] NO date filter applied! startDate=${startDate}, endDate=${endDate}, dates=${dates}`);
     }
 
     query = query.order('Date', { ascending: false });
 
     const { data, error } = await query;
+    console.log(`🔍 [DEBUG] Query returned ${data?.length || 0} rows`);
 
     if (error) {
       const uiData: DetailedTradesUIData = {

@@ -10,7 +10,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { queryTrades, buildVoiceResponse, buildUIData, validateConsistency } from '@/src/lib/trade-query';
 import { DateFilter } from '@/src/lib/query-resolver';
 import { startTrace, formatTraceForResponse } from '@/src/lib/request-trace';
-import { getConversationKey, mergeWithContextAsync, storeContextAsync } from '@/src/lib/conversation-context';
+// Context merging disabled - ElevenLabs LLM has full conversation history and handles context better
 
 export async function POST(req: NextRequest) {
   const trace = startTrace('detailed-trades');
@@ -18,42 +18,18 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
 
-    // Extract client IP for context tracking (Vercel/Next.js headers)
-    const clientIp = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-                     req.headers.get('x-real-ip') ||
-                     'unknown';
-
-    // Log all headers for debugging what ElevenLabs sends
-    console.log('📬 [detailed-trades] Request headers:', {
-      'x-conversation-id': req.headers.get('x-conversation-id'),
-      'x-agent-id': req.headers.get('x-agent-id'),
-      'x-session-id': req.headers.get('x-session-id'),
-      'x-forwarded-for': req.headers.get('x-forwarded-for'),
-      'x-real-ip': req.headers.get('x-real-ip'),
-    });
+    // Log request body keys for debugging
     console.log('📬 [detailed-trades] Request body keys:', Object.keys(body));
 
-    // Extract conversation key from ElevenLabs headers or body
-    const conversationKey = getConversationKey({
-      conversationId: req.headers.get('x-conversation-id') || body.conversation_id,
-      agentId: req.headers.get('x-agent-id') || body.agent_id,
-      sessionId: req.headers.get('x-session-id') || body.session_id,
-      clientIp,
-    });
-
     // ElevenLabs may send symbol directly or nested in various ways
-    let symbol = body.symbol || body.parameters?.symbol || body.body?.symbol || body.body?.parameters?.symbol;
+    const symbol = body.symbol || body.parameters?.symbol || body.body?.symbol || body.body?.parameters?.symbol;
     const timePeriod = body.time_period || body.parameters?.time_period ||
                        body.body?.time_period || body.body?.parameters?.time_period;
     const dateFilter: DateFilter | undefined = body.date_filter || body.parameters?.date_filter ||
                        body.body?.date_filter || body.body?.parameters?.date_filter;
 
-    // Merge with conversation context if symbol is missing (follow-up query)
-    const merged = await mergeWithContextAsync(conversationKey, { symbol, timePeriod, dateFilter });
-    symbol = merged.symbol;
-
-    // Log input (including context application)
-    trace.logInput({ symbol, timePeriod, dateFilter, _contextApplied: merged._contextApplied });
+    // Log input parameters (context merging disabled - ElevenLabs LLM handles context)
+    trace.logInput({ symbol, timePeriod, dateFilter });
 
     if (!symbol) {
       trace.logError('No symbol provided');
@@ -62,9 +38,6 @@ export async function POST(req: NextRequest) {
         uiData: null,
       });
     }
-
-    // Store context for future follow-up queries
-    await storeContextAsync(conversationKey, { symbol, timePeriod, dateFilter, queryType: 'detailed-trades' });
 
     // Use unified query - SINGLE SOURCE OF TRUTH
     const result = await queryTrades({

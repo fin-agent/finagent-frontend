@@ -38,6 +38,8 @@ import {
 
 type QueryType = 'stock_quote' | 'option_quote' | 'historical' | 'news' | 'halt';
 
+// Expected request structure (defensive parsing handles nested variants)
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 interface MarketDataRequest {
   query_type: QueryType;
   symbol?: string;
@@ -156,8 +158,23 @@ interface ErrorUIData {
 
 export async function POST(req: NextRequest) {
   try {
-    const body: MarketDataRequest = await req.json();
-    const { query_type, symbol, strike, call_put, expiration, chart_period } = body;
+    const body = await req.json();
+
+    // Defensive parameter extraction - ElevenLabs may nest params differently
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rawBody = body as any;
+    const query_type: QueryType = rawBody.query_type || rawBody.parameters?.query_type ||
+                                   rawBody.body?.query_type || rawBody.body?.parameters?.query_type;
+    const symbol: string | undefined = rawBody.symbol || rawBody.parameters?.symbol ||
+                                        rawBody.body?.symbol || rawBody.body?.parameters?.symbol;
+    const strike: number | undefined = rawBody.strike || rawBody.parameters?.strike ||
+                                        rawBody.body?.strike || rawBody.body?.parameters?.strike;
+    const call_put: 'call' | 'put' | undefined = rawBody.call_put || rawBody.parameters?.call_put ||
+                                                  rawBody.body?.call_put || rawBody.body?.parameters?.call_put;
+    const expiration: string | undefined = rawBody.expiration || rawBody.parameters?.expiration ||
+                                            rawBody.body?.expiration || rawBody.body?.parameters?.expiration;
+    const chart_period: string | undefined = rawBody.chart_period || rawBody.parameters?.chart_period ||
+                                              rawBody.body?.chart_period || rawBody.body?.parameters?.chart_period;
 
     // Validate query type
     if (!query_type) {

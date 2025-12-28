@@ -122,7 +122,20 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const { query_type, symbol, metric_type, statement_type } = body;
+    // Defensive parameter extraction - ElevenLabs may nest params differently
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rawBody = body as any;
+    const query_type: QueryType = rawBody.query_type || rawBody.parameters?.query_type ||
+                                   rawBody.body?.query_type || rawBody.body?.parameters?.query_type;
+    const symbol: string = rawBody.symbol || rawBody.parameters?.symbol ||
+                           rawBody.body?.symbol || rawBody.body?.parameters?.symbol;
+    const metric_type: string | undefined = rawBody.metric_type || rawBody.parameters?.metric_type ||
+                                             rawBody.body?.metric_type || rawBody.body?.parameters?.metric_type;
+    const statement_type: 'income' | 'balance' | 'cashflow' | undefined =
+                          rawBody.statement_type || rawBody.parameters?.statement_type ||
+                          rawBody.body?.statement_type || rawBody.body?.parameters?.statement_type;
+
+    console.log('📊 [Fundamentals] Extracted params:', { query_type, symbol, metric_type, statement_type });
 
     // Validate required parameters
     if (!query_type) {

@@ -18,6 +18,9 @@ import { ExpiringOptionsTable } from './generative-ui/ExpiringOptionsTable';
 import { LastOptionTradeCard } from './generative-ui/LastOptionTradeCard';
 import { AccountSummary, type AccountQueryType } from './generative-ui/AccountSummary';
 import { FeesSummary, type FeeType } from './generative-ui/FeesSummary';
+import { StockQuoteCard } from './generative-ui/StockQuoteCard';
+import { CompanyOverviewCard } from './generative-ui/CompanyOverviewCard';
+import { OptionQuoteCard } from './generative-ui/OptionQuoteCard';
 import type { ClassificationResult } from '@/src/lib/intent-detection';
 import { formatCalendarDate } from '@/src/lib/date-utils';
 import { getOptionPremiumUSD, safeParseNumber } from '@/src/lib/trade-math';
@@ -34,7 +37,11 @@ interface Conversation {
 }
 
 interface TradeUIData {
-  type: 'summary' | 'detailed' | 'stats' | 'profitable' | 'time-based' | 'option-stats' | 'average-price' | 'advanced-options' | 'highest-strike' | 'total-premium' | 'expiring-options' | 'last-option' | 'account-balance' | 'fees' | 'options';
+  type: 'summary' | 'detailed' | 'stats' | 'profitable' | 'time-based' | 'option-stats' | 'average-price' | 'advanced-options' | 'highest-strike' | 'total-premium' | 'expiring-options' | 'last-option' | 'account-balance' | 'fees' | 'options'
+    // Market data types
+    | 'stock-quote' | 'option-quote' | 'price-chart' | 'news' | 'halt-status'
+    // Fundamentals types
+    | 'company-overview' | 'fundamental-metric' | 'financials' | 'earnings' | 'dividend';
   symbol: string;
   tradeType?: 'buy' | 'sell' | 'all';
   timePeriod?: string;
@@ -574,6 +581,8 @@ function buildAnswerOverride(intent: QueryIntent | null, tradeUI: TradeUIData | 
       error?: string;
       queryType?: AccountQueryType;
       date?: string;
+      asOfDate?: string; // API returns asOfDate, not date
+      timePeriod?: string; // API returns timePeriod for balance trends
       cashBalance?: number;
       accountEquity?: number;
       dayTradingBP?: number;
@@ -583,6 +592,12 @@ function buildAnswerOverride(intent: QueryIntent | null, tradeUI: TradeUIData | 
       optionsSMV?: number;
       houseRequirement?: number;
       houseExcessDeficit?: number;
+      // Flat fields returned by API for balance trends
+      avgBalance?: number;
+      maxBalance?: number;
+      minBalance?: number;
+      maxBalanceDate?: string;
+      minBalanceDate?: string;
       balanceTrend?: {
         average: number;
         highest: number;
@@ -594,10 +609,41 @@ function buildAnswerOverride(intent: QueryIntent | null, tradeUI: TradeUIData | 
       };
     };
 
-    if (!d || d.error || !d.date) return null;
+    if (!d || d.error) return null;
 
     const queryType = tradeUI.accountQueryType || d.queryType || intent.accountQueryType || 'account_summary';
-    const asOfDate = formatCalendarDate(d.date);
+
+    // Handle balance trends first (they use timePeriod, not date)
+    if (queryType === 'debit_balances' || queryType === 'credit_balances') {
+      // Construct balanceTrend from flat API fields if not already present
+      let trend = d.balanceTrend;
+      if (!trend && d.avgBalance !== undefined) {
+        trend = {
+          average: d.avgBalance,
+          highest: d.maxBalance || 0,
+          highestDate: d.maxBalanceDate || '',
+          lowest: d.minBalance || 0,
+          lowestDate: d.minBalanceDate || '',
+          period: d.timePeriod || '',
+        };
+      }
+      if (!trend) return null;
+
+      const monthLabel = trend.periodMonth || trend.period;
+      const average = formatUSDCurrency(trend.average);
+      const highestAmount = formatUSDCurrency(trend.highest);
+      const lowestAmount = formatUSDCurrency(trend.lowest);
+      const highestDate = formatCalendarDate(trend.highestDate);
+      const lowestDate = formatCalendarDate(trend.lowestDate);
+
+      const balanceType = queryType === 'debit_balances' ? 'debit' : 'credit';
+      return `Your average ${balanceType} balance for ${monthLabel} is ${average}.\nThe highest ${balanceType} balance was on ${highestDate} at ${highestAmount}.\nThe lowest ${balanceType} balance was on ${lowestDate} at ${lowestAmount}.`;
+    }
+
+    // For other query types, we need a date
+    const dateValue = d?.date || d?.asOfDate;
+    if (!dateValue) return null;
+    const asOfDate = formatCalendarDate(dateValue);
 
     if (queryType === 'cash_balance') {
       return `Your account cash balance as of ${asOfDate} is ${formatUSDCurrency(d.cashBalance)}`;
@@ -625,21 +671,6 @@ function buildAnswerOverride(intent: QueryIntent | null, tradeUI: TradeUIData | 
 
     if (queryType === 'market_value') {
       return `The market value of your long stock positions is ${formatUSDCurrency(d.stockLMV)}, your long options positions is ${formatUSDCurrency(d.optionsLMV)}, your short stock positions is ${formatUSDCurrency(d.stockSMV)}, and your short options positions is ${formatUSDCurrency(d.optionsSMV)}`;
-    }
-
-    if (queryType === 'debit_balances' || queryType === 'credit_balances') {
-      const trend = d.balanceTrend;
-      if (!trend) return null;
-
-      const monthLabel = trend.periodMonth || trend.period;
-      const average = formatUSDCurrency(trend.average);
-      const highestAmount = formatUSDCurrency(trend.highest);
-      const lowestAmount = formatUSDCurrency(trend.lowest);
-      const highestDate = formatCalendarDate(trend.highestDate);
-      const lowestDate = formatCalendarDate(trend.lowestDate);
-
-      const balanceType = queryType === 'debit_balances' ? 'debit' : 'credit';
-      return `Your average ${balanceType} balance for the month of ${monthLabel} is ${average}.\nThe highest ${balanceType} balance was on ${highestDate} at ${highestAmount}.\nThe lowest ${balanceType} balance was on ${lowestDate} at ${lowestAmount}.`;
     }
 
     // Default: full summary
@@ -2586,14 +2617,196 @@ const UnifiedAssistant: React.FC = () => {
   // Fetch trade data for UI rendering
   const fetchTradeData = useCallback(async (
     symbol: string,
-    type: 'summary' | 'detailed' | 'stats' | 'profitable' | 'time-based' | 'option-stats' | 'average-price' | 'advanced-options' | 'highest-strike' | 'total-premium' | 'expiring-options' | 'last-option' | 'account-balance' | 'fees' | 'options',
+    type: TradeUIData['type'],
     tradeType?: 'buy' | 'sell' | 'all',
     timePeriod?: string,
-    extraParams?: { callPut?: 'call' | 'put'; expiration?: string; aggregation?: string; accountQueryType?: AccountQueryType; feeType?: FeeType; includeTrades?: boolean; dateFilter?: { type: string; startDate?: string; endDate?: string; description: string }; queryType?: string }
+    extraParams?: { callPut?: 'call' | 'put'; expiration?: string; aggregation?: string; accountQueryType?: AccountQueryType; feeType?: FeeType; includeTrades?: boolean; dateFilter?: { type: string; startDate?: string; endDate?: string; description: string }; queryType?: string; strike?: number; chartPeriod?: string }
   ): Promise<TradeUIData | null> => {
     try {
       let endpoint: string;
       let body: Record<string, unknown> = { symbol };
+
+      // === MARKET DATA HANDLERS ===
+
+      if (type === 'stock-quote') {
+        // Use market-data webhook for stock quotes
+        endpoint = '/api/elevenlabs/market-data';
+        body = {
+          query_type: 'stock_quote',
+          symbol,
+        };
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const voicePayload = await res.json();
+        const uiData = voicePayload?.uiData || voicePayload;
+        return { type, symbol, data: uiData };
+      }
+
+      if (type === 'option-quote') {
+        // Use market-data webhook for option quotes
+        endpoint = '/api/elevenlabs/market-data';
+        body = {
+          query_type: 'option_quote',
+          symbol,
+          strike: extraParams?.strike,
+          call_put: extraParams?.callPut,
+          expiration: extraParams?.expiration,
+        };
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const voicePayload = await res.json();
+        const uiData = voicePayload?.uiData || voicePayload;
+        return { type, symbol, data: uiData };
+      }
+
+      if (type === 'price-chart') {
+        // Use market-data webhook for historical charts
+        endpoint = '/api/elevenlabs/market-data';
+        body = {
+          query_type: 'historical',
+          symbol,
+          chart_period: extraParams?.chartPeriod || timePeriod || '1 month',
+        };
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const voicePayload = await res.json();
+        const uiData = voicePayload?.uiData || voicePayload;
+        return { type, symbol, data: uiData };
+      }
+
+      if (type === 'news') {
+        // Use market-data webhook for news
+        endpoint = '/api/elevenlabs/market-data';
+        body = {
+          query_type: 'news',
+          symbol: symbol || undefined,
+        };
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const voicePayload = await res.json();
+        const uiData = voicePayload?.uiData || voicePayload;
+        return { type, symbol, data: uiData };
+      }
+
+      if (type === 'halt-status') {
+        // Use market-data webhook for halt status
+        endpoint = '/api/elevenlabs/market-data';
+        body = {
+          query_type: 'halt',
+          symbol: symbol || undefined,
+        };
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const voicePayload = await res.json();
+        const uiData = voicePayload?.uiData || voicePayload;
+        return { type, symbol, data: uiData };
+      }
+
+      // === FUNDAMENTALS DATA HANDLERS ===
+
+      if (type === 'company-overview') {
+        // Use fundamentals webhook for company overview
+        endpoint = '/api/elevenlabs/fundamentals';
+        body = {
+          query_type: 'overview',
+          symbol,
+        };
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const voicePayload = await res.json();
+        const uiData = voicePayload?.uiData || voicePayload;
+        return { type, symbol, data: uiData };
+      }
+
+      if (type === 'fundamental-metric') {
+        // Use fundamentals webhook for specific metrics
+        endpoint = '/api/elevenlabs/fundamentals';
+        body = {
+          query_type: 'metric',
+          symbol,
+          metric_type: extraParams?.queryType, // metric type like pe_ratio, market_cap, etc.
+        };
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const voicePayload = await res.json();
+        const uiData = voicePayload?.uiData || voicePayload;
+        return { type, symbol, data: uiData };
+      }
+
+      if (type === 'financials') {
+        // Use fundamentals webhook for financial statements
+        endpoint = '/api/elevenlabs/fundamentals';
+        body = {
+          query_type: 'financials',
+          symbol,
+          statement_type: extraParams?.queryType || 'income', // income, balance, cashflow
+        };
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const voicePayload = await res.json();
+        const uiData = voicePayload?.uiData || voicePayload;
+        return { type, symbol, data: uiData };
+      }
+
+      if (type === 'earnings') {
+        // Use fundamentals webhook for earnings data
+        endpoint = '/api/elevenlabs/fundamentals';
+        body = {
+          query_type: 'earnings',
+          symbol,
+        };
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const voicePayload = await res.json();
+        const uiData = voicePayload?.uiData || voicePayload;
+        return { type, symbol, data: uiData };
+      }
+
+      if (type === 'dividend') {
+        // Use fundamentals webhook for dividend data
+        endpoint = '/api/elevenlabs/fundamentals';
+        body = {
+          query_type: 'dividend',
+          symbol,
+        };
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const voicePayload = await res.json();
+        const uiData = voicePayload?.uiData || voicePayload;
+        return { type, symbol, data: uiData };
+      }
+
+      // === EXISTING TRADE DATA HANDLERS ===
 
       if (type === 'account-balance') {
         // SINGLE FETCH: Use voice endpoint with uiData
@@ -4580,7 +4793,9 @@ const UnifiedAssistant: React.FC = () => {
       console.log('🎨 Rendering account balance card with data:', data);
       const accountData = data as {
         queryType: AccountQueryType;
-        date: string;
+        date?: string;
+        asOfDate?: string; // API returns asOfDate, not date
+        timePeriod?: string; // API returns timePeriod for balance trends
         cashBalance?: number;
         accountEquity?: number;
         dayTradingBP?: number;
@@ -4594,6 +4809,12 @@ const UnifiedAssistant: React.FC = () => {
         houseExcessDeficit?: number;
         fedRequirement?: number;
         fedExcessDeficit?: number;
+        // Flat fields returned by API for balance trends
+        avgBalance?: number;
+        maxBalance?: number;
+        minBalance?: number;
+        maxBalanceDate?: string;
+        minBalanceDate?: string;
         balanceTrend?: {
           average: number;
           highest: number;
@@ -4606,12 +4827,30 @@ const UnifiedAssistant: React.FC = () => {
         };
       };
 
-      if (accountData.date) {
+      // Handle both date and asOfDate (API returns asOfDate)
+      const dateValue = accountData.date || accountData.asOfDate;
+
+      // Construct balanceTrend from flat API fields if not already present
+      // API returns avgBalance, maxBalance, etc. but component expects nested balanceTrend
+      let balanceTrend = accountData.balanceTrend;
+      if (!balanceTrend && accountData.avgBalance !== undefined) {
+        balanceTrend = {
+          average: accountData.avgBalance,
+          highest: accountData.maxBalance || 0,
+          highestDate: accountData.maxBalanceDate || '',
+          lowest: accountData.minBalance || 0,
+          lowestDate: accountData.minBalanceDate || '',
+          period: accountData.timePeriod || '',
+        };
+        console.log('🔧 Constructed balanceTrend from flat API fields:', balanceTrend);
+      }
+
+      if (dateValue || balanceTrend) {
         return (
           <div style={{ marginTop: '12px' }}>
             <AccountSummary
               queryType={tradeUI.accountQueryType || accountData.queryType || 'account_summary'}
-              date={accountData.date}
+              date={dateValue || ''}
               cashBalance={accountData.cashBalance}
               accountEquity={accountData.accountEquity}
               dayTradingBP={accountData.dayTradingBP}
@@ -4625,7 +4864,7 @@ const UnifiedAssistant: React.FC = () => {
               houseExcessDeficit={accountData.houseExcessDeficit}
               fedRequirement={accountData.fedRequirement}
               fedExcessDeficit={accountData.fedExcessDeficit}
-              balanceTrend={accountData.balanceTrend}
+              balanceTrend={balanceTrend}
             />
           </div>
         );
@@ -4666,6 +4905,130 @@ const UnifiedAssistant: React.FC = () => {
               breakdown={feesData.breakdown}
               suggestion={feesData.suggestion}
             />
+          </div>
+        );
+      }
+    }
+
+    // === MARKET DATA CARDS ===
+
+    if (type === 'stock-quote') {
+      console.log('🎨 Rendering stock quote card with data:', data);
+      const quoteData = data as {
+        symbol: string;
+        companyName?: string;
+        price: number;
+        change: number;
+        changePercent: number;
+        bid: number;
+        bidSize: number;
+        ask: number;
+        askSize: number;
+        mid: number;
+        spread: number;
+        spreadPercent: number;
+        volume: number;
+        dayHigh: number;
+        dayLow: number;
+        dayOpen: number;
+        prevClose: number;
+        timestamp: string;
+        isMarketOpen: boolean;
+      };
+
+      if (quoteData.price !== undefined) {
+        return (
+          <div style={{ marginTop: '12px' }}>
+            <StockQuoteCard
+              symbol={quoteData.symbol}
+              companyName={quoteData.companyName}
+              price={quoteData.price}
+              change={quoteData.change}
+              changePercent={quoteData.changePercent}
+              bid={quoteData.bid}
+              bidSize={quoteData.bidSize}
+              ask={quoteData.ask}
+              askSize={quoteData.askSize}
+              mid={quoteData.mid}
+              spread={quoteData.spread}
+              spreadPercent={quoteData.spreadPercent}
+              volume={quoteData.volume}
+              dayHigh={quoteData.dayHigh}
+              dayLow={quoteData.dayLow}
+              dayOpen={quoteData.dayOpen}
+              prevClose={quoteData.prevClose}
+              timestamp={quoteData.timestamp}
+              isMarketOpen={quoteData.isMarketOpen}
+            />
+          </div>
+        );
+      }
+    }
+
+    if (type === 'option-quote') {
+      console.log('🎨 Rendering option quote card with data:', data);
+      const optionData = data as {
+        type: 'option-quote';
+        occSymbol: string;
+        displayName: string;
+        underlying: string;
+        expiration: string;
+        strike: number;
+        optionType: 'call' | 'put';
+        bid: number;
+        bidSize: number;
+        ask: number;
+        askSize: number;
+        mid: number;
+        spread: number;
+        last: number | null;
+        lastSize: number | null;
+        volume?: number;
+        openInterest?: number;
+        impliedVolatility?: number;
+        greeks?: {
+          delta?: number;
+          gamma?: number;
+          theta?: number;
+          vega?: number;
+        };
+        timestamp: string;
+      };
+
+      if (optionData.underlying) {
+        return (
+          <div style={{ marginTop: '12px' }}>
+            <OptionQuoteCard data={optionData} />
+          </div>
+        );
+      }
+    }
+
+    // === FUNDAMENTALS CARDS ===
+
+    if (type === 'company-overview') {
+      console.log('🎨 Rendering company overview card with data:', data);
+      const overviewData = data as {
+        type: 'company-overview';
+        symbol: string;
+        name: string;
+        description: string;
+        exchange: string;
+        sector: string;
+        industry: string;
+        marketCap: number;
+        peRatio: number | null;
+        eps: number | null;
+        dividendYield: number | null;
+        fiftyTwoWeekHigh: number;
+        fiftyTwoWeekLow: number;
+        beta: number | null;
+      };
+
+      if (overviewData.symbol) {
+        return (
+          <div style={{ marginTop: '12px' }}>
+            <CompanyOverviewCard data={overviewData} />
           </div>
         );
       }

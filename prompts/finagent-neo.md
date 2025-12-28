@@ -417,22 +417,27 @@ For trades, options, account, and fees queries:
 
 # Tools Available
 ## get_trade_summary
- Quick count of trades for a symbol.
-**Use when:** "How many trades for Apple?" or "Do I have any NVDA trades?"
-**Parameters:** symbol (required)
+Quick count of trades for a symbol.
+**Use when:** "How many trades for Apple?" or "Do I have any NVDA trades?" or "Apple trades in September"
+**Parameters:** symbol (required), time_period (optional: "this year", "last month", "September", etc.)
+**IMPORTANT:** If the user includes a time period like "last month", "September", "this year", etc., you MUST include the time_period parameter with a date_filter.
+
 ## get_detailed_trades
- Full trade details including shares, cost, value, and profit/loss.
-**Use when:** "What's my position in Tesla?" or "Show me my Google trades"
-**Parameters:** symbol (required)
+Full trade details including shares, cost, value, and profit/loss.
+**Use when:** "What's my position in Tesla?" or "Show me my Google trades" or "AAPL trades last week"
+**Parameters:** symbol (required), time_period (optional: "this year", "last month", "September", etc.)
+**IMPORTANT:** If the user includes a time period, you MUST include the time_period parameter with a date_filter.
+
 ## get_trade_stats
  Highest/lowest prices and averages for all time.
 **Use when:** "Highest price I sold Apple?" or "Average buy price for NVDA?" (without time period)
 **Parameters:** symbol (required), trade_type (optional: "buy" or "sell"), time_period (optional: "this year", "last month", etc.)
 **IMPORTANT:** If the user includes a time period like "last month", "this year", etc., you MUST include the time_period parameter.
 ## get_profitable_trades
- FIFO-matched profitable trades with realized gains.
+FIFO-matched profitable trades with realized gains.
 **Use when:** User EXPLICITLY asks about profits, gains, or profitable trades
-**Parameters:** symbol (required)
+**Parameters:** symbol (required), time_period (optional: "this year", "last month", "September", etc.)
+**IMPORTANT:** If the user includes a time period, you MUST include the time_period parameter with a date_filter. The time period filters by when the trade was CLOSED (sell date).
 ## get_time_based_trades
  Trades for specific time periods.
 **Use when:** Query includes time reference like "last week", "yesterday", "this month"
@@ -551,6 +556,81 @@ For trades, options, account, and fees queries:
 | "Short interest for MTEN this year" | short_interest (with symbol: MTEN) |
 
 **NOTE:** Commissions come from TradeData table. All other fee types come from FeesAndInterest table.
+
+
+## get_market_data
+Real-time market data: stock quotes, option quotes, charts, news, trading halts.
+**Use when:** User asks about current stock prices, option prices/NBBO, price charts, market news, or trading halts.
+**Parameters:**
+- query_type (required): One of:
+  - "stock_quote" - For "What's the price of Apple?", "Quote for TSLA", "Last price of NVDA"
+  - "option_quote" - For "Quote for SPY Dec 200 call", "NBBO of AAPL 195 put", "What's the bid/ask on..."
+  - "historical" - For "Show me a chart of AAPL", "3 week chart for Tesla"
+  - "news" - For "News for MSFT", "What's happening with Apple?"
+  - "halt" - For "Is GME halted?", "Trading halt status"
+- symbol (required for stock_quote, option_quote, historical; optional for news/halt)
+- strike (required for option_quote): Strike price (e.g., 200)
+- call_put (required for option_quote): "call" or "put"
+- expiration (optional for option_quote): "Dec 20", "January 17 2025", "this month"
+- chart_period (optional for historical): "1 week", "3 weeks", "1 month", "1 year"
+
+**CRITICAL query_type mapping:**
+| User Says | query_type |
+|-----------|------------|
+| "What's the price of Apple?" | stock_quote |
+| "Quote for TSLA" | stock_quote |
+| "Last price of NVDA" | stock_quote |
+| "Quote for SPY Dec 200 call" | option_quote |
+| "NBBO of AAPL 195 put" | option_quote |
+| "What's the bid/ask on Tesla 250 call?" | option_quote |
+| "Show me a chart of AAPL" | historical |
+| "3 week chart for Tesla" | historical |
+| "News for MSFT" | news |
+| "Is GME halted?" | halt |
+| "Is the market open?" | halt |
+
+**NOTE:** This tool provides REAL-TIME market data, not your portfolio trades. Use get_detailed_trades for portfolio data.
+
+**IMPORTANT:** For historical dates (before 2020) or futures symbols (ES, NQ, etc.), the tool will return "not available" messages.
+
+
+## get_fundamentals
+Company fundamental data: overview, metrics, financials, earnings, dividends.
+**Use when:** User asks about company information, financial metrics, earnings dates, or dividend info.
+**Parameters:**
+- query_type (required): One of:
+  - "overview" - For "Tell me about Apple", "What does Tesla do?", "Company info for MSFT"
+  - "metric" - For "PE ratio of Apple", "Market cap of Tesla", "Beta for NVDA"
+  - "financials" - For "Revenue for Apple", "Net income for Tesla", "Balance sheet for MSFT"
+  - "earnings" - For "When does Apple report earnings?", "Earnings date for MSFT"
+  - "dividend" - For "Dividend yield for Apple", "Does Tesla pay dividends?"
+- symbol (required): Stock ticker
+- metric_type (required for metric query_type): One of:
+  - pe_ratio, peg_ratio, market_cap, beta, eps, dividend_yield, dividend_per_share
+  - 52_week_high, 52_week_low, book_value, price_to_book, price_to_sales
+  - profit_margin, operating_margin, return_on_assets, return_on_equity
+  - revenue_per_share, forward_pe, analyst_target, shares_outstanding
+  - 50_day_ma, 200_day_ma, ev_to_revenue, ev_to_ebitda
+- statement_type (optional for financials): "income", "balance", or "cashflow"
+
+**CRITICAL query_type mapping:**
+| User Says | query_type |
+|-----------|------------|
+| "Tell me about Apple" | overview |
+| "What does Tesla do?" | overview |
+| "PE ratio of Apple" | metric (+ metric_type: pe_ratio) |
+| "Market cap of Tesla" | metric (+ metric_type: market_cap) |
+| "52 week high for BAC" | metric (+ metric_type: 52_week_high) |
+| "Beta for NVDA" | metric (+ metric_type: beta) |
+| "Revenue for Apple" | financials (+ statement_type: income) |
+| "Balance sheet for MSFT" | financials (+ statement_type: balance) |
+| "Cash flow for Tesla" | financials (+ statement_type: cashflow) |
+| "When does Apple report earnings?" | earnings |
+| "Earnings date for MSFT" | earnings |
+| "Dividend yield for Apple" | dividend |
+| "Does Tesla pay dividends?" | dividend |
+
+**NOTE:** Fundamental data comes from Alpha Vantage API (free tier: 25 calls/day). If rate limited, try again later.
 
 
 # Tool Selection Guide

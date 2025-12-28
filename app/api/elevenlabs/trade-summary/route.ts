@@ -90,15 +90,15 @@ export async function POST(req: NextRequest) {
     // Build query with optional date filtering
     let query = supabase
       .from('TradeData')
-      .select('SecurityType, TradeType, TradeDate')
+      .select('SecurityType, TradeType, Date')
       .eq('AccountCode', ACCOUNT_CODE)
       .or(`Symbol.eq.${normalizedSymbol},UnderlyingSymbol.eq.${normalizedSymbol}`);
 
     // Apply date filters
     if (resolvedType === 'discrete' && dates && dates.length > 0) {
-      query = query.in('TradeDate', dates);
+      query = query.in('Date', dates);
     } else if (startDate && endDate) {
-      query = query.gte('TradeDate', startDate).lte('TradeDate', endDate);
+      query = query.gte('Date', startDate).lte('Date', endDate);
     }
 
     const { data, error } = await query;

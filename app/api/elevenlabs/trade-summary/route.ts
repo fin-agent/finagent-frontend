@@ -18,11 +18,27 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
 
+    // Extract client IP for context tracking (Vercel/Next.js headers)
+    const clientIp = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+                     req.headers.get('x-real-ip') ||
+                     'unknown';
+
+    // Log all headers for debugging what ElevenLabs sends
+    console.log('📬 [trade-summary] Request headers:', {
+      'x-conversation-id': req.headers.get('x-conversation-id'),
+      'x-agent-id': req.headers.get('x-agent-id'),
+      'x-session-id': req.headers.get('x-session-id'),
+      'x-forwarded-for': req.headers.get('x-forwarded-for'),
+      'x-real-ip': req.headers.get('x-real-ip'),
+    });
+    console.log('📬 [trade-summary] Request body keys:', Object.keys(body));
+
     // Extract conversation key from ElevenLabs headers or body
     const conversationKey = getConversationKey({
       conversationId: req.headers.get('x-conversation-id') || body.conversation_id,
       agentId: req.headers.get('x-agent-id') || body.agent_id,
       sessionId: req.headers.get('x-session-id') || body.session_id,
+      clientIp,
     });
 
     // ElevenLabs may send symbol directly or nested in various ways

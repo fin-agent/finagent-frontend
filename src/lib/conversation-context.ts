@@ -37,9 +37,20 @@ export function getConversationKey(params: {
   conversationId?: string;
   agentId?: string;
   sessionId?: string;
+  clientIp?: string;
 }): string {
-  // Prefer conversationId, fall back to agentId or sessionId
-  return params.conversationId || params.agentId || params.sessionId || 'default';
+  // Log what identifiers we received for debugging
+  console.log('🔑 [Context] Available identifiers:', {
+    conversationId: params.conversationId || '(none)',
+    agentId: params.agentId || '(none)',
+    sessionId: params.sessionId || '(none)',
+    clientIp: params.clientIp || '(none)',
+  });
+
+  // Prefer conversationId, then agentId, then sessionId, then IP, then default
+  const key = params.conversationId || params.agentId || params.sessionId || params.clientIp || 'default';
+  console.log(`🔑 [Context] Using key: ${key}`);
+  return key;
 }
 
 /**
@@ -51,10 +62,12 @@ export function storeContext(
 ): void {
   // Only store if we have meaningful context
   if (!context.symbol && !context.feeType && !context.queryType) {
+    console.log(`⚠️ [Context] Not storing - no meaningful context:`, context);
     return;
   }
 
   const existing = contextStore.get(conversationKey);
+  console.log(`📦 [Context] Existing context for ${conversationKey}:`, existing || '(none)');
 
   // Merge with existing context (new values override)
   const merged: QueryContext = {
@@ -72,11 +85,13 @@ export function storeContext(
 
   contextStore.set(conversationKey, merged);
 
-  console.log(`📝 [Context] Stored for ${conversationKey}:`, {
+  console.log(`✅ [Context] Stored for ${conversationKey}:`, {
     symbol: merged.symbol,
     timePeriod: merged.timePeriod,
     queryType: merged.queryType,
+    dateFilter: merged.dateFilter,
   });
+  console.log(`📊 [Context] Total contexts in store: ${contextStore.size}`);
 }
 
 /**
@@ -120,11 +135,21 @@ export function mergeWithContext(
     feeType?: string;
   }
 ): typeof params & { _contextApplied?: boolean } {
+  console.log(`🔄 [Context] mergeWithContext called for key: ${conversationKey}`);
+  console.log(`🔄 [Context] Incoming params:`, params);
+
   const context = getContext(conversationKey);
 
   if (!context) {
+    console.log(`❌ [Context] No stored context found for ${conversationKey}`);
     return params;
   }
+
+  console.log(`✨ [Context] Found stored context:`, {
+    symbol: context.symbol,
+    timePeriod: context.timePeriod,
+    queryType: context.queryType,
+  });
 
   const merged = { ...params };
   let contextApplied = false;
@@ -149,6 +174,9 @@ export function mergeWithContext(
     contextApplied = true;
     console.log(`🔗 [Context] Applied queryType from context: ${context.queryType}`);
   }
+
+  console.log(`📤 [Context] Merged result:`, merged);
+  console.log(`📤 [Context] Context was applied: ${contextApplied}`);
 
   return {
     ...merged,

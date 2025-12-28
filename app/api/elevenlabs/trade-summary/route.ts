@@ -3,12 +3,14 @@
  *
  * Returns summary counts of trades for a symbol.
  * Uses unified queryTrades() to ensure voice/UI consistency.
+ * Supports conversation context for follow-up queries.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { queryTrades, buildVoiceResponse, buildUIData, validateConsistency } from '@/src/lib/trade-query';
 import { DateFilter } from '@/src/lib/query-resolver';
 import { startTrace, formatTraceForResponse } from '@/src/lib/request-trace';
+import { getConversationKey, mergeWithContext, storeContext } from '@/src/lib/conversation-context';
 
 export async function POST(req: NextRequest) {
   const trace = startTrace('trade-summary');
@@ -16,15 +18,26 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
 
+    // Extract conversation key from ElevenLabs headers or body
+    const conversationKey = getConversationKey({
+      conversationId: req.headers.get('x-conversation-id') || body.conversation_id,
+      agentId: req.headers.get('x-agent-id') || body.agent_id,
+      sessionId: req.headers.get('x-session-id') || body.session_id,
+    });
+
     // ElevenLabs may send symbol directly or nested in various ways
-    const symbol = body.symbol || body.parameters?.symbol || body.body?.symbol || body.body?.parameters?.symbol;
+    let symbol = body.symbol || body.parameters?.symbol || body.body?.symbol || body.body?.parameters?.symbol;
     const timePeriod = body.time_period || body.parameters?.time_period ||
                        body.body?.time_period || body.body?.parameters?.time_period;
     const dateFilter: DateFilter | undefined = body.date_filter || body.parameters?.date_filter ||
                        body.body?.date_filter || body.body?.parameters?.date_filter;
 
-    // Log input
-    trace.logInput({ symbol, timePeriod, dateFilter });
+    // Merge with conversation context if symbol is missing (follow-up query)
+    const merged = mergeWithContext(conversationKey, { symbol, timePeriod, dateFilter });
+    symbol = merged.symbol;
+
+    // Log input (including context application)
+    trace.logInput({ symbol, timePeriod, dateFilter, _contextApplied: merged._contextApplied });
 
     if (!symbol) {
       trace.logError('No symbol provided');
@@ -33,6 +46,9 @@ export async function POST(req: NextRequest) {
         uiData: null,
       });
     }
+
+    // Store context for future follow-up queries
+    storeContext(conversationKey, { symbol, timePeriod, dateFilter, queryType: 'trade-summary' });
 
     // Use unified query - SINGLE SOURCE OF TRUTH
     const result = await queryTrades({

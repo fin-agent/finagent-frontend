@@ -4,6 +4,7 @@
  * Returns trades for a specific time period.
  * Uses unified queryTrades() to ensure voice/UI consistency.
  * Includes data availability suggestions when no data found.
+ * Supports conversation context for follow-up queries.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -12,6 +13,7 @@ import { DateFilter } from '@/src/lib/query-resolver';
 import { suggestDataPeriod } from '@/src/lib/data-availability';
 import { formatDisplayDate, formatDateRange } from '@/src/lib/date-utils';
 import { startTrace, formatTraceForResponse } from '@/src/lib/request-trace';
+import { getConversationKey, mergeWithContext, storeContext } from '@/src/lib/conversation-context';
 
 // Format date in PACIFIC TIMEZONE to match UI display
 function formatDateForVoice(dateStr: string): string {
@@ -68,10 +70,17 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
 
+    // Extract conversation key from ElevenLabs headers or body
+    const conversationKey = getConversationKey({
+      conversationId: req.headers.get('x-conversation-id') || body.conversation_id,
+      agentId: req.headers.get('x-agent-id') || body.agent_id,
+      sessionId: req.headers.get('x-session-id') || body.session_id,
+    });
+
     // Extract parameters - support various nesting patterns from ElevenLabs
     const timePeriod = body.time_period || body.parameters?.time_period ||
                        body.body?.time_period || body.body?.parameters?.time_period;
-    const symbol = body.symbol || body.parameters?.symbol ||
+    let symbol = body.symbol || body.parameters?.symbol ||
                    body.body?.symbol || body.body?.parameters?.symbol;
     const calculation = body.calculation || body.parameters?.calculation ||
                         body.body?.calculation || body.body?.parameters?.calculation;
@@ -80,8 +89,12 @@ export async function POST(req: NextRequest) {
     const dateFilter: DateFilter | undefined = body.date_filter || body.parameters?.date_filter ||
                        body.body?.date_filter || body.body?.parameters?.date_filter;
 
-    // Log input
-    trace.logInput({ symbol, timePeriod, dateFilter, calculation, tradeType });
+    // Merge with conversation context if symbol is missing (follow-up query)
+    const merged = mergeWithContext(conversationKey, { symbol, timePeriod, dateFilter });
+    symbol = merged.symbol;
+
+    // Log input (including context application)
+    trace.logInput({ symbol, timePeriod, dateFilter, calculation, tradeType, _contextApplied: merged._contextApplied });
 
     if (!timePeriod && !dateFilter) {
       trace.logError('No time period or date filter provided');
@@ -89,6 +102,9 @@ export async function POST(req: NextRequest) {
         response: 'Please specify a time period like "last week", "yesterday", "past 5 days", "Q3", "January", or a date range like "June 1st to the 7th".',
       });
     }
+
+    // Store context for future follow-up queries (even if symbol is null for all-trades queries)
+    storeContext(conversationKey, { symbol, timePeriod, dateFilter, queryType: 'time-trades' });
 
     // Determine trade type filter
     const normalizedTradeType = tradeType && tradeType.toLowerCase() !== 'all'

@@ -14,21 +14,19 @@ interface DateFilter {
   description: string;
 }
 
-// Format date in EASTERN TIMEZONE to match user's timezone and market hours
-// Database stores dates as YYYY-MM-DD which JS interprets as UTC midnight
-// We use Eastern timezone to align with NYSE/NASDAQ hours and user's local time
+// Format date for voice output - parse as local time to avoid UTC timezone shift
+// Database stores dates as YYYY-MM-DD, we display them verbatim
 function formatDateForVoice(dateStr: string): string {
   if (!dateStr) return 'N/A';
 
-  // Extract YYYY-MM-DD part and interpret as UTC midnight
+  // Parse YYYY-MM-DD as local time to avoid UTC → local timezone shift
   const datePart = dateStr.split('T')[0];
-  const date = new Date(datePart + 'T00:00:00Z');
+  const [year, month, day] = datePart.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
 
   if (isNaN(date.getTime())) return dateStr;
 
-  // Format in Eastern timezone to match user's timezone
   return date.toLocaleDateString('en-US', {
-    timeZone: 'America/New_York',
     month: 'long',
     day: 'numeric',
     year: 'numeric'

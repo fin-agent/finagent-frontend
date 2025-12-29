@@ -16,14 +16,15 @@ import { startTrace, formatTraceForResponse } from '@/src/lib/request-trace';
 import { checkSymbolPresence } from '@/src/lib/symbol-lookup';
 // Context merging disabled - ElevenLabs LLM has full conversation history and handles context better
 
-// Format date in EASTERN TIMEZONE to match user's timezone and market hours
+// Format date for voice output - parse as local time to avoid UTC timezone shift
 function formatDateForVoice(dateStr: string): string {
   if (!dateStr) return 'N/A';
+  // Parse YYYY-MM-DD as local time to avoid UTC → local timezone shift
   const datePart = dateStr.split('T')[0];
-  const date = new Date(datePart + 'T00:00:00Z');
+  const [year, month, day] = datePart.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
   if (isNaN(date.getTime())) return dateStr;
   return date.toLocaleDateString('en-US', {
-    timeZone: 'America/New_York',
     month: 'long',
     day: 'numeric',
     year: 'numeric'

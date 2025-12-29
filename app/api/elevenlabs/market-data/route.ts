@@ -11,6 +11,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { normalizeSymbol } from '@/src/lib/symbol-utils';
+import { checkSymbolPresence } from '@/src/lib/symbol-lookup';
 import {
   getStockSnapshot,
   getOptionSnapshot,
@@ -264,8 +265,15 @@ async function handleStockQuote(symbol?: string): Promise<NextResponse> {
     const prevBar = snapshot.prevDailyBar;
 
     if (!quote && !trade) {
+      // Check if user has trading history with this symbol
+      const presence = await checkSymbolPresence(symbol);
+      let responseText = `I couldn't find quote data for ${symbol}. Please check the symbol and try again.`;
+      if (presence.context) {
+        const contextLower = presence.context.charAt(0).toLowerCase() + presence.context.slice(1);
+        responseText = `I couldn't find real-time quote data for ${symbol}. However, ${contextLower} Would you like to see those instead?`;
+      }
       return NextResponse.json({
-        response: `I couldn't find quote data for ${symbol}. Please check the symbol and try again.`,
+        response: responseText,
         uiData: { type: 'error', message: `No data found for ${symbol}`, code: 'SYMBOL_NOT_FOUND' } as ErrorUIData,
       });
     }
@@ -315,8 +323,15 @@ async function handleStockQuote(symbol?: string): Promise<NextResponse> {
 
   } catch (error) {
     console.error(`Stock quote error for ${symbol}:`, error);
+    // Check if user has trading history with this symbol
+    const presence = await checkSymbolPresence(symbol);
+    let responseText = `I couldn't fetch the quote for ${symbol}. The symbol may be invalid or the market data service may be unavailable.`;
+    if (presence.context) {
+      const contextLower = presence.context.charAt(0).toLowerCase() + presence.context.slice(1);
+      responseText = `I couldn't fetch the real-time quote for ${symbol}, but ${contextLower} Would you like to see those instead?`;
+    }
     return NextResponse.json({
-      response: `I couldn't fetch the quote for ${symbol}. The symbol may be invalid or the market data service may be unavailable.`,
+      response: responseText,
       uiData: { type: 'error', message: `Failed to fetch ${symbol}` } as ErrorUIData,
     });
   }
@@ -379,8 +394,15 @@ async function handleOptionQuote(
     const trade = snapshot.latestTrade;
 
     if (!quote && !trade) {
+      // Check if user has trading history with this underlying symbol
+      const presence = await checkSymbolPresence(symbol);
+      let responseText = `I couldn't find quote data for the ${symbol} ${formatOCCForDisplay(occSymbol)}. This option contract may not exist or may have no active quotes.`;
+      if (presence.context) {
+        const contextLower = presence.context.charAt(0).toLowerCase() + presence.context.slice(1);
+        responseText = `I couldn't find quote data for the ${symbol} ${formatOCCForDisplay(occSymbol)}. However, ${contextLower} Would you like to see those instead?`;
+      }
       return NextResponse.json({
-        response: `I couldn't find quote data for the ${symbol} ${formatOCCForDisplay(occSymbol)}. This option contract may not exist or may have no active quotes.`,
+        response: responseText,
         uiData: { type: 'error', message: `No data for ${occSymbol}`, code: 'OPTION_NOT_FOUND' } as ErrorUIData,
       });
     }
@@ -432,8 +454,15 @@ async function handleOptionQuote(
 
   } catch (error) {
     console.error(`Option quote error for ${occSymbol}:`, error);
+    // Check if user has trading history with this underlying symbol
+    const presence = await checkSymbolPresence(symbol);
+    let responseText = `I couldn't fetch the quote for the ${symbol} ${formatOCCForDisplay(occSymbol)}. The option contract may not exist or may have no active market.`;
+    if (presence.context) {
+      const contextLower = presence.context.charAt(0).toLowerCase() + presence.context.slice(1);
+      responseText = `I couldn't fetch the real-time quote for ${symbol} options, but ${contextLower} Would you like to see those instead?`;
+    }
     return NextResponse.json({
-      response: `I couldn't fetch the quote for the ${symbol} ${formatOCCForDisplay(occSymbol)}. The option contract may not exist or may have no active market.`,
+      response: responseText,
       uiData: { type: 'error', message: `Failed to fetch ${occSymbol}` } as ErrorUIData,
     });
   }
@@ -466,8 +495,15 @@ async function handleHistorical(symbol?: string, period?: string): Promise<NextR
     });
 
     if (bars.length === 0) {
+      // Check if user has trading history with this symbol
+      const presence = await checkSymbolPresence(symbol);
+      let responseText = `I couldn't find historical data for ${symbol} over the past ${chartPeriod}.`;
+      if (presence.context) {
+        const contextLower = presence.context.charAt(0).toLowerCase() + presence.context.slice(1);
+        responseText = `I couldn't find historical chart data for ${symbol}. However, ${contextLower} Would you like to see those instead?`;
+      }
       return NextResponse.json({
-        response: `I couldn't find historical data for ${symbol} over the past ${chartPeriod}.`,
+        response: responseText,
         uiData: { type: 'error', message: `No historical data for ${symbol}` } as ErrorUIData,
       });
     }
@@ -510,8 +546,15 @@ async function handleHistorical(symbol?: string, period?: string): Promise<NextR
 
   } catch (error) {
     console.error(`Historical data error for ${symbol}:`, error);
+    // Check if user has trading history with this symbol
+    const presence = await checkSymbolPresence(symbol);
+    let responseText = `I couldn't fetch the chart data for ${symbol}. Please try again.`;
+    if (presence.context) {
+      const contextLower = presence.context.charAt(0).toLowerCase() + presence.context.slice(1);
+      responseText = `I couldn't fetch the chart data for ${symbol}, but ${contextLower} Would you like to see those instead?`;
+    }
     return NextResponse.json({
-      response: `I couldn't fetch the chart data for ${symbol}. Please try again.`,
+      response: responseText,
       uiData: { type: 'error', message: `Failed to fetch chart for ${symbol}` } as ErrorUIData,
     });
   }
@@ -529,9 +572,18 @@ async function handleNews(symbol?: string): Promise<NextResponse> {
     });
 
     if (articles.length === 0) {
-      const noNewsMsg = symbol
+      let noNewsMsg = symbol
         ? `I couldn't find any recent news for ${symbol}.`
         : 'I couldn\'t find any recent market news.';
+
+      // Check if user has trading history with this symbol
+      if (symbol) {
+        const presence = await checkSymbolPresence(symbol);
+        if (presence.context) {
+          const contextLower = presence.context.charAt(0).toLowerCase() + presence.context.slice(1);
+          noNewsMsg = `I couldn't find any recent news for ${symbol}. However, ${contextLower} Would you like to see those instead?`;
+        }
+      }
       return NextResponse.json({
         response: noNewsMsg,
         uiData: { type: 'news', symbol, articles: [] } as NewsUIData,
@@ -579,8 +631,15 @@ async function handleHaltStatus(symbol?: string): Promise<NextResponse> {
       const status = await checkTradingHalt(symbol);
 
       if (!status) {
+        // Check if user has trading history with this symbol
+        const presence = await checkSymbolPresence(symbol);
+        let responseText = `I couldn't find trading status for ${symbol}. Please check the symbol.`;
+        if (presence.context) {
+          const contextLower = presence.context.charAt(0).toLowerCase() + presence.context.slice(1);
+          responseText = `I couldn't find trading status for ${symbol}. However, ${contextLower} Would you like to see those instead?`;
+        }
         return NextResponse.json({
-          response: `I couldn't find trading status for ${symbol}. Please check the symbol.`,
+          response: responseText,
           uiData: { type: 'error', message: `Status not found for ${symbol}` } as ErrorUIData,
         });
       }

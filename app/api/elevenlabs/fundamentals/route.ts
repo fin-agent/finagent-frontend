@@ -11,6 +11,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { normalizeSymbol } from '@/src/lib/symbol-utils';
+import { checkSymbolPresence } from '@/src/lib/symbol-lookup';
 import {
   getCompanyOverview,
   getIncomeStatement,
@@ -197,8 +198,15 @@ async function handleOverview(symbol: string): Promise<NextResponse> {
     const overview = await getCompanyOverview(symbol);
 
     if (!overview) {
+      // Check if user has trading history with this symbol
+      const presence = await checkSymbolPresence(symbol);
+      let responseText = `I couldn't find fundamental data for ${symbol}. Please check the symbol and try again. Note: The free tier has a limit of 25 API calls per day.`;
+      if (presence.context) {
+        const contextLower = presence.context.charAt(0).toLowerCase() + presence.context.slice(1);
+        responseText = `I couldn't find fundamental data for ${symbol}. However, ${contextLower} Would you like to see those instead?`;
+      }
       return NextResponse.json({
-        response: `I couldn't find fundamental data for ${symbol}. Please check the symbol and try again. Note: The free tier has a limit of 25 API calls per day.`,
+        response: responseText,
         uiData: { type: 'error', message: `No data found for ${symbol}`, code: 'SYMBOL_NOT_FOUND' } as ErrorUIData,
       });
     }
@@ -235,8 +243,15 @@ async function handleOverview(symbol: string): Promise<NextResponse> {
 
   } catch (error) {
     console.error(`Company overview error for ${symbol}:`, error);
+    // Check if user has trading history with this symbol
+    const presence = await checkSymbolPresence(symbol);
+    let responseText = `I couldn't fetch the company overview for ${symbol}. The API may be rate limited or the symbol may be invalid.`;
+    if (presence.context) {
+      const contextLower = presence.context.charAt(0).toLowerCase() + presence.context.slice(1);
+      responseText = `I couldn't fetch fundamental data for ${symbol}, but ${contextLower} Would you like to see those instead?`;
+    }
     return NextResponse.json({
-      response: `I couldn't fetch the company overview for ${symbol}. The API may be rate limited or the symbol may be invalid.`,
+      response: responseText,
       uiData: { type: 'error', message: `Failed to fetch ${symbol}` } as ErrorUIData,
     });
   }
@@ -258,8 +273,15 @@ async function handleMetric(symbol: string, metricType?: string): Promise<NextRe
     const overview = await getCompanyOverview(symbol);
 
     if (!overview) {
+      // Check if user has trading history with this symbol
+      const presence = await checkSymbolPresence(symbol);
+      let responseText = `I couldn't find fundamental data for ${symbol}. Please check the symbol.`;
+      if (presence.context) {
+        const contextLower = presence.context.charAt(0).toLowerCase() + presence.context.slice(1);
+        responseText = `I couldn't find fundamental data for ${symbol}. However, ${contextLower} Would you like to see those instead?`;
+      }
       return NextResponse.json({
-        response: `I couldn't find fundamental data for ${symbol}. Please check the symbol.`,
+        response: responseText,
         uiData: { type: 'error', message: `No data found for ${symbol}` } as ErrorUIData,
       });
     }
@@ -301,8 +323,15 @@ async function handleMetric(symbol: string, metricType?: string): Promise<NextRe
 
   } catch (error) {
     console.error(`Metric error for ${symbol}:`, error);
+    // Check if user has trading history with this symbol
+    const presence = await checkSymbolPresence(symbol);
+    let responseText = `I couldn't fetch the ${metricType} for ${symbol}. Please try again.`;
+    if (presence.context) {
+      const contextLower = presence.context.charAt(0).toLowerCase() + presence.context.slice(1);
+      responseText = `I couldn't fetch the ${metricType} for ${symbol}, but ${contextLower} Would you like to see those instead?`;
+    }
     return NextResponse.json({
-      response: `I couldn't fetch the ${metricType} for ${symbol}. Please try again.`,
+      response: responseText,
       uiData: { type: 'error', message: `Failed to fetch metric` } as ErrorUIData,
     });
   }
@@ -335,8 +364,15 @@ async function handleFinancials(symbol: string, statementType?: 'income' | 'bala
     }
 
     if (!data || data.length === 0) {
+      // Check if user has trading history with this symbol
+      const presence = await checkSymbolPresence(symbol);
+      let responseText = `I couldn't find ${statementName} data for ${symbol}. Please check the symbol.`;
+      if (presence.context) {
+        const contextLower = presence.context.charAt(0).toLowerCase() + presence.context.slice(1);
+        responseText = `I couldn't find ${statementName} data for ${symbol}. However, ${contextLower} Would you like to see those instead?`;
+      }
       return NextResponse.json({
-        response: `I couldn't find ${statementName} data for ${symbol}. Please check the symbol.`,
+        response: responseText,
         uiData: { type: 'error', message: `No data found for ${symbol}` } as ErrorUIData,
       });
     }
@@ -376,8 +412,15 @@ async function handleFinancials(symbol: string, statementType?: 'income' | 'bala
 
   } catch (error) {
     console.error(`Financials error for ${symbol}:`, error);
+    // Check if user has trading history with this symbol
+    const presence = await checkSymbolPresence(symbol);
+    let responseText = `I couldn't fetch the financial statements for ${symbol}. Please try again.`;
+    if (presence.context) {
+      const contextLower = presence.context.charAt(0).toLowerCase() + presence.context.slice(1);
+      responseText = `I couldn't fetch financials for ${symbol}, but ${contextLower} Would you like to see those instead?`;
+    }
     return NextResponse.json({
-      response: `I couldn't fetch the financial statements for ${symbol}. Please try again.`,
+      response: responseText,
       uiData: { type: 'error', message: `Failed to fetch financials` } as ErrorUIData,
     });
   }
@@ -434,15 +477,29 @@ async function handleEarnings(symbol: string): Promise<NextResponse> {
     }
 
     if (!uiData.nextEarningsDate && earnings.length === 0) {
-      response = `I couldn't find earnings data for ${symbol}. The symbol may be invalid or the API may be rate limited.`;
+      // Check if user has trading history with this symbol
+      const presence = await checkSymbolPresence(symbol);
+      if (presence.context) {
+        const contextLower = presence.context.charAt(0).toLowerCase() + presence.context.slice(1);
+        response = `I couldn't find earnings data for ${symbol}. However, ${contextLower} Would you like to see those instead?`;
+      } else {
+        response = `I couldn't find earnings data for ${symbol}. The symbol may be invalid or the API may be rate limited.`;
+      }
     }
 
     return NextResponse.json({ response, uiData });
 
   } catch (error) {
     console.error(`Earnings error for ${symbol}:`, error);
+    // Check if user has trading history with this symbol
+    const presence = await checkSymbolPresence(symbol);
+    let responseText = `I couldn't fetch the earnings data for ${symbol}. Please try again.`;
+    if (presence.context) {
+      const contextLower = presence.context.charAt(0).toLowerCase() + presence.context.slice(1);
+      responseText = `I couldn't fetch earnings data for ${symbol}, but ${contextLower} Would you like to see those instead?`;
+    }
     return NextResponse.json({
-      response: `I couldn't fetch the earnings data for ${symbol}. Please try again.`,
+      response: responseText,
       uiData: { type: 'error', message: `Failed to fetch earnings` } as ErrorUIData,
     });
   }
@@ -461,8 +518,15 @@ async function handleDividend(symbol: string): Promise<NextResponse> {
     ]);
 
     if (!overview && history.length === 0) {
+      // Check if user has trading history with this symbol
+      const presence = await checkSymbolPresence(symbol);
+      let responseText = `I couldn't find dividend data for ${symbol}. This company may not pay dividends or the symbol may be invalid.`;
+      if (presence.context) {
+        const contextLower = presence.context.charAt(0).toLowerCase() + presence.context.slice(1);
+        responseText = `I couldn't find dividend data for ${symbol}. However, ${contextLower} Would you like to see those instead?`;
+      }
       return NextResponse.json({
-        response: `I couldn't find dividend data for ${symbol}. This company may not pay dividends or the symbol may be invalid.`,
+        response: responseText,
         uiData: { type: 'error', message: `No data found for ${symbol}` } as ErrorUIData,
       });
     }
@@ -495,8 +559,15 @@ async function handleDividend(symbol: string): Promise<NextResponse> {
 
   } catch (error) {
     console.error(`Dividend error for ${symbol}:`, error);
+    // Check if user has trading history with this symbol
+    const presence = await checkSymbolPresence(symbol);
+    let responseText = `I couldn't fetch the dividend data for ${symbol}. Please try again.`;
+    if (presence.context) {
+      const contextLower = presence.context.charAt(0).toLowerCase() + presence.context.slice(1);
+      responseText = `I couldn't fetch dividend data for ${symbol}, but ${contextLower} Would you like to see those instead?`;
+    }
     return NextResponse.json({
-      response: `I couldn't fetch the dividend data for ${symbol}. Please try again.`,
+      response: responseText,
       uiData: { type: 'error', message: `Failed to fetch dividend` } as ErrorUIData,
     });
   }

@@ -841,14 +841,18 @@ const UnifiedAssistant: React.FC = () => {
   // "how are you calculating this?"
   const lastAssistantTradeUIRef = useRef<TradeUIData | null>(null);
   // Stores the last data suggestion offered (for "would you like to know more?" follow-ups)
+  // Supports both fees and trades suggestions
   const lastSuggestionRef = useRef<{
-    feeType: FeeType;
+    type: 'fees' | 'trades';
+    feeType?: FeeType;  // Only for fees type
+    cardType?: string;  // Original card type for trades
     timePeriod: string;
     startDate: string;
     endDate: string;
-    amount: number;
+    amount?: number;    // For fees
     count: number;
     symbol?: string;
+    tradeType?: string; // For trades
   } | null>(null);
   // Used to avoid rendering a new UI card for purely explanatory follow-ups.
   const suppressNextTradeUICardRef = useRef(false);
@@ -1636,11 +1640,12 @@ const UnifiedAssistant: React.FC = () => {
 
           if (tradeUI) {
             lastAssistantTradeUIRef.current = tradeUI;
-            // Store suggestion for follow-up handling
+            // Store suggestion for follow-up handling (supports both fees and trades)
             if (tradeUI.type === 'fees' && tradeUI.data) {
               const feesData = tradeUI.data as { suggestion?: { period: string; amount: number; count: number; startDate: string; endDate: string } | null; feeType?: FeeType; symbol?: string; timePeriod?: string };
               if (feesData.suggestion) {
                 lastSuggestionRef.current = {
+                  type: 'fees',
                   feeType: tradeUI.feeType || feesData.feeType || 'commission',
                   timePeriod: feesData.suggestion.period,
                   startDate: feesData.suggestion.startDate,
@@ -1648,6 +1653,21 @@ const UnifiedAssistant: React.FC = () => {
                   amount: feesData.suggestion.amount,
                   count: feesData.suggestion.count,
                   symbol: feesData.symbol || tradeUI.symbol,
+                };
+              }
+            } else if ((tradeUI.type === 'time-based' || tradeUI.type === 'detailed') && tradeUI.data) {
+              // Handle trade suggestions (from time-based or detailed queries)
+              const tradesData = tradeUI.data as { suggestion?: { period: string; count: number; startDate: string; endDate: string } | null; symbol?: string | null; timePeriod?: string };
+              if (tradesData.suggestion) {
+                lastSuggestionRef.current = {
+                  type: 'trades',
+                  cardType: tradeUI.type,
+                  timePeriod: tradesData.suggestion.period,
+                  startDate: tradesData.suggestion.startDate,
+                  endDate: tradesData.suggestion.endDate,
+                  count: tradesData.suggestion.count,
+                  symbol: tradesData.symbol || tradeUI.symbol,
+                  tradeType: tradeUI.tradeType,
                 };
               }
             }
@@ -2303,28 +2323,49 @@ const UnifiedAssistant: React.FC = () => {
 
             // VOICE MODE: Handle user accepting a suggestion (e.g., "yes" to "Would you like to know more?")
             // This mirrors the text mode handling at handleSendMessage
+            // Supports both fees and trades suggestions
             const voiceSuggestionAccept = isSuggestionFollowup(userQuery) && lastSuggestionRef.current !== null;
             if (voiceSuggestionAccept && lastSuggestionRef.current) {
-              console.log('📊 [Voice Suggestion Follow-up] User accepted suggestion, setting intent for:', lastSuggestionRef.current.timePeriod);
+              console.log('📊 [Voice Suggestion Follow-up] User accepted suggestion, setting intent for:', lastSuggestionRef.current.timePeriod, '(type:', lastSuggestionRef.current.type, ')');
               const suggestion = lastSuggestionRef.current;
-              // Create a synthetic intent to fetch fees data with the suggested period
-              const suggestionIntent: QueryIntent = {
-                cardType: 'fees',
-                feeType: suggestion.feeType,
-                timePeriod: suggestion.timePeriod,
-                symbol: suggestion.symbol,
-                dateFilter: {
-                  type: 'range',
-                  startDate: suggestion.startDate,
-                  endDate: suggestion.endDate,
-                  description: suggestion.timePeriod,
-                },
-              };
+
+              // Create a synthetic intent based on suggestion type
+              let suggestionIntent: QueryIntent;
+              if (suggestion.type === 'trades') {
+                // Trade suggestion - use time-based card type
+                suggestionIntent = {
+                  cardType: 'time-based',
+                  timePeriod: suggestion.timePeriod,
+                  symbol: suggestion.symbol,
+                  tradeType: suggestion.tradeType as 'buy' | 'sell' | undefined,
+                  dateFilter: {
+                    type: 'range',
+                    startDate: suggestion.startDate,
+                    endDate: suggestion.endDate,
+                    description: suggestion.timePeriod,
+                  },
+                };
+              } else {
+                // Fees suggestion (default for backwards compatibility)
+                suggestionIntent = {
+                  cardType: 'fees',
+                  feeType: suggestion.feeType,
+                  timePeriod: suggestion.timePeriod,
+                  symbol: suggestion.symbol,
+                  dateFilter: {
+                    type: 'range',
+                    startDate: suggestion.startDate,
+                    endDate: suggestion.endDate,
+                    description: suggestion.timePeriod,
+                  },
+                };
+              }
+
               pendingQueryIntentRef.current = suggestionIntent;
               pendingTradeUIRequestRef.current = fetchTradeData(
                 suggestionIntent.symbol || '',
                 suggestionIntent.cardType,
-                undefined,
+                suggestionIntent.tradeType,
                 suggestionIntent.timePeriod,
                 {
                   feeType: suggestionIntent.feeType,
@@ -2514,11 +2555,12 @@ const UnifiedAssistant: React.FC = () => {
 
             if (tradeUI) {
               lastAssistantTradeUIRef.current = tradeUI;
-              // Store suggestion for follow-up handling
+              // Store suggestion for follow-up handling (supports both fees and trades)
               if (tradeUI.type === 'fees' && tradeUI.data) {
                 const feesData = tradeUI.data as { suggestion?: { period: string; amount: number; count: number; startDate: string; endDate: string } | null; feeType?: FeeType; symbol?: string; timePeriod?: string };
                 if (feesData.suggestion) {
                   lastSuggestionRef.current = {
+                    type: 'fees',
                     feeType: tradeUI.feeType || feesData.feeType || 'commission',
                     timePeriod: feesData.suggestion.period,
                     startDate: feesData.suggestion.startDate,
@@ -2526,6 +2568,21 @@ const UnifiedAssistant: React.FC = () => {
                     amount: feesData.suggestion.amount,
                     count: feesData.suggestion.count,
                     symbol: feesData.symbol || tradeUI.symbol,
+                  };
+                }
+              } else if ((tradeUI.type === 'time-based' || tradeUI.type === 'detailed') && tradeUI.data) {
+                // Handle trade suggestions (from time-based or detailed queries)
+                const tradesData = tradeUI.data as { suggestion?: { period: string; count: number; startDate: string; endDate: string } | null; symbol?: string | null; timePeriod?: string };
+                if (tradesData.suggestion) {
+                  lastSuggestionRef.current = {
+                    type: 'trades',
+                    cardType: tradeUI.type,
+                    timePeriod: tradesData.suggestion.period,
+                    startDate: tradesData.suggestion.startDate,
+                    endDate: tradesData.suggestion.endDate,
+                    count: tradesData.suggestion.count,
+                    symbol: tradesData.symbol || tradeUI.symbol,
+                    tradeType: tradeUI.tradeType,
                   };
                 }
               }
@@ -2752,24 +2809,41 @@ const UnifiedAssistant: React.FC = () => {
 	    }
 
 	    // Handle user accepting a suggestion (e.g., "yes" to "Would you like to know more?")
+	    // Supports both fees and trades suggestions
 	    if (isSuggestionAccept && lastSuggestionRef.current) {
-	      console.log('📊 [Suggestion Follow-up] User accepted suggestion, fetching data for:', lastSuggestionRef.current.timePeriod);
+	      console.log('📊 [Suggestion Follow-up] User accepted suggestion, fetching data for:', lastSuggestionRef.current.timePeriod, '(type:', lastSuggestionRef.current.type, ')');
 	      const suggestion = lastSuggestionRef.current;
-	      // Create a synthetic intent to fetch fees data with the suggested period
-	      // Use explicit dateFilter with startDate/endDate for reliable date handling
-	      intent = {
-	        cardType: 'fees',
-	        feeType: suggestion.feeType,
-	        timePeriod: suggestion.timePeriod,
-	        symbol: suggestion.symbol,
-	        // Pass dateFilter with explicit dates for the follow-up fetch
-	        dateFilter: {
-	          type: 'range',
-	          startDate: suggestion.startDate,
-	          endDate: suggestion.endDate,
-	          description: suggestion.timePeriod,
-	        },
-	      };
+
+	      // Create a synthetic intent based on suggestion type
+	      if (suggestion.type === 'trades') {
+	        // Trade suggestion - use time-based card type
+	        intent = {
+	          cardType: 'time-based',
+	          timePeriod: suggestion.timePeriod,
+	          symbol: suggestion.symbol,
+	          tradeType: suggestion.tradeType as 'buy' | 'sell' | undefined,
+	          dateFilter: {
+	            type: 'range',
+	            startDate: suggestion.startDate,
+	            endDate: suggestion.endDate,
+	            description: suggestion.timePeriod,
+	          },
+	        };
+	      } else {
+	        // Fees suggestion (default for backwards compatibility)
+	        intent = {
+	          cardType: 'fees',
+	          feeType: suggestion.feeType,
+	          timePeriod: suggestion.timePeriod,
+	          symbol: suggestion.symbol,
+	          dateFilter: {
+	            type: 'range',
+	            startDate: suggestion.startDate,
+	            endDate: suggestion.endDate,
+	            description: suggestion.timePeriod,
+	          },
+	        };
+	      }
 	      // Clear the suggestion after using it
 	      lastSuggestionRef.current = null;
 	    }
@@ -2909,11 +2983,12 @@ const UnifiedAssistant: React.FC = () => {
         };
 
         lastAssistantTradeUIRef.current = tradeUI;
-        // Store suggestion for follow-up handling
+        // Store suggestion for follow-up handling (supports both fees and trades)
         if (tradeUI && tradeUI.type === 'fees' && tradeUI.data) {
           const feesData = tradeUI.data as { suggestion?: { period: string; amount: number; count: number; startDate: string; endDate: string } | null; feeType?: FeeType; symbol?: string; timePeriod?: string };
           if (feesData.suggestion) {
             lastSuggestionRef.current = {
+              type: 'fees',
               feeType: tradeUI.feeType || feesData.feeType || 'commission',
               timePeriod: feesData.suggestion.period,
               startDate: feesData.suggestion.startDate,
@@ -2921,6 +2996,21 @@ const UnifiedAssistant: React.FC = () => {
               amount: feesData.suggestion.amount,
               count: feesData.suggestion.count,
               symbol: feesData.symbol || tradeUI.symbol,
+            };
+          }
+        } else if (tradeUI && (tradeUI.type === 'time-based' || tradeUI.type === 'detailed') && tradeUI.data) {
+          // Handle trade suggestions (from time-based or detailed queries)
+          const tradesData = tradeUI.data as { suggestion?: { period: string; count: number; startDate: string; endDate: string } | null; symbol?: string | null; timePeriod?: string };
+          if (tradesData.suggestion) {
+            lastSuggestionRef.current = {
+              type: 'trades',
+              cardType: tradeUI.type,
+              timePeriod: tradesData.suggestion.period,
+              startDate: tradesData.suggestion.startDate,
+              endDate: tradesData.suggestion.endDate,
+              count: tradesData.suggestion.count,
+              symbol: tradesData.symbol || tradeUI.symbol,
+              tradeType: tradeUI.tradeType,
             };
           }
         }

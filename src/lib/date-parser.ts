@@ -2,25 +2,26 @@
  * Natural language date parsing for time-based trade queries
  * Parses expressions like "last week", "yesterday", "past 5 days", "Monday"
  *
- * IMPORTANT: Uses US Pacific timezone for consistent date calculations
+ * IMPORTANT: Uses US Eastern timezone for consistent date calculations
+ * (matches user timezone and market hours)
  */
 
 import { formatDateForDB, realDateToDemoDate } from './date-utils';
 import type { DateFilter } from './intent-detection/types';
 
 /**
- * Get the current date in US Pacific timezone as a Date object
- * Duplicated from date-utils for module independence
+ * Get the current date in US Eastern timezone as a Date object
+ * Eastern timezone aligns with NYSE/NASDAQ market hours and user's local time
  */
-function getPacificToday(): Date {
+function getEasternToday(): Date {
   const now = new Date();
-  const pacificDateStr = now.toLocaleDateString('en-US', {
-    timeZone: 'America/Los_Angeles',
+  const easternDateStr = now.toLocaleDateString('en-US', {
+    timeZone: 'America/New_York',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit'
   });
-  const [month, day, year] = pacificDateStr.split('/').map(Number);
+  const [month, day, year] = easternDateStr.split('/').map(Number);
   return new Date(year, month - 1, day);
 }
 
@@ -82,7 +83,7 @@ export function parseTimeExpression(expression: string): ParsedDateQuery | null 
   let lowerExpr = expression.toLowerCase().trim();
   lowerExpr = lowerExpr.replace(/^(in|for|during)\s+/i, '');
 
-  const today = getPacificToday();
+  const today = getEasternToday();
   today.setHours(0, 0, 0, 0);
 
   // Helper to format date for DB query (no offset applied)
@@ -577,7 +578,7 @@ export function resolveDateFilter(filter: DateFilter): ResolvedDates {
   }
 
   // Ultimate fallback: last 30 days
-  const today = getPacificToday();
+  const today = getEasternToday();
   const start = new Date(today);
   start.setDate(start.getDate() - 30);
   return {
@@ -600,7 +601,7 @@ export function parseTimePeriodToResolvedDates(timePeriod: string): ResolvedDate
   let lowerExpr = timePeriod.toLowerCase().trim();
   lowerExpr = lowerExpr.replace(/^(in|for|during)\s+/i, '');
 
-  const today = getPacificToday();
+  const today = getEasternToday();
   today.setHours(0, 0, 0, 0);
 
   // Helper to format date WITH offset - for DB queries

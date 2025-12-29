@@ -2,37 +2,37 @@
  * Date utilities for time-based trade queries
  * Handles offset calculation between demo data dates and actual today
  *
- * IMPORTANT: Uses US Pacific timezone for consistent date calculations
- * This ensures the same "today" is used whether running locally or on Vercel (UTC).
+ * IMPORTANT: Uses US Eastern timezone for consistent date calculations
+ * Eastern timezone aligns with NYSE/NASDAQ market hours and user's local time.
  */
 
 // The latest trade date in the demo database - this represents "today" in the demo
 const DEMO_TODAY = '2025-11-20';
 
 /**
- * Get the current date in US Pacific timezone as a Date object
- * This ensures consistent "today" across local dev (PST) and production (UTC)
+ * Get the current date in US Eastern timezone as a Date object
+ * This ensures consistent "today" across local dev and production (UTC)
+ * and aligns with market hours and user timezone.
  */
-function getPacificToday(): Date {
-  // Get current time in Pacific timezone
+function getEasternToday(): Date {
   const now = new Date();
-  const pacificDateStr = now.toLocaleDateString('en-US', {
-    timeZone: 'America/Los_Angeles',
+  const easternDateStr = now.toLocaleDateString('en-US', {
+    timeZone: 'America/New_York',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit'
   });
   // Parse MM/DD/YYYY format
-  const [month, day, year] = pacificDateStr.split('/').map(Number);
+  const [month, day, year] = easternDateStr.split('/').map(Number);
   return new Date(year, month - 1, day);
 }
 
 /**
- * Calculate the offset in days between demo "today" and actual today (Pacific time)
+ * Calculate the offset in days between demo "today" and actual today (Eastern time)
  * Positive offset means demo dates are in the future relative to actual today
  */
 export function getDateOffset(): number {
-  const actualToday = getPacificToday();
+  const actualToday = getEasternToday();
   actualToday.setHours(0, 0, 0, 0);
 
   // Parse DEMO_TODAY as local date (not UTC) to avoid timezone issues
@@ -79,7 +79,7 @@ export function demoDateToRealDate(demoDateStr: string): Date {
 export function formatDisplayDate(demoDateStr: string): string {
   const realDate = demoDateToRealDate(demoDateStr);
 
-  const today = getPacificToday();
+  const today = getEasternToday();
   today.setHours(0, 0, 0, 0);
   realDate.setHours(0, 0, 0, 0);
 

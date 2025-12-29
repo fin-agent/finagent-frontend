@@ -14,10 +14,9 @@ interface DateFilter {
   description: string;
 }
 
-// Format date in PACIFIC TIMEZONE to match UI display
-// The UI renders dates in the user's browser (typically Pacific time)
+// Format date in EASTERN TIMEZONE to match user's timezone and market hours
 // Database stores dates as YYYY-MM-DD which JS interprets as UTC midnight
-// UTC midnight = previous day evening in Pacific, so we need Pacific formatting
+// We use Eastern timezone to align with NYSE/NASDAQ hours and user's local time
 function formatDateForVoice(dateStr: string): string {
   if (!dateStr) return 'N/A';
 
@@ -27,9 +26,9 @@ function formatDateForVoice(dateStr: string): string {
 
   if (isNaN(date.getTime())) return dateStr;
 
-  // Format in Pacific timezone to match browser display
+  // Format in Eastern timezone to match user's timezone
   return date.toLocaleDateString('en-US', {
-    timeZone: 'America/Los_Angeles',
+    timeZone: 'America/New_York',
     month: 'long',
     day: 'numeric',
     year: 'numeric'

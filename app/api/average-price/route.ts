@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import { formatCalendarDate, getDateOffset } from '@/src/lib/date-utils';
-import { parseTimeExpression } from '@/src/lib/date-parser';
+import { parseTimePeriodToResolvedDates } from '@/src/lib/date-parser';
 import { normalizeSymbol } from '@/src/lib/symbol-utils';
 
 const supabase = createClient(
@@ -39,12 +39,13 @@ export async function POST(req: NextRequest) {
     let timePeriodDescription: string = timePeriod || 'this year';
 
     // If timePeriod is provided, parse it to get date range
+    // Use parseTimePeriodToResolvedDates which handles month names ("September") and relative dates ("last week")
     if (timePeriod) {
-      const parsedTime = parseTimeExpression(timePeriod);
-      if (parsedTime) {
-        dateStart = parsedTime.dateRange.startDate;
-        dateEnd = parsedTime.dateRange.endDate;
-        timePeriodDescription = parsedTime.dateRange.description || timePeriod;
+      const resolved = parseTimePeriodToResolvedDates(timePeriod);
+      if (resolved && resolved.type === 'range' && resolved.startDate && resolved.endDate) {
+        dateStart = resolved.startDate;
+        dateEnd = resolved.endDate;
+        timePeriodDescription = resolved.description || timePeriod;
       } else {
         // Fallback to full year if parsing fails
         dateStart = `${dbYear}-01-01`;

@@ -520,8 +520,16 @@ export function resolveDateFilter(filter: DateFilter): ResolvedDates {
 
   // Handle discrete dates (multiple specific dates)
   if (filter.type === 'discrete' && filter.dates && filter.dates.length > 0) {
+    // CRITICAL FIX: If dates are already in YYYY-MM-DD format, use them directly
+    // to avoid timezone issues where new Date("2025-08-21") creates UTC midnight
+    // which then shifts backward when formatDateForDB uses local timezone
     const formattedDates = filter.dates.map(d => {
-      const date = new Date(d);
+      // Check if already in YYYY-MM-DD format
+      if (/^\d{4}-\d{2}-\d{2}$/.test(d)) {
+        return d;  // Already in correct format, use as-is
+      }
+      // Otherwise parse and format (with timezone-safe approach)
+      const date = new Date(d + 'T00:00:00');  // Parse as local midnight, not UTC
       return formatDateForDB(date);
     });
     return {
@@ -533,12 +541,24 @@ export function resolveDateFilter(filter: DateFilter): ResolvedDates {
 
   // Handle explicit date ranges
   if (filter.type === 'range' && filter.startDate && filter.endDate) {
-    const start = new Date(filter.startDate);
-    const end = new Date(filter.endDate);
+    // CRITICAL FIX: If dates are already in YYYY-MM-DD format, use them directly
+    // to avoid timezone issues (same as discrete dates fix above)
+    let startFormatted = filter.startDate;
+    let endFormatted = filter.endDate;
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(filter.startDate)) {
+      const start = new Date(filter.startDate + 'T00:00:00');  // Parse as local midnight
+      startFormatted = formatDateForDB(start);
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(filter.endDate)) {
+      const end = new Date(filter.endDate + 'T00:00:00');  // Parse as local midnight
+      endFormatted = formatDateForDB(end);
+    }
+
     return {
       type: 'range',
-      startDate: formatDateForDB(start),
-      endDate: formatDateForDB(end),
+      startDate: startFormatted,
+      endDate: endFormatted,
       description: filter.description
     };
   }

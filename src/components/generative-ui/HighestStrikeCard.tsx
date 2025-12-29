@@ -34,7 +34,10 @@ const formatExact = (value: number) => {
 };
 
 const formatDate = (dateStr: string) => {
-  const date = new Date(dateStr);
+  // Parse as local time to avoid UTC → local timezone shift
+  const datePart = dateStr.split('T')[0];
+  const [year, month, day] = datePart.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
   return date.toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric',

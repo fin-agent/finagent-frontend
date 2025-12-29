@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { queryTrades, buildVoiceResponse, buildUIData, validateConsistency } from '@/src/lib/trade-query';
 import { DateFilter } from '@/src/lib/query-resolver';
 import { startTrace, formatTraceForResponse } from '@/src/lib/request-trace';
+import { buildNoResultsMessage } from '@/src/lib/symbol-lookup';
 // Context merging disabled - ElevenLabs LLM has full conversation history and handles context better
 
 export async function POST(req: NextRequest) {
@@ -56,6 +57,28 @@ export async function POST(req: NextRequest) {
       counts: result.counts,
     });
 
+    // Handle zero results with intelligent symbol lookup
+    if (result.counts.total === 0) {
+      const noResultsMsg = await buildNoResultsMessage(
+        result.metadata.symbol,
+        'trades',
+        result.metadata.dateRange.description
+      );
+
+      trace.logResponse({
+        voiceText: noResultsMsg,
+        uiDataSummary: '0 trades',
+      }, 'passed');
+
+      const completedTrace = trace.complete();
+
+      return NextResponse.json({
+        response: noResultsMsg,
+        uiData: buildUIData(result),
+        _debug: formatTraceForResponse(completedTrace),
+      });
+    }
+
     // Build voice response from computed data (never fabricates)
     const response = buildVoiceResponse(result, {
       includeAggregates: false,  // Summary doesn't need value totals
@@ -74,9 +97,7 @@ export async function POST(req: NextRequest) {
       consistencyStatus = 'failed';
       trace.logError(`Consistency check failed: ${consistencyErrors.join(', ')}`);
       // Fall back to safe response using computed data only
-      finalResponse = result.counts.total === 0
-        ? `No trades found for ${result.metadata.symbol}.`
-        : `Found ${result.counts.total} trades for ${result.metadata.symbol}.`;
+      finalResponse = `Found ${result.counts.total} trades for ${result.metadata.symbol}.`;
     }
 
     // Log response

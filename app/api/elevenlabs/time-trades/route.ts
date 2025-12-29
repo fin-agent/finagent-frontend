@@ -13,6 +13,7 @@ import { DateFilter } from '@/src/lib/query-resolver';
 import { suggestDataPeriod } from '@/src/lib/data-availability';
 import { formatDisplayDate, formatDateRange } from '@/src/lib/date-utils';
 import { startTrace, formatTraceForResponse } from '@/src/lib/request-trace';
+import { checkSymbolPresence } from '@/src/lib/symbol-lookup';
 // Context merging disabled - ElevenLabs LLM has full conversation history and handles context better
 
 // Format date in PACIFIC TIMEZONE to match UI display
@@ -124,9 +125,16 @@ export async function POST(req: NextRequest) {
     const symbolText = metadata.symbol && metadata.symbol !== '(all)' ? ` for ${metadata.symbol}` : '';
     const description = metadata.dateRange.description;
 
-    // Handle zero results with data availability suggestion
+    // Handle zero results with data availability suggestion and symbol lookup
     if (counts.total === 0) {
       const suggestion = await suggestDataPeriod('TradeData', description);
+
+      // If a specific symbol was queried, check if it exists in other tables
+      let symbolContext: string | null = null;
+      if (metadata.symbol && metadata.symbol !== '(all)') {
+        const presence = await checkSymbolPresence(metadata.symbol, 'TradeData');
+        symbolContext = presence.context;
+      }
 
       trace.logResponse({
         voiceText: `No trades found${symbolText} for ${description}.`,
@@ -134,32 +142,30 @@ export async function POST(req: NextRequest) {
       }, 'skipped');
       const completedTrace = trace.complete();
 
-      if (suggestion) {
-        return NextResponse.json({
-          response: `No trades found${symbolText} for ${description}. However, I found ${suggestion.count} trades for ${suggestion.suggestedPeriod}. Would you like to see those instead?`,
-          uiData: {
-            tradeCount: 0,
-            timePeriod: description,
-            symbol: metadata.symbol === '(all)' ? null : metadata.symbol,
-            trades: [],
-            suggestion: {
-              period: suggestion.suggestedPeriod,
-              count: suggestion.count,
-              startDate: suggestion.startDate,
-              endDate: suggestion.endDate,
-            },
-          },
-          _debug: formatTraceForResponse(completedTrace),
-        });
+      // Build response with symbol context if available
+      let responseText = `No trades found${symbolText} for ${description}.`;
+      if (symbolContext) {
+        // Make first letter lowercase to flow naturally after "However, "
+        const contextLower = symbolContext.charAt(0).toLowerCase() + symbolContext.slice(1);
+        responseText += ` However, ${contextLower} Would you like to see those instead?`;
+      } else if (suggestion) {
+        responseText = `No trades found${symbolText} for ${description}. However, I found ${suggestion.count} trades for ${suggestion.suggestedPeriod}. Would you like to see those instead?`;
       }
 
       return NextResponse.json({
-        response: `No trades found${symbolText} for ${description}.`,
+        response: responseText,
         uiData: {
           tradeCount: 0,
           timePeriod: description,
           symbol: metadata.symbol === '(all)' ? null : metadata.symbol,
           trades: [],
+          suggestion: suggestion ? {
+            period: suggestion.suggestedPeriod,
+            count: suggestion.count,
+            startDate: suggestion.startDate,
+            endDate: suggestion.endDate,
+          } : undefined,
+          symbolContext: symbolContext || undefined,
         },
         _debug: formatTraceForResponse(completedTrace),
       });

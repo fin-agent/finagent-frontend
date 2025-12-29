@@ -865,6 +865,10 @@ const UnifiedAssistant: React.FC = () => {
   // UI data set directly by client tools - bypasses pattern matching for reliable rendering
   // This ensures voice response and UI card use the SAME data (no drift)
   const toolUIDataRef = useRef<TradeUIData | null>(null);
+  // Promise that resolves when tool function sets toolUIDataRef (for voice mode sync)
+  // Message handler awaits this to ensure UI data is ready before rendering
+  const pendingToolDataPromiseRef = useRef<Promise<TradeUIData | null> | null>(null);
+  const resolveToolDataPromiseRef = useRef<((data: TradeUIData | null) => void) | null>(null);
   // Promise that resolves when the LLM classifier completes (for voice mode)
   // Tool functions await this to ensure dateFilter/entities are available
   const pendingLLMClassifierPromiseRef = useRef<Promise<QueryIntent | null> | null>(null);
@@ -897,6 +901,32 @@ const UnifiedAssistant: React.FC = () => {
     if (!isJustCheckingMessage(trimmed)) return false;
     // Allow "let me check... <answer>" style messages through.
     return !/(?:executed|here\s+are|found|no\s+trades|total\s+trades|bought|sold|premium|strike|contracts?|shares?)/i.test(trimmed);
+  }
+
+  // Create a promise that will be resolved when tool function sets UI data
+  // This prevents the race condition where message handler runs before tool fetch completes
+  function startToolDataPromise(): void {
+    pendingToolDataPromiseRef.current = new Promise((resolve) => {
+      resolveToolDataPromiseRef.current = resolve;
+      // Auto-resolve after 5 seconds to prevent infinite waiting if tool doesn't complete
+      setTimeout(() => {
+        if (resolveToolDataPromiseRef.current === resolve) {
+          console.log('⚠️ [Tool Data Promise] Auto-resolved after 5s timeout');
+          resolve(null);
+          resolveToolDataPromiseRef.current = null;
+        }
+      }, 5000);
+    });
+    console.log('🔧 [Tool Data Promise] Created new promise, awaiting tool data...');
+  }
+
+  // Resolve the promise when tool function sets UI data
+  function resolveToolDataPromise(data: TradeUIData | null): void {
+    if (resolveToolDataPromiseRef.current) {
+      console.log('🔧 [Tool Data Promise] Resolving with data:', data ? data.type : 'null');
+      resolveToolDataPromiseRef.current(data);
+      resolveToolDataPromiseRef.current = null;
+    }
   }
 
   const clientTools = useMemo(() => {
@@ -982,6 +1012,9 @@ const UnifiedAssistant: React.FC = () => {
       if (voicePayload && typeof voicePayload === 'object' && 'uiData' in voicePayload) {
         toolUIDataRef.current = { type: 'detailed', symbol: symbol || '', data: voicePayload.uiData, timePeriod, dateFilter: dateFilter as TradeUIData['dateFilter'] };
         console.log('📊 [Trade Summary Tool] Set toolUIDataRef (detailed type) from voice response:', toolUIDataRef.current);
+        resolveToolDataPromise(toolUIDataRef.current);
+      } else {
+        resolveToolDataPromise(null);
       }
 
       console.log('📊 [Trade Summary Tool] ================================');
@@ -1020,6 +1053,9 @@ const UnifiedAssistant: React.FC = () => {
       if (voicePayload && typeof voicePayload === 'object' && 'uiData' in voicePayload) {
         toolUIDataRef.current = { type: 'detailed', symbol: symbol || '', data: voicePayload.uiData, timePeriod, dateFilter: dateFilter as TradeUIData['dateFilter'] };
         console.log('📊 [Detailed Trades Tool] Set toolUIDataRef from voice response:', toolUIDataRef.current);
+        resolveToolDataPromise(toolUIDataRef.current);
+      } else {
+        resolveToolDataPromise(null);
       }
 
       console.log('📊 [Detailed Trades Tool] ================================');
@@ -1087,6 +1123,9 @@ const UnifiedAssistant: React.FC = () => {
           optionData: null  // Voice endpoint focuses on stock stats (options handled by options tool)
         };
         console.log('📊 [Trade Stats Tool] Set toolUIDataRef from voice response:', toolUIDataRef.current);
+        resolveToolDataPromise(toolUIDataRef.current);
+      } else {
+        resolveToolDataPromise(null);
       }
 
       console.log('📊 [Trade Stats Tool] ================================');
@@ -1130,6 +1169,9 @@ const UnifiedAssistant: React.FC = () => {
         };
         toolUIDataRef.current = { type: 'profitable', symbol: symbol || '', timePeriod, data: transformedData };
         console.log('📊 [Profitable Trades Tool] Set toolUIDataRef from voice response:', toolUIDataRef.current);
+        resolveToolDataPromise(toolUIDataRef.current);
+      } else {
+        resolveToolDataPromise(null);
       }
 
       console.log('📊 [Profitable Trades Tool] ================================');
@@ -1168,6 +1210,11 @@ const UnifiedAssistant: React.FC = () => {
       if (voicePayload && typeof voicePayload === 'object' && 'uiData' in voicePayload) {
         toolUIDataRef.current = { type: 'time-based', symbol: symbol || '', timePeriod, data: voicePayload.uiData };
         console.log('📊 [Time Based Trades Tool] Set toolUIDataRef from voice response:', toolUIDataRef.current);
+        // Resolve promise so message handler knows data is ready
+        resolveToolDataPromise(toolUIDataRef.current);
+      } else {
+        // No uiData in response - still resolve to prevent waiting
+        resolveToolDataPromise(null);
       }
 
       console.log('📊 [Time Based Trades Tool] ================================');
@@ -1229,6 +1276,9 @@ const UnifiedAssistant: React.FC = () => {
           data: voicePayload.uiData
         };
         console.log('📊 [Advanced Trades Tool] Set toolUIDataRef from voice response:', toolUIDataRef.current);
+        resolveToolDataPromise(toolUIDataRef.current);
+      } else {
+        resolveToolDataPromise(null);
       }
 
       console.log('📊 [Advanced Trades Tool] ================================');
@@ -1269,6 +1319,9 @@ const UnifiedAssistant: React.FC = () => {
           data: voicePayload.uiData
         };
         console.log('💰 [Account Balance Tool] Set toolUIDataRef from voice response:', toolUIDataRef.current);
+        resolveToolDataPromise(toolUIDataRef.current);
+      } else {
+        resolveToolDataPromise(null);
       }
 
       const result = unwrapResponse(voicePayload);
@@ -1318,6 +1371,9 @@ const UnifiedAssistant: React.FC = () => {
           data: voicePayload.uiData
         };
         console.log('💸 [Fees Tool] Set toolUIDataRef from voice response:', toolUIDataRef.current);
+        resolveToolDataPromise(toolUIDataRef.current);
+      } else {
+        resolveToolDataPromise(null);
       }
 
       const result = unwrapResponse(voicePayload);
@@ -1398,6 +1454,9 @@ const UnifiedAssistant: React.FC = () => {
           data: voicePayload.uiData,
         };
         console.log('📈 [Options Tool] Set toolUIDataRef from voice response:', toolUIDataRef.current);
+        resolveToolDataPromise(toolUIDataRef.current);
+      } else {
+        resolveToolDataPromise(null);
       }
 
       console.log('📈 [Options Tool] ================================');
@@ -1505,6 +1564,15 @@ const UnifiedAssistant: React.FC = () => {
             return;
           }
           let tradeUI: TradeUIData | undefined;
+
+          // CRITICAL: Wait for tool function to complete before checking toolUIDataRef
+          // This prevents the race condition where message handler runs before tool fetch completes
+          if (pendingToolDataPromiseRef.current) {
+            console.log('⏳ [Text Mode] Awaiting tool data promise...');
+            const toolData = await pendingToolDataPromiseRef.current;
+            pendingToolDataPromiseRef.current = null;  // Clear after awaiting
+            console.log('✅ [Text Mode] Tool data promise resolved:', toolData ? toolData.type : 'null');
+          }
 
           // HIGHEST PRIORITY: Use UI data set directly by client tools (single source of truth)
           if (toolUIDataRef.current) {
@@ -2288,6 +2356,11 @@ const UnifiedAssistant: React.FC = () => {
             pendingQueryIntentRef.current = null;
             pendingTradeUIRequestRef.current = null;
             pendingAnswerOverrideRef.current = null;
+            toolUIDataRef.current = null;  // Clear any stale UI data
+
+            // Start a promise that will be resolved when the tool function sets UI data
+            // This prevents the race condition where message handler runs before tool completes
+            startToolDataPromise();
 
             // LLM classifier (async) - for logging and card type inference only
             // No fetchTradeData calls - webhook uiData is the data source
@@ -2326,6 +2399,15 @@ const UnifiedAssistant: React.FC = () => {
               return;
             }
             let tradeUI: TradeUIData | undefined;
+
+            // CRITICAL: Wait for tool function to complete before checking toolUIDataRef
+            // This prevents the race condition where message handler runs before tool fetch completes
+            if (pendingToolDataPromiseRef.current) {
+              console.log('⏳ [Voice Mode] Awaiting tool data promise...');
+              const toolData = await pendingToolDataPromiseRef.current;
+              pendingToolDataPromiseRef.current = null;  // Clear after awaiting
+              console.log('✅ [Voice Mode] Tool data promise resolved:', toolData ? toolData.type : 'null');
+            }
 
             // DEBUG: Log the state of toolUIDataRef.current
             console.log('🔍 [Voice Mode] toolUIDataRef.current:', toolUIDataRef.current ? 'SET' : 'NULL');
@@ -2869,6 +2951,10 @@ const UnifiedAssistant: React.FC = () => {
 		      } else if (!pendingAnswerOverrideRef.current) {
 		        pendingAnswerOverrideRef.current = null;
 		      }
+
+      // Clear stale UI data and start promise for sync
+      toolUIDataRef.current = null;
+      startToolDataPromise();
 
       // Send to ElevenLabs text-only conversation
       textOnlyConversation.sendUserMessage(message);

@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { normalizeSymbol } from '@/src/lib/symbol-utils';
 import { realDateToDemoDate, formatDateForDB } from '@/src/lib/date-utils';
 import { parseTimePeriodToResolvedDates } from '@/src/lib/date-parser';
+import { checkSymbolPresence } from '@/src/lib/symbol-lookup';
 
 // LLM-resolved date filter
 interface DateFilter {
@@ -220,8 +221,23 @@ export async function POST(req: NextRequest) {
       if (timePeriod) filterDesc += ` ${timePeriod}`;
       if (expiration) filterDesc += ` expiring ${expiration}`;
 
+      // Check if symbol exists elsewhere (trades or fees)
+      let symbolContext: string | undefined;
+      if (normalizedSymbol) {
+        const presence = await checkSymbolPresence(normalizedSymbol);
+        if (presence.context) {
+          symbolContext = presence.context;
+        }
+      }
+
+      let responseText = `No${filterDesc} found.`;
+      if (symbolContext) {
+        const contextLower = symbolContext.charAt(0).toLowerCase() + symbolContext.slice(1);
+        responseText += ` However, ${contextLower} Would you like to see those instead?`;
+      }
+
       return NextResponse.json({
-        response: `No${filterDesc} found.`,
+        response: responseText,
         uiData: {
           queryType,
           symbol: normalizedSymbol || null,
@@ -231,6 +247,7 @@ export async function POST(req: NextRequest) {
           callPut: callPut || null,
           trades: [],
           summary: null,
+          symbolContext: symbolContext || undefined,
         },
       });
     }

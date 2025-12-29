@@ -4,6 +4,7 @@ import { normalizeSymbol, parseOptionSymbol } from '@/src/lib/symbol-utils';
 import { suggestDataPeriod } from '@/src/lib/data-availability';
 import { realDateToDemoDate, formatDateForDB } from '@/src/lib/date-utils';
 import { parseTimePeriodToResolvedDates } from '@/src/lib/date-parser';
+import { checkSymbolPresence } from '@/src/lib/symbol-lookup';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -268,6 +269,15 @@ export async function POST(req: NextRequest) {
       const feeTypeName = feeType.replace('_', ' ');
       const symbolText = normalizedSymbol ? ` for ${normalizedSymbol}` : '';
 
+      // Check if symbol exists elsewhere (e.g., in trades)
+      let symbolContext: string | undefined;
+      if (normalizedSymbol) {
+        const presence = await checkSymbolPresence(normalizedSymbol, 'FeesAndInterest');
+        if (presence.context) {
+          symbolContext = presence.context;
+        }
+      }
+
       if (suggestion && suggestion.amount > 0) {
         const uiData: FeesUIData = {
           feeType,
@@ -289,6 +299,13 @@ export async function POST(req: NextRequest) {
         });
       }
 
+      // If no suggestion but symbol has trades, mention that
+      let responseText = `No ${feeTypeName} data found${symbolText} for ${description}.`;
+      if (symbolContext) {
+        const contextLower = symbolContext.charAt(0).toLowerCase() + symbolContext.slice(1);
+        responseText += ` However, ${contextLower} Would you like to see those instead?`;
+      }
+
       const uiData: FeesUIData = {
         feeType,
         totalAmount: 0,
@@ -297,7 +314,7 @@ export async function POST(req: NextRequest) {
         symbol: normalizedSymbol,
       };
       return NextResponse.json({
-        response: `No ${feeTypeName} data found${symbolText} for ${description}.`,
+        response: responseText,
         uiData,
       });
     }

@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { realDateToDemoDate, formatDateForDB } from '@/src/lib/date-utils';
 import { normalizeSymbol } from '@/src/lib/symbol-utils';
 import { parseTimePeriodToResolvedDates } from '@/src/lib/date-parser';
+import { checkSymbolPresence } from '@/src/lib/symbol-lookup';
 
 // LLM-resolved date filter
 interface DateFilter {
@@ -130,13 +131,23 @@ export async function POST(req: NextRequest) {
 
     if (!data || data.length === 0) {
       const typeLabel = tradeType ? (tradeType.toLowerCase().startsWith('s') ? 'sell' : 'buy') : '';
+
+      // Check if symbol exists elsewhere (e.g., in fees)
+      const presence = await checkSymbolPresence(normalizedSymbol, 'TradeData');
+      let responseText = `No ${typeLabel} trades found for ${normalizedSymbol} ${periodDescription}.`;
+      if (presence.context) {
+        const contextLower = presence.context.charAt(0).toLowerCase() + presence.context.slice(1);
+        responseText += ` However, ${contextLower} Would you like to see those instead?`;
+      }
+
       return NextResponse.json({
-        response: `No ${typeLabel} trades found for ${normalizedSymbol} ${periodDescription}.`,
+        response: responseText,
         uiData: {
           symbol: normalizedSymbol,
           timePeriod: periodDescription,
           tradeType: tradeType || null,
           stockStats: null,
+          symbolContext: presence.context || undefined,
         },
       });
     }

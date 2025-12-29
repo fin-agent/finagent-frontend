@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import { normalizeSymbol } from '@/src/lib/symbol-utils';
+import { checkSymbolPresence } from '@/src/lib/symbol-lookup';
 
 // Format date in PACIFIC TIMEZONE to match UI display
 // The UI renders dates in the user's browser (typically Pacific time)
@@ -361,6 +362,21 @@ export async function POST(req: NextRequest) {
       if (callPut) filterDesc += ` ${callPut} options`;
       if (expiration) filterDesc += ` expiring ${expiration}`;
 
+      // Check if symbol exists elsewhere (e.g., in fees)
+      let symbolContext: string | undefined;
+      if (normalizedSymbol) {
+        const presence = await checkSymbolPresence(normalizedSymbol, 'TradeData');
+        if (presence.context) {
+          symbolContext = presence.context;
+        }
+      }
+
+      let responseText = `No trades found${filterDesc || ' matching your criteria'}.`;
+      if (symbolContext) {
+        const contextLower = symbolContext.charAt(0).toLowerCase() + symbolContext.slice(1);
+        responseText += ` However, ${contextLower} Would you like to see those instead?`;
+      }
+
       // Return empty uiData for UI card rendering - SINGLE SOURCE OF TRUTH
       const uiData = {
         filters: {
@@ -376,10 +392,11 @@ export async function POST(req: NextRequest) {
         },
         trades: [],
         summary: null,
+        symbolContext: symbolContext || undefined,
       };
 
       return NextResponse.json({
-        response: `No trades found${filterDesc || ' matching your criteria'}.`,
+        response: responseText,
         uiData,
       });
     }

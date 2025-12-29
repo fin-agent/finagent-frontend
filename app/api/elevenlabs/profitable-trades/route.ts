@@ -4,6 +4,7 @@ import { calculateRealizedMatchesFIFO, filterProfitableTrades } from '@/src/lib/
 import { normalizeSymbol } from '@/src/lib/symbol-utils';
 import { realDateToDemoDate, formatDateForDB } from '@/src/lib/date-utils';
 import { parseTimePeriodToResolvedDates } from '@/src/lib/date-parser';
+import { checkSymbolPresence } from '@/src/lib/symbol-lookup';
 
 // LLM-resolved date filter
 interface DateFilter {
@@ -105,14 +106,23 @@ export async function POST(req: NextRequest) {
 
     const allTrades = trades || [];
     if (allTrades.length === 0) {
+      // Check if symbol exists elsewhere (e.g., in fees)
+      const presence = await checkSymbolPresence(normalizedSymbol, 'TradeData');
+      let responseText = `No trades found for ${normalizedSymbol}${periodLabelFor}.`;
+      if (presence.context) {
+        const contextLower = presence.context.charAt(0).toLowerCase() + presence.context.slice(1);
+        responseText += ` However, ${contextLower} Would you like to see those instead?`;
+      }
+
       return NextResponse.json({
-        response: `No trades found for ${normalizedSymbol}${periodLabelFor}.`,
+        response: responseText,
         uiData: {
           symbol: normalizedSymbol,
           profitableTrades: [],
           totalProfit: 0,
           tradeCount: 0,
           timePeriod: description || undefined,
+          symbolContext: presence.context || undefined,
         },
       });
     }

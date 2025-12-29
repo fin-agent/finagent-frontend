@@ -344,6 +344,106 @@ export interface SuggestDataPeriodFilters {
   symbol?: string;           // For locate fees
 }
 
+export interface TradeFilters {
+  symbol?: string;           // Stock symbol
+  tradeType?: 'B' | 'S';     // Buy or Sell
+  securityType?: 'S' | 'O';  // Stock or Option
+}
+
+export interface NearestPeriodSuggestion {
+  suggestedPeriod: string;   // "October 2025", "last month", etc.
+  count: number;
+  startDate: string;
+  endDate: string;
+}
+
+/**
+ * Find the nearest month with matching trade data
+ * Searches both forward and backward from the requested period
+ *
+ * @param requestedPeriod - What the user asked for ("September", "last month")
+ * @param filters - Symbol, tradeType, securityType filters
+ * @returns Suggestion with the nearest month that has data, or null if none found
+ */
+export async function findNearestMonthWithTrades(
+  requestedPeriod: string,
+  filters: TradeFilters
+): Promise<NearestPeriodSuggestion | null> {
+  try {
+    // Build query with filters
+    let query = supabase
+      .from('TradeData')
+      .select('Date')
+      .eq('AccountCode', ACCOUNT_CODE);
+
+    if (filters.symbol) {
+      query = query.or(`Symbol.eq.${filters.symbol},UnderlyingSymbol.eq.${filters.symbol}`);
+    }
+    if (filters.tradeType) {
+      query = query.eq('TradeType', filters.tradeType);
+    }
+    if (filters.securityType) {
+      query = query.eq('SecurityType', filters.securityType);
+    }
+
+    const { data, error } = await query.order('Date', { ascending: false });
+
+    if (error || !data?.length) {
+      console.log('[Data Availability] No matching trades found');
+      return null;
+    }
+
+    // Group trades by month
+    const monthGroups: Map<string, { count: number; dates: string[] }> = new Map();
+
+    for (const trade of data) {
+      const date = new Date(trade.Date);
+      const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+
+      if (!monthGroups.has(monthKey)) {
+        monthGroups.set(monthKey, { count: 0, dates: [] });
+      }
+      const group = monthGroups.get(monthKey)!;
+      group.count++;
+      group.dates.push(trade.Date);
+    }
+
+    // Find the most recent month with data
+    const sortedMonths = Array.from(monthGroups.entries())
+      .sort((a, b) => b[0].localeCompare(a[0])); // Sort descending by month
+
+    if (sortedMonths.length === 0) {
+      return null;
+    }
+
+    // Get the most recent month with data
+    const [monthKey, monthData] = sortedMonths[0];
+    const [year, month] = monthKey.split('-').map(Number);
+
+    // Format the month name
+    const monthDate = new Date(year, month - 1, 1);
+    const monthName = monthDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+    // Calculate date range for that month
+    const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
+    const lastDay = new Date(year, month, 0).getDate();
+    const endDate = `${year}-${String(month).padStart(2, '0')}-${lastDay}`;
+
+    console.log(`[Data Availability] Nearest month with matching trades: ${monthName} (${monthData.count} trades)`);
+
+    return {
+      suggestedPeriod: monthName,
+      count: monthData.count,
+      startDate,
+      endDate,
+    };
+
+  } catch (error) {
+    console.error('[Data Availability] findNearestMonthWithTrades error:', error);
+    return null;
+  }
+}
+
 /**
  * Find available data and suggest a natural time period with the actual amount
  *

@@ -4,6 +4,7 @@ import { realDateToDemoDate, formatDateForDB } from '@/src/lib/date-utils';
 import { normalizeSymbol } from '@/src/lib/symbol-utils';
 import { parseTimePeriodToResolvedDates } from '@/src/lib/date-parser';
 import { checkSymbolPresence } from '@/src/lib/symbol-lookup';
+import { findNearestMonthWithTrades } from '@/src/lib/data-availability';
 
 // LLM-resolved date filter
 interface DateFilter {
@@ -131,8 +132,37 @@ export async function POST(req: NextRequest) {
 
     if (!data || data.length === 0) {
       const typeLabel = tradeType ? (tradeType.toLowerCase().startsWith('s') ? 'sell' : 'buy') : '';
+      const normalizedType = tradeType ? (tradeType.toLowerCase().startsWith('s') ? 'S' : 'B') as 'B' | 'S' : undefined;
 
-      // Check if symbol exists elsewhere (e.g., in fees)
+      // First, try to find the nearest month with matching trades
+      const nearestMonth = await findNearestMonthWithTrades(periodDescription, {
+        symbol: normalizedSymbol,
+        tradeType: normalizedType,
+        securityType: 'S', // Stock trades for trade-stats
+      });
+
+      if (nearestMonth) {
+        // Found trades in a different month - suggest that period
+        const responseText = `No ${typeLabel} trades found for ${normalizedSymbol} in ${periodDescription}, but I found ${nearestMonth.count} ${typeLabel} trades in ${nearestMonth.suggestedPeriod}. Would you like to see those instead?`;
+
+        return NextResponse.json({
+          response: responseText,
+          uiData: {
+            symbol: normalizedSymbol,
+            timePeriod: periodDescription,
+            tradeType: tradeType || null,
+            stockStats: null,
+            suggestion: {
+              period: nearestMonth.suggestedPeriod,
+              count: nearestMonth.count,
+              startDate: nearestMonth.startDate,
+              endDate: nearestMonth.endDate,
+            },
+          },
+        });
+      }
+
+      // No trades found for this symbol at all - check if symbol exists elsewhere (e.g., in fees)
       const presence = await checkSymbolPresence(normalizedSymbol, 'TradeData');
       let responseText = `No ${typeLabel} trades found for ${normalizedSymbol} ${periodDescription}.`;
       if (presence.context) {

@@ -10,7 +10,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { queryTrades, TradeRow } from '@/src/lib/trade-query';
 import { DateFilter } from '@/src/lib/query-resolver';
-import { suggestDataPeriod } from '@/src/lib/data-availability';
+import { suggestDataPeriod, findNearestMonthWithTrades } from '@/src/lib/data-availability';
 import { formatDisplayDate, formatDateRange } from '@/src/lib/date-utils';
 import { startTrace, formatTraceForResponse } from '@/src/lib/request-trace';
 import { checkSymbolPresence } from '@/src/lib/symbol-lookup';
@@ -127,11 +127,24 @@ export async function POST(req: NextRequest) {
 
     // Handle zero results with data availability suggestion and symbol lookup
     if (counts.total === 0) {
-      const suggestion = await suggestDataPeriod('TradeData', description);
-
-      // If a specific symbol was queried, check if it exists in other tables
-      let symbolContext: string | null = null;
+      // For symbol-specific queries, try to find nearest month with matching trades
+      let nearestMonth = null;
       if (metadata.symbol && metadata.symbol !== '(all)') {
+        // Determine trade type filter for nearest month search
+        const tradeTypeFilter = normalizedTradeType === 'buy' ? 'B' : normalizedTradeType === 'sell' ? 'S' : undefined;
+
+        nearestMonth = await findNearestMonthWithTrades(description, {
+          symbol: metadata.symbol,
+          tradeType: tradeTypeFilter as 'B' | 'S' | undefined,
+        });
+      }
+
+      // Fall back to general data availability if no symbol-specific match
+      const suggestion = nearestMonth ? null : await suggestDataPeriod('TradeData', description);
+
+      // If a specific symbol was queried and no nearest month found, check if it exists in other tables
+      let symbolContext: string | null = null;
+      if (metadata.symbol && metadata.symbol !== '(all)' && !nearestMonth) {
         const presence = await checkSymbolPresence(metadata.symbol, 'TradeData');
         symbolContext = presence.context;
       }
@@ -142,9 +155,12 @@ export async function POST(req: NextRequest) {
       }, 'skipped');
       const completedTrace = trace.complete();
 
-      // Build response with symbol context if available
+      // Build response - prioritize nearest month suggestion for symbol-specific queries
       let responseText = `No trades found${symbolText} for ${description}.`;
-      if (symbolContext) {
+      if (nearestMonth) {
+        const tradeTypeLabel = normalizedTradeType === 'buy' ? 'buy ' : normalizedTradeType === 'sell' ? 'sell ' : '';
+        responseText = `No ${tradeTypeLabel}trades found for ${metadata.symbol} in ${description}, but I found ${nearestMonth.count} ${tradeTypeLabel}trades in ${nearestMonth.suggestedPeriod}. Would you like to see those instead?`;
+      } else if (symbolContext) {
         // Make first letter lowercase to flow naturally after "However, "
         const contextLower = symbolContext.charAt(0).toLowerCase() + symbolContext.slice(1);
         responseText += ` However, ${contextLower} Would you like to see those instead?`;
@@ -159,7 +175,12 @@ export async function POST(req: NextRequest) {
           timePeriod: description,
           symbol: metadata.symbol === '(all)' ? null : metadata.symbol,
           trades: [],
-          suggestion: suggestion ? {
+          suggestion: nearestMonth ? {
+            period: nearestMonth.suggestedPeriod,
+            count: nearestMonth.count,
+            startDate: nearestMonth.startDate,
+            endDate: nearestMonth.endDate,
+          } : suggestion ? {
             period: suggestion.suggestedPeriod,
             count: suggestion.count,
             startDate: suggestion.startDate,

@@ -351,25 +351,177 @@ export interface TradeFilters {
 }
 
 export interface NearestPeriodSuggestion {
-  suggestedPeriod: string;   // "October 2025", "last month", etc.
+  suggestedPeriod: string;   // "October 2025", "last week", "November 15th", etc.
   count: number;
   startDate: string;
   endDate: string;
 }
 
+type TimeGranularity = 'day' | 'week' | 'month' | 'quarter' | 'year';
+
 /**
- * Find the nearest month with matching trade data
- * Searches both forward and backward from the requested period
+ * Detect the time granularity from a period description
+ */
+function detectTimeGranularity(period: string): TimeGranularity {
+  const lower = period.toLowerCase();
+
+  // Day patterns: "yesterday", "today", "Monday", "November 15", "last 3 days"
+  if (/yesterday|today|tomorrow/i.test(lower)) return 'day';
+  if (/\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(lower)) return 'day';
+  if (/\d{1,2}(st|nd|rd|th)?[,\s]*(20\d{2})?$/i.test(lower)) return 'day'; // "November 15th"
+  if (/last\s+\d+\s+days?/i.test(lower)) return 'day';
+
+  // Week patterns: "last week", "this week", "past 2 weeks"
+  if (/\b(this|last|past|next)\s+week\b/i.test(lower)) return 'week';
+  if (/last\s+\d+\s+weeks?/i.test(lower)) return 'week';
+
+  // Quarter patterns: "Q1", "Q2 2025", "first quarter", "last quarter"
+  if (/\bq[1-4]\b/i.test(lower)) return 'quarter';
+  if (/\b(first|second|third|fourth|1st|2nd|3rd|4th)\s+quarter\b/i.test(lower)) return 'quarter';
+  if (/\blast\s+quarter\b/i.test(lower)) return 'quarter';
+
+  // Year patterns: "2024", "this year", "last year"
+  if (/^20\d{2}$/i.test(lower.trim())) return 'year';
+  if (/\b(this|last)\s+year\b/i.test(lower)) return 'year';
+  if (/\bytd\b/i.test(lower)) return 'year';
+
+  // Month patterns (default): "September", "last month", "October 2025"
+  return 'month';
+}
+
+/**
+ * Group trades by the specified granularity
+ */
+function groupTradesByGranularity(
+  trades: { Date: string }[],
+  granularity: TimeGranularity
+): Map<string, { count: number; dates: string[] }> {
+  const groups = new Map<string, { count: number; dates: string[] }>();
+
+  for (const trade of trades) {
+    const date = new Date(trade.Date);
+    let key: string;
+
+    switch (granularity) {
+      case 'day':
+        key = trade.Date.split('T')[0]; // YYYY-MM-DD
+        break;
+      case 'week': {
+        // Get start of week (Sunday)
+        const startOfWeek = new Date(date);
+        startOfWeek.setDate(date.getDate() - date.getDay());
+        key = startOfWeek.toISOString().split('T')[0];
+        break;
+      }
+      case 'month':
+        key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+        break;
+      case 'quarter': {
+        const quarter = Math.floor(date.getMonth() / 3) + 1;
+        key = `${date.getFullYear()}-Q${quarter}`;
+        break;
+      }
+      case 'year':
+        key = String(date.getFullYear());
+        break;
+    }
+
+    if (!groups.has(key)) {
+      groups.set(key, { count: 0, dates: [] });
+    }
+    const group = groups.get(key)!;
+    group.count++;
+    group.dates.push(trade.Date);
+  }
+
+  return groups;
+}
+
+/**
+ * Format a period key into a human-readable string
+ */
+function formatPeriodKey(key: string, granularity: TimeGranularity): {
+  label: string;
+  startDate: string;
+  endDate: string;
+} {
+  switch (granularity) {
+    case 'day': {
+      // key is YYYY-MM-DD
+      const date = new Date(key + 'T00:00:00');
+      const label = date.toLocaleDateString('en-US', {
+        month: 'long',
+        day: 'numeric',
+        year: 'numeric'
+      });
+      return { label, startDate: key, endDate: key };
+    }
+    case 'week': {
+      // key is start of week YYYY-MM-DD
+      const startDate = new Date(key + 'T00:00:00');
+      const endDate = new Date(startDate);
+      endDate.setDate(startDate.getDate() + 6);
+      const startLabel = startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      const endLabel = endDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+      return {
+        label: `the week of ${startLabel} to ${endLabel}`,
+        startDate: key,
+        endDate: endDate.toISOString().split('T')[0]
+      };
+    }
+    case 'month': {
+      // key is YYYY-MM
+      const [year, month] = key.split('-').map(Number);
+      const date = new Date(year, month - 1, 1);
+      const label = date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+      const lastDay = new Date(year, month, 0).getDate();
+      return {
+        label,
+        startDate: `${year}-${String(month).padStart(2, '0')}-01`,
+        endDate: `${year}-${String(month).padStart(2, '0')}-${lastDay}`
+      };
+    }
+    case 'quarter': {
+      // key is YYYY-QN
+      const [year, q] = key.split('-Q');
+      const quarter = parseInt(q);
+      const startMonth = (quarter - 1) * 3 + 1;
+      const endMonth = quarter * 3;
+      const lastDay = new Date(parseInt(year), endMonth, 0).getDate();
+      return {
+        label: `Q${quarter} ${year}`,
+        startDate: `${year}-${String(startMonth).padStart(2, '0')}-01`,
+        endDate: `${year}-${String(endMonth).padStart(2, '0')}-${lastDay}`
+      };
+    }
+    case 'year': {
+      // key is YYYY
+      return {
+        label: key,
+        startDate: `${key}-01-01`,
+        endDate: `${key}-12-31`
+      };
+    }
+  }
+}
+
+/**
+ * Find the nearest time period with matching trade data
+ * Matches the granularity of the requested period (day, week, month, quarter, year)
  *
- * @param requestedPeriod - What the user asked for ("September", "last month")
+ * @param requestedPeriod - What the user asked for ("September", "last week", "yesterday")
  * @param filters - Symbol, tradeType, securityType filters
- * @returns Suggestion with the nearest month that has data, or null if none found
+ * @returns Suggestion with the nearest period that has data, or null if none found
  */
 export async function findNearestMonthWithTrades(
   requestedPeriod: string,
   filters: TradeFilters
 ): Promise<NearestPeriodSuggestion | null> {
   try {
+    // Detect the granularity of the requested period
+    const granularity = detectTimeGranularity(requestedPeriod);
+    console.log(`[Data Availability] Detected granularity: ${granularity} for "${requestedPeriod}"`);
+
     // Build query with filters
     let query = supabase
       .from('TradeData')
@@ -393,49 +545,28 @@ export async function findNearestMonthWithTrades(
       return null;
     }
 
-    // Group trades by month
-    const monthGroups: Map<string, { count: number; dates: string[] }> = new Map();
+    // Group trades by the detected granularity
+    const groups = groupTradesByGranularity(data, granularity);
 
-    for (const trade of data) {
-      const date = new Date(trade.Date);
-      const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-
-      if (!monthGroups.has(monthKey)) {
-        monthGroups.set(monthKey, { count: 0, dates: [] });
-      }
-      const group = monthGroups.get(monthKey)!;
-      group.count++;
-      group.dates.push(trade.Date);
-    }
-
-    // Find the most recent month with data
-    const sortedMonths = Array.from(monthGroups.entries())
-      .sort((a, b) => b[0].localeCompare(a[0])); // Sort descending by month
-
-    if (sortedMonths.length === 0) {
+    if (groups.size === 0) {
       return null;
     }
 
-    // Get the most recent month with data
-    const [monthKey, monthData] = sortedMonths[0];
-    const [year, month] = monthKey.split('-').map(Number);
+    // Sort groups descending by key (most recent first)
+    const sortedPeriods = Array.from(groups.entries())
+      .sort((a, b) => b[0].localeCompare(a[0]));
 
-    // Format the month name
-    const monthDate = new Date(year, month - 1, 1);
-    const monthName = monthDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    // Get the most recent period with data
+    const [periodKey, periodData] = sortedPeriods[0];
+    const formatted = formatPeriodKey(periodKey, granularity);
 
-    // Calculate date range for that month
-    const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
-    const lastDay = new Date(year, month, 0).getDate();
-    const endDate = `${year}-${String(month).padStart(2, '0')}-${lastDay}`;
-
-    console.log(`[Data Availability] Nearest month with matching trades: ${monthName} (${monthData.count} trades)`);
+    console.log(`[Data Availability] Nearest ${granularity} with matching trades: ${formatted.label} (${periodData.count} trades)`);
 
     return {
-      suggestedPeriod: monthName,
-      count: monthData.count,
-      startDate,
-      endDate,
+      suggestedPeriod: formatted.label,
+      count: periodData.count,
+      startDate: formatted.startDate,
+      endDate: formatted.endDate,
     };
 
   } catch (error) {

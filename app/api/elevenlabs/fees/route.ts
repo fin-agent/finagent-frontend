@@ -246,6 +246,7 @@ export async function POST(req: NextRequest) {
     let feesQuery = supabase
       .from('FeesAndInterest')
       .select('*')
+      .eq('AccountCode', ACCOUNT_CODE)
       .eq('Type', dbFeeType);
 
     if (resolvedType === 'discrete' && dates && dates.length > 0) {

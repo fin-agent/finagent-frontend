@@ -49,6 +49,14 @@ const getDaysUntil = (expirationStr: string): number => {
   return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 };
 
+const formatDaysUntil = (days: number | null): string => {
+  if (days === null) return '?';
+  if (days < 0) return 'Exp';  // Already expired
+  if (days === 0) return 'Today';
+  if (days === 1) return '1d';
+  return `${days}d`;
+};
+
 // Terminal Luxe color palette
 const palette = {
   void: '#000000',
@@ -84,12 +92,26 @@ export function ExpiringOptionsTable({
   aggregations: externalAggregations,
 }: ExpiringOptionsTableProps) {
   const [currentPage, setCurrentPage] = useState(1);
-  const isUrgent = expirationPeriod.toLowerCase() === 'tomorrow';
 
-  // Dynamic colors based on urgency
-  const accentColor = isUrgent ? palette.urgent : palette.warning;
-  const accentDim = isUrgent ? palette.urgentDim : palette.warningDim;
-  const accentGlow = isUrgent ? palette.urgentGlow : palette.warningGlow;
+  // Check expiration status of all trades
+  const expirationStats = trades.reduce((acc, trade) => {
+    if (trade.Expiration) {
+      const days = getDaysUntil(trade.Expiration);
+      if (days < 0) acc.expired++;
+      else if (days <= 1) acc.urgent++;
+      else acc.upcoming++;
+    }
+    return acc;
+  }, { expired: 0, urgent: 0, upcoming: 0 });
+
+  const allExpired = expirationStats.expired === trades.length && trades.length > 0;
+  const hasUrgent = expirationStats.urgent > 0;
+  const isUrgent = !allExpired && (expirationPeriod.toLowerCase() === 'tomorrow' || hasUrgent);
+
+  // Dynamic colors based on status
+  const accentColor = allExpired ? palette.textMuted : (isUrgent ? palette.urgent : palette.warning);
+  const accentDim = allExpired ? palette.elevated : (isUrgent ? palette.urgentDim : palette.warningDim);
+  const accentGlow = allExpired ? 'transparent' : (isUrgent ? palette.urgentGlow : palette.warningGlow);
 
   // Pagination
   const totalPages = Math.ceil(trades.length / ITEMS_PER_PAGE);
@@ -221,9 +243,9 @@ export function ExpiringOptionsTable({
               textTransform: 'uppercase',
               letterSpacing: '1.5px',
             }}>
-              EXPIRING {expirationPeriod.toUpperCase()}
+              {allExpired ? 'EXPIRED OPTIONS' : `EXPIRING ${expirationPeriod.toUpperCase()}`}
             </span>
-            {isUrgent && (
+            {!allExpired && isUrgent && (
               <span style={{
                 fontSize: '10px',
                 padding: '2px 6px',
@@ -240,7 +262,9 @@ export function ExpiringOptionsTable({
             fontSize: '14px',
             color: palette.textSecondary,
           }}>
-            {aggregations.tradeCount} position{aggregations.tradeCount !== 1 ? 's' : ''} require attention
+            {allExpired
+              ? `${aggregations.tradeCount} position${aggregations.tradeCount !== 1 ? 's' : ''} already expired`
+              : `${aggregations.tradeCount} position${aggregations.tradeCount !== 1 ? 's' : ''} require attention`}
           </div>
         </div>
 
@@ -382,7 +406,11 @@ export function ExpiringOptionsTable({
               let daysColor = palette.textMuted;
               let daysBg = palette.elevated;
               if (daysUntil !== null) {
-                if (daysUntil <= 1) {
+                if (daysUntil < 0) {
+                  // Already expired - grey/muted
+                  daysColor = palette.textDim;
+                  daysBg = palette.elevated;
+                } else if (daysUntil <= 1) {
                   daysColor = palette.urgent;
                   daysBg = palette.urgentDim;
                 } else if (daysUntil <= 3) {
@@ -463,7 +491,7 @@ export function ExpiringOptionsTable({
                       backgroundColor: daysBg,
                       color: daysColor,
                     }}>
-                      {daysUntil === 0 ? 'Today' : daysUntil === 1 ? '1d' : `${daysUntil}d`}
+                      {formatDaysUntil(daysUntil)}
                     </span>
                   </td>
                   {/* Qty */}

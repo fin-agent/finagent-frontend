@@ -103,9 +103,16 @@ export async function POST(req: NextRequest) {
     const dateFilter: DateFilter | undefined = body.date_filter || body.parameters?.date_filter ||
                        body.body?.date_filter || body.body?.parameters?.date_filter;
 
+    // Check if this is a "current balance" query - these should skip date parsing
+    // and just return the latest available data from the database
+    const isCurrentBalanceQuery = !timePeriod ||
+      /^(today|current|now)$/i.test(timePeriod?.trim() || '') ||
+      /current/i.test(timePeriod || '');
+
     // Recovery Type B: Validate and correct time period if needed
+    // Skip for "current balance" queries - they should return latest data
     let correctedTimePeriod = timePeriod;
-    if (timePeriod && !dateFilter) {
+    if (timePeriod && !dateFilter && !isCurrentBalanceQuery) {
       const recovery = parseTimePeriodWithRecovery(timePeriod);
       if (!recovery.parsed && recovery.suggestion) {
         // Time period couldn't be parsed - return helpful message
@@ -174,11 +181,16 @@ export async function POST(req: NextRequest) {
         .eq('AccountCode', ACCOUNT_CODE)
         .order('Date', { ascending: false });
 
-      // Apply date filters
-      if (resolvedType === 'discrete' && dates && dates.length > 0) {
-        query = query.in('Date', dates);
-      } else if (startDate && endDate) {
-        query = query.gte('Date', startDate).lte('Date', endDate);
+      // Apply date filters ONLY if not a "current balance" query
+      // isCurrentBalanceQuery is defined at the top of the function
+      if (!isCurrentBalanceQuery) {
+        if (resolvedType === 'discrete' && dates && dates.length > 0) {
+          query = query.in('Date', dates);
+        } else if (startDate && endDate) {
+          query = query.gte('Date', startDate).lte('Date', endDate);
+        }
+      } else {
+        console.log(`[account-balance] Current balance query detected, skipping date filter to get latest data`);
       }
 
       const { data, error } = await query;

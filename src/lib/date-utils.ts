@@ -7,8 +7,7 @@
  */
 
 // The latest trade date in the demo database - this represents "today" in the demo
-// Updated to match actual latest data in AccountBalance table
-const DEMO_TODAY = '2025-12-11';
+const DEMO_TODAY = '2025-11-20';
 
 /**
  * Get the current date in US Eastern timezone as a Date object

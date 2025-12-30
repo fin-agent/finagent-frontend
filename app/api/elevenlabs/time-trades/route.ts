@@ -84,11 +84,13 @@ export async function POST(req: NextRequest) {
                         body.body?.calculation || body.body?.parameters?.calculation;
     const tradeType = body.trade_type || body.parameters?.trade_type ||
                       body.body?.trade_type || body.body?.parameters?.trade_type;
+    const securityType = body.security_type || body.parameters?.security_type ||
+                         body.body?.security_type || body.body?.parameters?.security_type;
     const dateFilter: DateFilter | undefined = body.date_filter || body.parameters?.date_filter ||
                        body.body?.date_filter || body.body?.parameters?.date_filter;
 
     // Log input parameters (context merging disabled - ElevenLabs LLM handles context)
-    trace.logInput({ symbol, timePeriod, dateFilter, calculation, tradeType });
+    trace.logInput({ symbol, timePeriod, dateFilter, calculation, tradeType, securityType });
 
     if (!timePeriod && !dateFilter) {
       trace.logError('No time period or date filter provided');
@@ -102,12 +104,18 @@ export async function POST(req: NextRequest) {
       ? (tradeType.toLowerCase().startsWith('s') ? 'sell' : 'buy')
       : 'all';
 
+    // Determine security type filter (stock/option)
+    const normalizedSecurityType = securityType && securityType.toLowerCase() !== 'all'
+      ? (securityType.toLowerCase().startsWith('o') ? 'option' : 'stock')
+      : 'all';
+
     // Use unified query - SINGLE SOURCE OF TRUTH
     const result = await queryTrades({
       symbol: symbol || undefined,
       timePeriod,
       dateFilter,
       tradeType: normalizedTradeType as 'buy' | 'sell' | 'all',
+      instrument: normalizedSecurityType as 'stock' | 'option' | 'all',
     });
 
     const { rows, counts, aggregates, metadata } = result;
@@ -205,13 +213,47 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Build voice response with exact counts from computed data
-    const totalValueStr = `$${aggregates.totalValue.toFixed(2)}`;
-    const totalTradePlural = counts.total === 1 ? 'trade' : 'trades';
-    const summaryLine = `You executed ${counts.total} total ${totalTradePlural}${symbolText} for ${description}: ${counts.stocks} stock trade${counts.stocks !== 1 ? 's' : ''} and ${counts.options} option trade${counts.options !== 1 ? 's' : ''} with a total value of ${totalValueStr}.`;
+    // Build voice response - context-aware based on filters applied
+    const hasTradeTypeFilter = normalizedTradeType !== 'all';
+    const hasSecurityTypeFilter = normalizedSecurityType !== 'all';
+    const symbolName = metadata.symbol && metadata.symbol !== '(all)' ? metadata.symbol : '';
 
-    // Add trade highlights
-    const highlightsText = buildTradeHighlights(rows);
+    let summaryLine: string;
+
+    if (hasTradeTypeFilter && hasSecurityTypeFilter) {
+      // Both filters: "You bought 180 shares of AAPL across 4 trades in November"
+      const action = normalizedTradeType === 'buy' ? 'bought' : 'sold';
+      if (normalizedSecurityType === 'stock') {
+        const shares = Math.round(aggregates.totalShares);
+        const symbolPart = symbolName ? ` of ${symbolName}` : '';
+        const tradesPart = counts.total > 1 ? ` across ${counts.total} trades` : '';
+        summaryLine = `You ${action} ${shares} shares${symbolPart}${tradesPart} in ${description}.`;
+      } else {
+        const contracts = Math.round(aggregates.totalContracts);
+        const symbolPart = symbolName ? ` on ${symbolName}` : '';
+        const tradesPart = counts.total > 1 ? ` across ${counts.total} trades` : '';
+        summaryLine = `You ${action} ${contracts} option contracts${symbolPart}${tradesPart} in ${description}.`;
+      }
+    } else if (hasTradeTypeFilter) {
+      // Only trade type filter
+      const action = normalizedTradeType === 'buy' ? 'buy' : 'sell';
+      summaryLine = `You made ${counts.total} ${action} trades${symbolText} in ${description}. ${counts.stocks} stock trades and ${counts.options} option trades.`;
+    } else if (hasSecurityTypeFilter) {
+      // Only security type filter
+      if (normalizedSecurityType === 'stock') {
+        summaryLine = `Found ${counts.stocks} stock trades${symbolText} in ${description}. ${counts.buys} buys and ${counts.sells} sells. Total: ${Math.round(aggregates.totalShares)} shares.`;
+      } else {
+        summaryLine = `Found ${counts.options} option trades${symbolText} in ${description}. ${counts.buys} buys and ${counts.sells} sells. Total: ${Math.round(aggregates.totalContracts)} contracts.`;
+      }
+    } else {
+      // No filters: standard verbose response
+      const totalValueStr = `$${aggregates.totalValue.toFixed(2)}`;
+      const totalTradePlural = counts.total === 1 ? 'trade' : 'trades';
+      summaryLine = `You executed ${counts.total} total ${totalTradePlural}${symbolText} for ${description}: ${counts.stocks} stock trade${counts.stocks !== 1 ? 's' : ''} and ${counts.options} option trade${counts.options !== 1 ? 's' : ''} with a total value of ${totalValueStr}.`;
+    }
+
+    // Add trade highlights only for unfiltered queries
+    const highlightsText = (!hasTradeTypeFilter && !hasSecurityTypeFilter) ? buildTradeHighlights(rows) : '';
     const response = summaryLine + highlightsText + statsText;
 
     // Format dates for display

@@ -410,7 +410,7 @@ async function getDetailedTrades(
   const totalContracts = optionTrades.reduce((sum, t) =>
     sum + parseFloat(t.OptionContracts || '0'), 0);
   const totalValue = allTrades.reduce((sum, t) =>
-    sum + Math.abs(parseFloat(t.NetAmount || '0')), 0);
+    sum + Math.abs(parseFloat(t.GrossAmount || '0')), 0);
 
   // Format trades for display
   const formattedStockTrades = stockTrades.map(t => ({
@@ -419,7 +419,7 @@ async function getDetailedTrades(
     type: t.TradeType === 'B' ? 'Buy' : 'Sell',
     shares: parseFloat(t.StockShareQty || '0'),
     price: parseFloat(t.StockTradePrice || '0'),
-    netAmount: parseFloat(t.NetAmount || '0'),
+    grossAmount: parseFloat(t.GrossAmount || '0'),
   }));
 
   const formattedOptionTrades = optionTrades.map(t => ({
@@ -431,7 +431,7 @@ async function getDetailedTrades(
     expiration: t.Expiration,
     contracts: parseFloat(t.OptionContracts || '0'),
     premium: parseFloat(t.OptionTradePremium || '0'),
-    netAmount: parseFloat(t.NetAmount || '0'),
+    grossAmount: parseFloat(t.GrossAmount || '0'),
   }));
 
   // Build natural response based on filters applied

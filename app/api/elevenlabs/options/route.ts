@@ -293,7 +293,7 @@ export async function POST(req: NextRequest) {
         const trade = data[0];
         const qty = parseFloat(trade.OptionContracts || '0');
         const strike = parseFloat(trade.Strike || '0');
-        const premium = Math.abs(parseFloat(trade.NetAmount || '0'));
+        const premium = Math.abs(parseFloat(trade.GrossAmount || '0'));
         const perContract = qty > 0 ? premium / qty : 0;
         const cp = trade['Call/Put'] === 'C' ? 'call' : 'put';
         const action = trade.TradeType === 'B' ? 'bought' : 'sold';
@@ -311,7 +311,7 @@ export async function POST(req: NextRequest) {
         const trade = data[0];
         const qty = parseFloat(trade.OptionContracts || '0');
         const strike = parseFloat(trade.Strike || '0');
-        const premium = Math.abs(parseFloat(trade.NetAmount || '0'));
+        const premium = Math.abs(parseFloat(trade.GrossAmount || '0'));
         const cp = trade['Call/Put'] === 'C' ? 'call' : 'put';
         const action = trade.TradeType === 'B' ? 'bought' : 'sold';
         const underlyingTicker = trade.UnderlyingSymbol || normalizedSymbol || 'the stock';
@@ -325,7 +325,7 @@ export async function POST(req: NextRequest) {
       case 'total_premium': {
         // Aggregated premium
         const totalContracts = data.reduce((sum, t) => sum + parseFloat(t.OptionContracts || '0'), 0);
-        const totalPremium = data.reduce((sum, t) => sum + Math.abs(parseFloat(t.NetAmount || '0')), 0);
+        const totalPremium = data.reduce((sum, t) => sum + Math.abs(parseFloat(t.GrossAmount || '0')), 0);
         const sharesCovered = totalContracts * 100;
         const avgPremium = totalContracts > 0 ? totalPremium / totalContracts / 100 : 0;
 
@@ -347,7 +347,7 @@ export async function POST(req: NextRequest) {
       default: {
         // Multiple trades summary
         const totalContracts = data.reduce((sum, t) => sum + parseFloat(t.OptionContracts || '0'), 0);
-        const totalPremium = data.reduce((sum, t) => sum + Math.abs(parseFloat(t.NetAmount || '0')), 0);
+        const totalPremium = data.reduce((sum, t) => sum + Math.abs(parseFloat(t.GrossAmount || '0')), 0);
         const sharesCovered = totalContracts * 100;
         const avgPremium = totalContracts > 0 ? totalPremium / totalContracts / 100 : 0;
 
@@ -358,7 +358,7 @@ export async function POST(req: NextRequest) {
 
     // Calculate metadata for UI - SINGLE SOURCE OF TRUTH
     const totalContracts = data.reduce((sum, t) => sum + parseFloat(t.OptionContracts || '0'), 0);
-    const totalPremium = data.reduce((sum, t) => sum + Math.abs(parseFloat(t.NetAmount || '0')), 0);
+    const totalPremium = data.reduce((sum, t) => sum + Math.abs(parseFloat(t.GrossAmount || '0')), 0);
     const callCount = data.filter(t => t['Call/Put'] === 'C').length;
     const putCount = data.filter(t => t['Call/Put'] === 'P').length;
 
@@ -380,9 +380,9 @@ export async function POST(req: NextRequest) {
         strike: parseFloat(t.Strike || '0'),
         expiration: t.Expiration,
         contracts: parseFloat(t.OptionContracts || '0'),
-        premium: Math.abs(parseFloat(t.NetAmount || '0')),
+        premium: Math.abs(parseFloat(t.GrossAmount || '0')),
         premiumPerContract: parseFloat(t.OptionContracts || '0') > 0
-          ? Math.abs(parseFloat(t.NetAmount || '0')) / parseFloat(t.OptionContracts || '0')
+          ? Math.abs(parseFloat(t.GrossAmount || '0')) / parseFloat(t.OptionContracts || '0')
           : 0,
       })),
       summary: {

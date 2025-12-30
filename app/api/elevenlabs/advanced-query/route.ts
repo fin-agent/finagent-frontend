@@ -428,11 +428,9 @@ export async function POST(req: NextRequest) {
     // For options: shares covered = contracts * 100
     const sharesCovered = totalContracts * 100;
 
-    // Calculate total premium correctly
-    // OptionTradePremium is per-share price, so total = premium * contracts * 100
-    // NetAmount already includes this calculation (premium * contracts * 100 - fees)
-    // Use NetAmount for accurate totals (what was actually received/paid)
-    const totalNetAmount = data.reduce((sum, t) => sum + Math.abs(parseFloat(t.NetAmount || '0')), 0);
+    // Calculate total premium correctly using GrossAmount (before fees)
+    // GrossAmount = premium * contracts * 100
+    const totalGrossAmount = data.reduce((sum, t) => sum + Math.abs(parseFloat(t.GrossAmount || '0')), 0);
 
     // Calculate gross premium (premium * contracts * 100) for display
     const totalGrossPremium = data.reduce((sum, t) => {
@@ -457,7 +455,7 @@ export async function POST(req: NextRequest) {
       const trade = data[0];
       const strikeVal = parseFloat(trade.Strike || '0');
       const qty = parseFloat(trade.OptionContracts || '0');
-      const premium = Math.abs(parseFloat(trade.NetAmount || '0'));
+      const premium = Math.abs(parseFloat(trade.GrossAmount || '0'));
       const perContract = qty > 0 ? premium / qty : 0;
       const callPutText = trade['Call/Put'] === 'C' ? 'call' : 'put';
       const tradeTypeText = trade.TradeType === 'B' ? 'bought' : 'sold';
@@ -470,7 +468,7 @@ export async function POST(req: NextRequest) {
       response = `Your most recent ${callPutText} option on ${underlyingSymbol} was on ${tradeDate}. You ${tradeTypeText} ${qty} ${qty === 1 ? 'contract' : 'contracts'} of the $${strikeVal} strike, ${premiumVerb} $${premium.toFixed(2)} total premium ($${perContract.toFixed(2)} per contract). This option expires ${expirationDate}.`;
     } else if (aggregation === 'total_premium') {
       const action = tradeType === 'sell' ? 'collected' : 'paid';
-      response = `You ${action} a total of $${totalNetAmount.toFixed(2)} in premium on ${tradeCount} ${normalizedSymbol || ''} ${callPut || ''} option trades (${totalContracts} contracts covering ${sharesCovered} shares)`;
+      response = `You ${action} a total of $${totalGrossAmount.toFixed(2)} in premium on ${tradeCount} ${normalizedSymbol || ''} ${callPut || ''} option trades (${totalContracts} contracts covering ${sharesCovered} shares)`;
       if (fromDate || toDate) {
         response += ` during the specified period`;
       }
@@ -479,7 +477,7 @@ export async function POST(req: NextRequest) {
       const trade = data[0];
       const strikeVal = parseFloat(trade.Strike || '0');
       const qty = parseFloat(trade.OptionContracts || '0');
-      const premium = Math.abs(parseFloat(trade.NetAmount || '0'));
+      const premium = Math.abs(parseFloat(trade.GrossAmount || '0'));
       const callPutText = trade['Call/Put'] === 'C' ? 'call' : 'put';
       const tradeTypeText = trade.TradeType === 'B' ? 'bought' : 'sold';
 
@@ -511,7 +509,7 @@ export async function POST(req: NextRequest) {
         response = `You ${action} ${totalContracts} ${optionType} option contracts`;
         if (normalizedSymbol) response += ` on ${normalizedSymbol}`;
         if (fromDate) response += ` ${fromDate}`;
-        response += `, ${premiumAction} total premium of $${totalNetAmount.toFixed(2)}`;
+        response += `, ${premiumAction} total premium of $${totalGrossAmount.toFixed(2)}`;
         response += `. The average premium per share was $${avgPremiumPerShare.toFixed(2)}`;
         response += `, covering ${sharesCovered} shares across ${tradeCount} trades.`;
       } else {
@@ -533,7 +531,7 @@ export async function POST(req: NextRequest) {
           response += `${stockTrades.length} stock trades (${totalShares} shares)`;
         }
 
-        response += `. ${buyTrades.length} buys, ${sellTrades.length} sells. Total value: $${totalNetAmount.toFixed(2)}.`;
+        response += `. ${buyTrades.length} buys, ${sellTrades.length} sells. Total value: $${totalGrossAmount.toFixed(2)}.`;
       }
     }
 
@@ -562,19 +560,19 @@ export async function POST(req: NextRequest) {
         expiration: t.Expiration || null,
         contracts: t.SecurityType === 'O' ? parseFloat(t.OptionContracts || '0') : null,
         shares: t.SecurityType === 'S' ? parseFloat(t.StockShareQty || '0') : null,
-        premium: t.SecurityType === 'O' ? Math.abs(parseFloat(t.NetAmount || '0')) : null,
+        premium: t.SecurityType === 'O' ? Math.abs(parseFloat(t.GrossAmount || '0')) : null,
         premiumPerContract: t.SecurityType === 'O' && parseFloat(t.OptionContracts || '0') > 0
-          ? Math.abs(parseFloat(t.NetAmount || '0')) / parseFloat(t.OptionContracts || '0')
+          ? Math.abs(parseFloat(t.GrossAmount || '0')) / parseFloat(t.OptionContracts || '0')
           : null,
         stockPrice: t.SecurityType === 'S' ? parseFloat(t.StockTradePrice || '0') : null,
-        netAmount: Math.abs(parseFloat(t.NetAmount || '0')),
+        grossAmount: Math.abs(parseFloat(t.GrossAmount || '0')),
       })),
       summary: {
         tradeCount,
         totalContracts,
         totalShares,
         sharesCovered,  // contracts * 100 for options
-        totalNetAmount,  // Actual amount received/paid (after fees)
+        totalGrossAmount,  // Gross amount (before fees)
         totalGrossPremium,  // premium * contracts * 100
         avgPremiumPerShare,  // Average premium per share
         stockTradeCount: data.filter(t => t.SecurityType === 'S').length,

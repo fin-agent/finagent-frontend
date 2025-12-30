@@ -266,7 +266,7 @@ export const intentRegistry: IntentDefinition[] = [
     id: 'fees.query',
     domain: 'fees',
     cardType: 'fees',
-    description: 'User asks about fees, commissions, interest charges, locate fees, or short interest (borrow fees for shorting stocks)',
+    description: 'User asks about fees, commissions, interest charges, locate fees, or short interest (borrow fees for shorting stocks). IMPORTANT: "charges" keyword means FEES, not account balances.',
     examples: [
       'How much did I pay in commissions?',
       'Interest charges this month',
@@ -284,6 +284,11 @@ export const intentRegistry: IntentDefinition[] = [
       'Show my short interest',
       'How much short interest did I pay?',
       'Short interest for MTEN',
+      // Debit interest (margin interest charges) examples
+      'Debit balance charges for this year',
+      'How much debit interest did I pay?',
+      'What did I pay in margin interest?',
+      'Debit charges this month',
     ],
     requiredEntities: ['feeType'],
     optionalEntities: ['symbol', 'timePeriod'],

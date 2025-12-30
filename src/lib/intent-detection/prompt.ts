@@ -116,9 +116,12 @@ ${intents.map(i => `### ${i.id}
 - **feeType**: Infer from context:
   - "commission" / "commissions" / "trading fees" -> "commission"
   - "credit interest" / "interest earned" -> "credit_interest"
-  - "debit interest" / "margin interest" / "interest charged" -> "debit_interest"
+  - "debit interest" / "margin interest" / "interest charged" / "debit balance charges" / "debit charges" -> "debit_interest"
   - "locate fee" / "borrow fee" / "stock borrow" -> "locate_fee"
   - "short interest" / "short borrow interest" / "shorting interest" -> "short_interest"
+
+  **CRITICAL: "charges" keyword = FEES intent**
+  When user says "charges" (e.g., "debit balance charges"), this is a FEES query (debit_interest), NOT an account balance query.
 
 ## Database Schema Reference
 
@@ -373,6 +376,9 @@ Response: {"intent": "fees.query", "confidence": 0.93, "entities": {"feeType": "
 
 Query: "Show my short interest for MTEN"
 Response: {"intent": "fees.query", "confidence": 0.92, "entities": {"symbol": "MTEN", "feeType": "short_interest"}}
+
+Query: "Debit balance charges for this year"
+Response: {"intent": "fees.query", "confidence": 0.95, "entities": {"feeType": "debit_interest", "timePeriod": "this year", "dateFilter": {"type": "relative", "period": "this year", "description": "this year"}}}
 
 Query: "What's the highest price I sold Apple for last quarter?" (context: Today is December 26, 2025)
 Response: {"intent": "trades.stats", "confidence": 0.96, "entities": {"symbol": "AAPL", "tradeType": "sell", "timePeriod": "last quarter", "dateFilter": {"type": "range", "startDate": "2025-07-01", "endDate": "2025-09-30", "description": "Q3 2025"}}}

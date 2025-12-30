@@ -634,7 +634,7 @@ Only proceed with the tool call once you have a clear expiration period.
 - "nlv" - For "What is my NLV?", "Net liquidation value"
 - "overnight_margin" - For "What's my overnight margin?", "Margin status"
 - "market_value" - For "Market value of my positions"
-- "debit_balances" - For "Debit balances for the month" (returns average, highest, lowest with dates)
+- "debit_balances" - For "Debit balances for the month" (returns average, highest, lowest with dates). NOT for "charges" - use get_fees with debit_interest instead.
 - "credit_balances" - For "Credit balances for the month" (returns average, highest, lowest with dates)
 - time_period (optional, but REQUIRED when user specifies a date): Examples: "November 14th", "last week", "October", "this month"
   - **CRITICAL:** If user asks "market value on Nov 14th", you MUST include time_period with date_filter
@@ -677,10 +677,13 @@ Only proceed with the tool call once you have a clear expiration period.
 | "What were my total commissions last month?" | commission |
 | "How much did I earn from credit interest this month?" | credit_interest |
 | "How much did I pay in debit interest last week?" | debit_interest |
+| "Debit balance charges for this year" | debit_interest (NOT debit_balances - "charges" = fees) |
 | "How much did I pay to borrow MTEN stock this year?" | locate_fee (with symbol: MTEN) |
 | "What is my short interest?" | short_interest |
 | "Short interest from last month" | short_interest |
 | "Short interest for MTEN this year" | short_interest (with symbol: MTEN) |
+
+**IMPORTANT:** When user says "charges" or "paid", use get_fees. When user asks about "balance" amounts without "charges", use get_account_balance.
 
 **NOTE:** Commissions come from TradeData table. All other fee types come from FeesAndInterest table.
 

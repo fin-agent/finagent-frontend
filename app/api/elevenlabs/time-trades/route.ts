@@ -155,10 +155,11 @@ export async function POST(req: NextRequest) {
       let responseText = `No trades found${symbolText} for ${description}.`;
       if (nearestPeriod) {
         const tradeTypeLabel = normalizedTradeType === 'buy' ? 'buy ' : normalizedTradeType === 'sell' ? 'sell ' : '';
+        const tradePlural = nearestPeriod.count === 1 ? 'trade' : 'trades';
         if (metadata.symbol && metadata.symbol !== '(all)') {
-          responseText = `No ${tradeTypeLabel}trades found for ${metadata.symbol} in ${description}, but I found ${nearestPeriod.count} ${tradeTypeLabel}trades in ${nearestPeriod.suggestedPeriod}. Would you like to see those instead?`;
+          responseText = `No ${tradeTypeLabel}trades found for ${metadata.symbol} in ${description}, but I found ${nearestPeriod.count} ${tradeTypeLabel}${tradePlural} on ${nearestPeriod.suggestedPeriod}. Would you like to see those instead?`;
         } else {
-          responseText = `No ${tradeTypeLabel}trades found for ${description}, but I found ${nearestPeriod.count} ${tradeTypeLabel}trades in ${nearestPeriod.suggestedPeriod}. Would you like to see those instead?`;
+          responseText = `No ${tradeTypeLabel}trades found for ${description}, but I found ${nearestPeriod.count} ${tradeTypeLabel}${tradePlural} on ${nearestPeriod.suggestedPeriod}. Would you like to see those instead?`;
         }
       } else if (symbolContext) {
         // Make first letter lowercase to flow naturally after "However, "
@@ -206,7 +207,8 @@ export async function POST(req: NextRequest) {
 
     // Build voice response with exact counts from computed data
     const totalValueStr = `$${aggregates.totalValue.toFixed(2)}`;
-    const summaryLine = `You executed ${counts.total} total trades${symbolText} for ${description}: ${counts.stocks} stock trade${counts.stocks !== 1 ? 's' : ''} and ${counts.options} option trade${counts.options !== 1 ? 's' : ''} with a total value of ${totalValueStr}.`;
+    const totalTradePlural = counts.total === 1 ? 'trade' : 'trades';
+    const summaryLine = `You executed ${counts.total} total ${totalTradePlural}${symbolText} for ${description}: ${counts.stocks} stock trade${counts.stocks !== 1 ? 's' : ''} and ${counts.options} option trade${counts.options !== 1 ? 's' : ''} with a total value of ${totalValueStr}.`;
 
     // Add trade highlights
     const highlightsText = buildTradeHighlights(rows);

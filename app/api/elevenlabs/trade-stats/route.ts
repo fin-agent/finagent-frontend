@@ -143,7 +143,8 @@ export async function POST(req: NextRequest) {
 
       if (nearestMonth) {
         // Found trades in a different month - suggest that period
-        const responseText = `No ${typeLabel} trades found for ${normalizedSymbol} in ${periodDescription}, but I found ${nearestMonth.count} ${typeLabel} trades in ${nearestMonth.suggestedPeriod}. Would you like to see those instead?`;
+        const tradePlural = nearestMonth.count === 1 ? 'trade' : 'trades';
+        const responseText = `No ${typeLabel} trades found for ${normalizedSymbol} in ${periodDescription}, but I found ${nearestMonth.count} ${typeLabel} ${tradePlural} on ${nearestMonth.suggestedPeriod}. Would you like to see those instead?`;
 
         return NextResponse.json({
           response: responseText,

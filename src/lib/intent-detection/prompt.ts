@@ -97,6 +97,10 @@ ${intents.map(i => `### ${i.id}
   **IMPORTANT**: Use current calendar year (2025). If a date would be in the future relative to today, use the previous year.
   **CRITICAL**: For quarters, single months, and half-years, ALWAYS use type "range" with resolved startDate/endDate - NOT type "relative".
 - **tradeType**: "buy"/"bought"/"purchased"/"long" -> "buy", "sell"/"sold"/"short"/"written" -> "sell"
+- **securityType**: "stock"/"stocks"/"shares"/"equity" -> "stock", "option"/"options"/"contracts" -> "option"
+  - IMPORTANT: Only extract securityType when explicitly mentioned. "Apple trades" = no filter. "Apple stock trades" = stock only.
+  - "stock trades" / "shares" -> "stock"
+  - "option trades" / "options" / "contracts" -> "option"
 - **callPut**: "call"/"calls" -> "call", "put"/"puts" -> "put"
 - **expiration**: "tomorrow", "this week", "this month", or specific date
 - **accountQueryType**: Infer from context:
@@ -222,6 +226,12 @@ Response: {"intent": "trades.detailed", "confidence": 0.94, "entities": {"symbol
 
 Query: "How many trades for Apple in January?"
 Response: {"intent": "trades.detailed", "confidence": 0.95, "entities": {"symbol": "AAPL", "timePeriod": "January", "dateFilter": {"type": "range", "startDate": "2025-01-01", "endDate": "2025-01-31", "description": "January 2025"}}}
+
+Query: "How many buy stock trades in Apple in November?"
+Response: {"intent": "trades.detailed", "confidence": 0.96, "entities": {"symbol": "AAPL", "tradeType": "buy", "securityType": "stock", "timePeriod": "November", "dateFilter": {"type": "range", "startDate": "2025-11-01", "endDate": "2025-11-30", "description": "November 2025"}}}
+
+Query: "Show my sell option trades for Tesla last month"
+Response: {"intent": "trades.detailed", "confidence": 0.95, "entities": {"symbol": "TSLA", "tradeType": "sell", "securityType": "option", "timePeriod": "last month", "dateFilter": {"type": "relative", "period": "last month", "description": "last month"}}}
 
 Query: "Count my TSLA trades"
 Response: {"intent": "trades.detailed", "confidence": 0.94, "entities": {"symbol": "TSLA"}}

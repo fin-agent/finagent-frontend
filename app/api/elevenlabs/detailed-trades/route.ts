@@ -28,9 +28,14 @@ export async function POST(req: NextRequest) {
                        body.body?.time_period || body.body?.parameters?.time_period;
     const dateFilter: DateFilter | undefined = body.date_filter || body.parameters?.date_filter ||
                        body.body?.date_filter || body.body?.parameters?.date_filter;
+    // Extract trade type (buy/sell) and security type (stock/option) filters
+    const tradeType = body.trade_type || body.parameters?.trade_type ||
+                      body.body?.trade_type || body.body?.parameters?.trade_type;
+    const securityType = body.security_type || body.parameters?.security_type ||
+                         body.body?.security_type || body.body?.parameters?.security_type;
 
     // Log input parameters (context merging disabled - ElevenLabs LLM handles context)
-    trace.logInput({ symbol, timePeriod, dateFilter });
+    trace.logInput({ symbol, timePeriod, dateFilter, tradeType, securityType });
 
     if (!symbol) {
       trace.logError('No symbol provided');
@@ -45,6 +50,8 @@ export async function POST(req: NextRequest) {
       symbol,
       timePeriod,
       dateFilter,
+      tradeType: tradeType || 'all',
+      instrument: securityType || 'all',  // securityType maps to instrument in queryTrades
       limit: 50,  // Limit for detailed view
     });
 
@@ -81,9 +88,12 @@ export async function POST(req: NextRequest) {
     }
 
     // Build voice response from computed data (never fabricates)
+    // Pass filter context for natural, context-aware responses
     const response = buildVoiceResponse(result, {
       includeAggregates: true,   // Include value totals
       includeBreakdown: true,    // Include stock/option breakdown
+      tradeType: tradeType || 'all',      // Pass filter for context-aware response
+      instrument: securityType || 'all',  // Pass filter for context-aware response
     });
 
     // Build UI data from same query results

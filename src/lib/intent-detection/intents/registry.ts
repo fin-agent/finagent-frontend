@@ -41,9 +41,14 @@ export const intentRegistry: IntentDefinition[] = [
       'Show my Apple trades for January',
       'AAPL trades last month',
       'How many Tesla trades last week?',
+      // With tradeType and securityType filters
+      'How many buy stock trades in Apple in November?',
+      'Show my sell option trades for Tesla',
+      'Buy trades for AAPL last month',
+      'Stock trades for Google this year',
     ],
     requiredEntities: ['symbol'],
-    optionalEntities: ['timePeriod', 'tradeType'],
+    optionalEntities: ['timePeriod', 'tradeType', 'securityType'],
   },
   {
     id: 'trades.time_based',
@@ -77,9 +82,13 @@ export const intentRegistry: IntentDefinition[] = [
       // Half-year examples
       'Trades in the first half of the year',
       'What did I trade in H2?',
+      // With tradeType and securityType filters
+      'What stock trades did I make last week?',
+      'Buy trades this month',
+      'Show sell trades for November',
     ],
     requiredEntities: ['timePeriod'],
-    optionalEntities: ['symbol'],
+    optionalEntities: ['symbol', 'tradeType', 'securityType'],
   },
   {
     id: 'trades.stats',

@@ -77,6 +77,7 @@ interface QueryIntent {
   cardType: TradeUIData['type'];
   symbol?: string;
   tradeType?: 'buy' | 'sell';
+  securityType?: 'stock' | 'option';  // Filter by instrument type
   timePeriod?: string;
   callPut?: 'call' | 'put';
   expiration?: string;
@@ -763,6 +764,7 @@ async function classifyIntentViaAPI(query: string): Promise<QueryIntentWithConfi
       cardType: result.cardType as QueryIntent['cardType'],
       symbol: result.entities.symbol,
       tradeType: result.entities.tradeType,
+      securityType: result.entities.securityType,  // stock/option filter
       timePeriod: result.entities.timePeriod,
       callPut: result.entities.callPut,
       expiration: result.entities.expiration,
@@ -1629,6 +1631,7 @@ const UnifiedAssistant: React.FC = () => {
                   accountQueryType: pendingIntent.accountQueryType,
                   feeType: pendingIntent.feeType,
                   dateFilter: pendingIntent.dateFilter,
+                  securityType: pendingIntent.securityType,
                 }
               );
               if (data) {
@@ -1697,7 +1700,7 @@ const UnifiedAssistant: React.FC = () => {
     type: TradeUIData['type'],
     tradeType?: 'buy' | 'sell' | 'all',
     timePeriod?: string,
-    extraParams?: { callPut?: 'call' | 'put'; expiration?: string; aggregation?: string; accountQueryType?: AccountQueryType; feeType?: FeeType; includeTrades?: boolean; dateFilter?: { type: string; startDate?: string; endDate?: string; description: string }; queryType?: string; strike?: number; chartPeriod?: string }
+    extraParams?: { callPut?: 'call' | 'put'; expiration?: string; aggregation?: string; accountQueryType?: AccountQueryType; feeType?: FeeType; includeTrades?: boolean; dateFilter?: { type: string; startDate?: string; endDate?: string; description: string }; queryType?: string; strike?: number; chartPeriod?: string; securityType?: 'stock' | 'option' }
   ): Promise<TradeUIData | null> => {
     try {
       let endpoint: string;
@@ -2135,7 +2138,13 @@ const UnifiedAssistant: React.FC = () => {
       } else if (type === 'detailed') {
         // SINGLE FETCH: Use voice endpoint with uiData
         endpoint = '/api/elevenlabs/detailed-trades';
-        body = { symbol, time_period: timePeriod, date_filter: extraParams?.dateFilter };
+        body = {
+          symbol,
+          time_period: timePeriod,
+          date_filter: extraParams?.dateFilter,
+          trade_type: tradeType,  // buy/sell filter
+          security_type: extraParams?.securityType,  // stock/option filter
+        };
         const res = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -2143,7 +2152,7 @@ const UnifiedAssistant: React.FC = () => {
         });
         const voicePayload = await res.json();
         const uiData = voicePayload?.uiData || voicePayload;
-        return { type, symbol, timePeriod, dateFilter: extraParams?.dateFilter as TradeUIData['dateFilter'], data: uiData };
+        return { type, symbol, timePeriod, tradeType, dateFilter: extraParams?.dateFilter as TradeUIData['dateFilter'], data: uiData };
       } else if (type === 'options') {
         // SINGLE FETCH: Use voice endpoint with uiData
         endpoint = '/api/elevenlabs/options';
@@ -2379,6 +2388,7 @@ const UnifiedAssistant: React.FC = () => {
                 {
                   feeType: suggestionIntent.feeType,
                   dateFilter: suggestionIntent.dateFilter,
+                  securityType: suggestionIntent.securityType,
                 }
               );
               // Clear suggestion after use
@@ -2521,6 +2531,7 @@ const UnifiedAssistant: React.FC = () => {
                     accountQueryType: pendingIntent.accountQueryType,
                     feeType: pendingIntent.feeType,
                     dateFilter: pendingIntent.dateFilter,
+                    securityType: pendingIntent.securityType,
                   }
                 );
                 if (data) {
@@ -2988,6 +2999,7 @@ const UnifiedAssistant: React.FC = () => {
                 accountQueryType: intent.accountQueryType,
                 feeType: intent.feeType,
                 dateFilter: intent.dateFilter,
+                securityType: intent.securityType,
               }
             )
           : null;
@@ -3052,6 +3064,7 @@ const UnifiedAssistant: React.FC = () => {
 		              accountQueryType: intent.accountQueryType,
 		              feeType: intent.feeType,
 		              dateFilter: intent.dateFilter,
+		              securityType: intent.securityType,
 		            }
 		          )
 		        : null;
@@ -3120,6 +3133,7 @@ const UnifiedAssistant: React.FC = () => {
 		            accountQueryType: intent.accountQueryType,
 		            feeType: intent.feeType,
 		            dateFilter: intent.dateFilter,
+		            securityType: intent.securityType,
 		          }
 		        )
 		      : null;

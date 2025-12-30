@@ -60,12 +60,23 @@ export function realDateToDemoDate(realDate: Date): Date {
  * Convert a demo database date to display-friendly date
  * NOTE: Date offsetting has been DISABLED - dates pass through unchanged
  *
- * @param demoDateStr - Date string from database (YYYY-MM-DD)
+ * @param demoDateStr - Date string from database (YYYY-MM-DD or ISO timestamp)
  * @returns Same date as Date object (no offset applied)
  */
 export function demoDateToRealDate(demoDateStr: string): Date {
-  // Parse as local date, no offset applied
-  const [year, month, day] = demoDateStr.split('-').map(Number);
+  if (!demoDateStr) {
+    return new Date(NaN); // Return Invalid Date for empty input
+  }
+
+  // Extract just the date part (handles both YYYY-MM-DD and ISO timestamps like 2025-11-15T00:00:00.000Z)
+  const datePart = demoDateStr.split('T')[0];
+  const [year, month, day] = datePart.split('-').map(Number);
+
+  // Validate parsed values
+  if (isNaN(year) || isNaN(month) || isNaN(day)) {
+    return new Date(NaN); // Return Invalid Date for unparseable input
+  }
+
   return new Date(year, month - 1, day);
 }
 
@@ -149,7 +160,17 @@ export function getDayOfWeek(demoDateStr: string): string {
  * This converts the database date to the actual display date with offset applied
  */
 export function formatCalendarDate(demoDateStr: string): string {
+  if (!demoDateStr) {
+    return 'N/A';
+  }
+
   const realDate = demoDateToRealDate(demoDateStr);
+
+  // Handle Invalid Date
+  if (isNaN(realDate.getTime())) {
+    return 'N/A';
+  }
+
   return realDate.toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric',

@@ -65,6 +65,7 @@ export interface ExtractedEntities {
   timePeriod?: string;           // Keep for backwards compatibility
   dateFilter?: DateFilter;       // NEW: Structured date extraction from LLM
   tradeType?: 'buy' | 'sell';
+  securityType?: 'stock' | 'option';  // Filter by instrument type
   callPut?: 'call' | 'put';
   accountQueryType?: AccountQueryType;
   feeType?: FeeType;

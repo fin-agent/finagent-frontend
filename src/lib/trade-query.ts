@@ -318,32 +318,180 @@ function formatTrades(rows: TradeRow[]): FormattedTrade[] {
 /**
  * Build a voice response from query results.
  * Uses ONLY computed data - never fabricates numbers.
+ *
+ * When filters are applied (tradeType, instrument), generates context-aware natural responses:
+ * - "buy stock trades in Apple" → "You bought 180 shares of Apple in 4 trades"
+ * - "sell option trades" → "You sold 3 option contracts"
  */
 export function buildVoiceResponse(
   result: TradeQueryResult,
   options?: {
     includeAggregates?: boolean;
     includeBreakdown?: boolean;
+    // Filter context for natural responses
+    tradeType?: 'buy' | 'sell' | 'all';
+    instrument?: 'stock' | 'option' | 'all';
   }
 ): string {
-  const { counts, aggregates, metadata } = result;
-  const { includeAggregates = true, includeBreakdown = true } = options || {};
+  const { counts, metadata } = result;
+  const {
+    includeAggregates = true,
+    includeBreakdown = true,
+    tradeType = 'all',
+    instrument = 'all',
+  } = options || {};
 
-  const symbol = metadata.symbol === '(all)' ? '' : ` for ${metadata.symbol}`;
-  const period = metadata.dateRange.description
-    ? ` ${metadata.dateRange.description}`
-    : '';
+  const symbol = metadata.symbol === '(all)' ? '' : metadata.symbol;
+  const period = metadata.dateRange.description || '';
 
   // Zero results case
   if (counts.total === 0) {
-    return `No trades found${symbol}${period}.`;
+    const filterDesc = buildFilterDescription(tradeType, instrument);
+    return `No ${filterDesc}trades found${symbol ? ` for ${symbol}` : ''}${period ? ` ${period}` : ''}.`;
   }
 
-  // Build response parts
+  // Check if specific filters were applied for context-aware response
+  const hasTradeTypeFilter = tradeType !== 'all';
+  const hasInstrumentFilter = instrument !== 'all';
+
+  // If both filters applied, generate a natural context-aware response
+  if (hasTradeTypeFilter && hasInstrumentFilter) {
+    return buildFilteredResponse(result, tradeType, instrument, symbol, period);
+  }
+
+  // If only trade type filter, generate semi-filtered response
+  if (hasTradeTypeFilter) {
+    return buildTradeTypeFilteredResponse(result, tradeType, symbol, period, includeBreakdown);
+  }
+
+  // If only instrument filter, generate instrument-filtered response
+  if (hasInstrumentFilter) {
+    return buildInstrumentFilteredResponse(result, instrument, symbol, period, includeBreakdown);
+  }
+
+  // Default: no filters - use standard response format
+  return buildStandardResponse(result, symbol, period, includeBreakdown, includeAggregates);
+}
+
+/**
+ * Build description of applied filters for zero-results message
+ */
+function buildFilterDescription(tradeType: string, instrument: string): string {
+  const parts: string[] = [];
+  if (tradeType === 'buy') parts.push('buy');
+  if (tradeType === 'sell') parts.push('sell');
+  if (instrument === 'stock') parts.push('stock');
+  if (instrument === 'option') parts.push('option');
+  return parts.length > 0 ? parts.join(' ') + ' ' : '';
+}
+
+/**
+ * Build natural response when both tradeType and instrument filters are applied.
+ * E.g., "You bought 180 shares of Apple across 4 trades in November"
+ */
+function buildFilteredResponse(
+  result: TradeQueryResult,
+  tradeType: 'buy' | 'sell',
+  instrument: 'stock' | 'option',
+  symbol: string,
+  period: string
+): string {
+  const { counts, aggregates } = result;
+  const action = tradeType === 'buy' ? 'bought' : 'sold';
+
+  if (instrument === 'stock') {
+    const shares = Math.round(aggregates.totalShares);
+    const symbolPart = symbol ? ` of ${symbol}` : '';
+    const periodPart = period ? ` in ${period}` : '';
+    const tradesPart = counts.total > 1 ? ` across ${counts.total} trades` : '';
+    return `You ${action} ${shares} shares${symbolPart}${tradesPart}${periodPart}.`;
+  } else {
+    // Options
+    const contracts = Math.round(aggregates.totalContracts);
+    const symbolPart = symbol ? ` on ${symbol}` : '';
+    const periodPart = period ? ` in ${period}` : '';
+    const tradesPart = counts.total > 1 ? ` across ${counts.total} trades` : '';
+    return `You ${action} ${contracts} option contracts${symbolPart}${tradesPart}${periodPart}.`;
+  }
+}
+
+/**
+ * Build response when only tradeType filter is applied.
+ * E.g., "You made 5 buy trades for Apple in November"
+ */
+function buildTradeTypeFilteredResponse(
+  result: TradeQueryResult,
+  tradeType: 'buy' | 'sell',
+  symbol: string,
+  period: string,
+  includeBreakdown: boolean
+): string {
+  const { counts } = result;
+  const action = tradeType === 'buy' ? 'buy' : 'sell';
+  const symbolPart = symbol ? ` for ${symbol}` : '';
+  const periodPart = period ? ` in ${period}` : '';
+
+  let response = `You made ${counts.total} ${action} trades${symbolPart}${periodPart}`;
+
+  // Add breakdown if requested and we have mixed stock/option
+  if (includeBreakdown && counts.stocks > 0 && counts.options > 0) {
+    response += `. ${counts.stocks} stock trades and ${counts.options} option trades`;
+  }
+
+  return response + '.';
+}
+
+/**
+ * Build response when only instrument filter is applied.
+ * E.g., "Found 4 stock trades for Apple in November"
+ */
+function buildInstrumentFilteredResponse(
+  result: TradeQueryResult,
+  instrument: 'stock' | 'option',
+  symbol: string,
+  period: string,
+  includeBreakdown: boolean
+): string {
+  const { counts, aggregates } = result;
+  const instrumentName = instrument === 'stock' ? 'stock' : 'option';
+  const symbolPart = symbol ? ` for ${symbol}` : '';
+  const periodPart = period ? ` ${period}` : '';
+
+  let response = `Found ${counts.total} ${instrumentName} trades${symbolPart}${periodPart}`;
+
+  // Add buy/sell breakdown if requested
+  if (includeBreakdown && counts.buys > 0 && counts.sells > 0) {
+    response += `. ${counts.buys} buys and ${counts.sells} sells`;
+  }
+
+  // Add quantity info
+  if (instrument === 'stock' && aggregates.totalShares > 0) {
+    response += `. Total: ${Math.round(aggregates.totalShares)} shares`;
+  } else if (instrument === 'option' && aggregates.totalContracts > 0) {
+    response += `. Total: ${Math.round(aggregates.totalContracts)} contracts`;
+  }
+
+  return response + '.';
+}
+
+/**
+ * Build standard response when no filters are applied.
+ */
+function buildStandardResponse(
+  result: TradeQueryResult,
+  symbol: string,
+  period: string,
+  includeBreakdown: boolean,
+  includeAggregates: boolean
+): string {
+  const { counts, aggregates } = result;
+  const symbolPart = symbol ? ` for ${symbol}` : '';
+  const periodPart = period ? ` ${period}` : '';
+
   const parts: string[] = [];
 
   // Main count
-  parts.push(`Found ${counts.total} trades${symbol}${period}`);
+  parts.push(`Found ${counts.total} trades${symbolPart}${periodPart}`);
 
   // Stock/option breakdown
   if (includeBreakdown && (counts.stocks > 0 || counts.options > 0)) {

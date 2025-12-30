@@ -98,10 +98,28 @@ const formatCurrency = (value: number) => {
 };
 
 const formatDate = (dateStr: string) => {
-  // Parse as local time to avoid UTC → local timezone shift
+  if (!dateStr) return 'N/A';
+
+  // Check if already formatted (e.g., "Nov 15, 2025" or "Nov 15")
+  // Pre-formatted dates don't start with a digit
+  if (!/^\d/.test(dateStr)) {
+    return dateStr;
+  }
+
+  // Parse ISO format as local time to avoid UTC → local timezone shift
   const datePart = dateStr.split('T')[0];
   const [year, month, day] = datePart.split('-').map(Number);
+
+  // Handle invalid date parts
+  if (isNaN(year) || isNaN(month) || isNaN(day)) {
+    return dateStr; // Return as-is if can't parse
+  }
+
   const date = new Date(year, month - 1, day);
+  if (isNaN(date.getTime())) {
+    return dateStr; // Return as-is if invalid date
+  }
+
   return date.toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric',

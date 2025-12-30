@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
-import { formatDateForDB } from '@/src/lib/date-utils';
+import { formatDateForDB, formatCalendarDate } from '@/src/lib/date-utils';
 import { calculateRealizedMatchesFIFO, filterProfitableTrades } from '@/src/lib/profitable-trades';
 import { normalizeSymbol } from '@/src/lib/symbol-utils';
 import { parseTimePeriodToResolvedDates } from '@/src/lib/date-parser';
@@ -415,7 +415,7 @@ async function getDetailedTrades(
   // Format trades for display
   const formattedStockTrades = stockTrades.map(t => ({
     tradeId: t.TradeID,
-    date: t.Date,
+    date: formatCalendarDate(t.Date),
     type: t.TradeType === 'B' ? 'Buy' : 'Sell',
     shares: parseFloat(t.StockShareQty || '0'),
     price: parseFloat(t.StockTradePrice || '0'),
@@ -424,7 +424,7 @@ async function getDetailedTrades(
 
   const formattedOptionTrades = optionTrades.map(t => ({
     tradeId: t.TradeID,
-    date: t.Date,
+    date: formatCalendarDate(t.Date),
     type: t.TradeType === 'B' ? 'Buy' : 'Sell',
     callPut: t['Call/Put'] === 'C' ? 'Call' : 'Put',
     strike: parseFloat(t.Strike || '0'),

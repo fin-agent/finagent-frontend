@@ -79,9 +79,10 @@ export interface ParsedDateQuery {
  * @returns ParsedDateQuery with DB-adjusted dates, or null if not parseable
  */
 export function parseTimeExpression(expression: string): ParsedDateQuery | null {
-  // Strip common prefixes like "in ", "for ", "during " that ElevenLabs may include
+  // Strip common prefixes like "in ", "for ", "during ", "the month of " that ElevenLabs may include
   let lowerExpr = expression.toLowerCase().trim();
   lowerExpr = lowerExpr.replace(/^(in|for|during)\s+/i, '');
+  lowerExpr = lowerExpr.replace(/^the\s+month\s+of\s+/i, '');
 
   const today = getEasternToday();
   today.setHours(0, 0, 0, 0);
@@ -597,9 +598,10 @@ export function resolveDateFilter(filter: DateFilter): ResolvedDates {
  * @returns ResolvedDates or null if not parseable
  */
 export function parseTimePeriodToResolvedDates(timePeriod: string): ResolvedDates | null {
-  // Strip common prefixes like "in ", "for ", "during " that ElevenLabs may include
+  // Strip common prefixes like "in ", "for ", "during ", "the month of " that ElevenLabs may include
   let lowerExpr = timePeriod.toLowerCase().trim();
   lowerExpr = lowerExpr.replace(/^(in|for|during)\s+/i, '');
+  lowerExpr = lowerExpr.replace(/^the\s+month\s+of\s+/i, '');
 
   const today = getEasternToday();
   today.setHours(0, 0, 0, 0);

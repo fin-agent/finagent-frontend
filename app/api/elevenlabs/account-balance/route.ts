@@ -258,14 +258,25 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // For other queries, get the latest record
-    const { data, error } = await supabase
+    // For other queries, get the record for the requested date or latest
+    let query = supabase
       .from('AccountBalance')
       .select('*')
-      .eq('AccountCode', ACCOUNT_CODE)
+      .eq('AccountCode', ACCOUNT_CODE);
+
+    // Apply date filters if specified
+    if (resolvedType === 'discrete' && dates && dates.length > 0) {
+      // For discrete dates (like "Nov 14th"), get that specific date
+      query = query.in('Date', dates);
+    } else if (startDate && endDate) {
+      // For date ranges (like "last week"), get records within range
+      query = query.gte('Date', startDate).lte('Date', endDate);
+    }
+
+    // Get the latest record (within the filtered range if filters applied)
+    const { data: dataArray, error } = await query
       .order('Date', { ascending: false })
-      .limit(1)
-      .single();
+      .limit(1);
 
     if (error) {
       const uiData: AccountBalanceUIData = {
@@ -278,13 +289,42 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    // Get the first record from the array (or undefined if empty)
+    const data = dataArray && dataArray.length > 0 ? dataArray[0] : null;
+
     if (!data) {
+      // If a specific time period was requested but no data found, suggest available data
+      const periodDescription = description || timePeriod || 'the specified period';
+      const hasDateFilter = (resolvedType === 'discrete' && dates && dates.length > 0) || (startDate && endDate);
+
+      if (hasDateFilter) {
+        const suggestion = await suggestDataPeriod('AccountBalance', periodDescription);
+
+        if (suggestion) {
+          const uiData: AccountBalanceUIData = {
+            queryType,
+            timePeriod: periodDescription,
+            asOfDate: '',
+            suggestion: {
+              period: suggestion.suggestedPeriod,
+            },
+          };
+          return NextResponse.json({
+            response: `No account balance data found for ${periodDescription}. However, I found balance data for ${suggestion.suggestedPeriod}. Would you like to know more about that?`,
+            uiData,
+          });
+        }
+      }
+
       const uiData: AccountBalanceUIData = {
         queryType,
+        timePeriod: hasDateFilter ? periodDescription : undefined,
         asOfDate: '',
       };
       return NextResponse.json({
-        response: 'No account balance data found.',
+        response: hasDateFilter
+          ? `No account balance data found for ${periodDescription}.`
+          : 'No account balance data found.',
         uiData,
       });
     }
@@ -352,7 +392,7 @@ export async function POST(req: NextRequest) {
         const optionsLong = balance['Options LMV'] || 0;
         const optionsShort = balance['Optons SMV'] || 0; // DB typo
         return NextResponse.json({
-          response: `The market value of your long stock positions is ${formatCurrency(stockLong)}, your long options positions is ${formatCurrency(optionsLong)}, your short stock positions is ${formatCurrency(stockShort)}, your short options positions is ${formatCurrency(optionsShort)}`,
+          response: `As of ${balanceDate}, the market value of your long stock positions is ${formatCurrency(stockLong)}, your long options positions is ${formatCurrency(optionsLong)}, your short stock positions is ${formatCurrency(stockShort)}, your short options positions is ${formatCurrency(optionsShort)}`,
           uiData: baseUIData,
         });
       }

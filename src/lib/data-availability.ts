@@ -197,26 +197,26 @@ const PARSEABLE_PERIODS = [
 ];
 
 /**
- * Calculate a deterministic suggested period based on data date range
- * This ensures we ALWAYS return a parseable period
+ * Calculate a deterministic suggested period based on how far back the data is from today
+ * This ensures we ALWAYS return a parseable period that CONTAINS the actual data
  */
 function calculateDeterministicPeriod(earliestDate: string, latestDate: string): string {
   const earliest = new Date(earliestDate);
-  const latest = new Date(latestDate);
+  const today = new Date();
 
-  // Calculate how many days of data we have
-  const dataSpanDays = Math.ceil((latest.getTime() - earliest.getTime()) / (1000 * 60 * 60 * 24));
+  // Calculate how many days AGO the earliest data point is (from today)
+  const daysAgo = Math.ceil((today.getTime() - earliest.getTime()) / (1000 * 60 * 60 * 24));
 
-  // Choose the most appropriate period based on data span
-  if (dataSpanDays <= 7) {
+  // Choose a period that will CONTAIN the data (must go back far enough)
+  if (daysAgo <= 7) {
     return 'this week';
-  } else if (dataSpanDays <= 14) {
+  } else if (daysAgo <= 14) {
     return 'the last two weeks';
-  } else if (dataSpanDays <= 31) {
+  } else if (daysAgo <= 31) {
     return 'this month';
-  } else if (dataSpanDays <= 90) {
+  } else if (daysAgo <= 90) {
     return 'the last three months';
-  } else if (dataSpanDays <= 180) {
+  } else if (daysAgo <= 180) {
     return 'the last six months';
   } else {
     return 'this year';
@@ -274,10 +274,15 @@ async function suggestTimePeriodWithLLM(
     const baseURL = `${url.origin}/openai/deployments/${deploymentName}`;
     const requestUrl = `${baseURL}/chat/completions?api-version=${apiVersion}`;
 
-    const prompt = `The user asked for data from "${requestedPeriod}" but no data was found for that period.
+    const today = new Date();
+    const todayFormatted = today.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+
+    const prompt = `Today is ${todayFormatted}.
+The user asked for data from "${requestedPeriod}" but no data was found for that period.
 Data IS available from ${formatDateForDisplay(earliestDate)} to ${formatDateForDisplay(latestDate)}.
 
-Suggest a natural time period to offer the user. You MUST respond with ONLY ONE of these EXACT phrases:
+Suggest a time period that CONTAINS this data. The period is relative to TODAY (${todayFormatted}).
+You MUST respond with ONLY ONE of these EXACT phrases:
 - "this week"
 - "last week"
 - "this month"
@@ -287,7 +292,9 @@ Suggest a natural time period to offer the user. You MUST respond with ONLY ONE 
 - "the last three months"
 - "the last six months"
 
-Choose the one that best matches the available data range.
+IMPORTANT: The period must go back far enough from TODAY to include the earliest available data (${formatDateForDisplay(earliestDate)}).
+For example, if today is Dec 30 and data is from Aug 15, "the last six months" would contain it, but "the last two weeks" would NOT.
+
 Respond with ONLY the period name - no other text.`;
 
     const response = await fetch(requestUrl, {

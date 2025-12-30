@@ -1587,6 +1587,15 @@ const UnifiedAssistant: React.FC = () => {
             lastIntentCardRenderedAtRef.current = Date.now();
           }
 
+          // CRITICAL: Await LLM classifier before checking pendingIntent
+          // The classifier runs async in user message handler and may not have finished yet
+          if (!tradeUI && pendingLLMClassifierPromiseRef.current) {
+            console.log('⏳ [Text Mode] Awaiting LLM classifier promise...');
+            await pendingLLMClassifierPromiseRef.current;
+            pendingLLMClassifierPromiseRef.current = null;  // Clear after awaiting
+            console.log('✅ [Text Mode] LLM classifier promise resolved');
+          }
+
           // PRIMARY: Use stored intent from user's query (deterministic)
           // Skip if we already have UI data from client tool
           const pendingIntent = pendingQueryIntentRef.current;
@@ -2464,6 +2473,16 @@ const UnifiedAssistant: React.FC = () => {
               console.log('🎯 [Voice Tool Direct] Using UI data from client tool:', tradeUI.type);
               // Mark timestamp to prevent fallback from overriding
               lastIntentCardRenderedAtRef.current = Date.now();
+            }
+
+            // CRITICAL: Await LLM classifier before checking pendingIntent
+            // The classifier runs async in user message handler and may not have finished yet
+            // This fixes the race condition where assistant message arrives before LLM classification completes
+            if (!tradeUI && pendingLLMClassifierPromiseRef.current) {
+              console.log('⏳ [Voice Mode] Awaiting LLM classifier promise...');
+              await pendingLLMClassifierPromiseRef.current;
+              pendingLLMClassifierPromiseRef.current = null;  // Clear after awaiting
+              console.log('✅ [Voice Mode] LLM classifier promise resolved');
             }
 
             // PRIMARY: Use stored intent from user's query (deterministic)

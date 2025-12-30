@@ -515,6 +515,45 @@ return NextResponse.json({
 
 **Key Principle:** Single source of truth - voice webhook computes data once, both voice and UI use that exact data.
 
+### LLM Classifier Race Condition Fix
+
+When a user sends a message, the LLM classifier runs asynchronously to detect intent. However, the assistant's response message may arrive BEFORE the classifier completes. This caused UI cards to not render because `pendingQueryIntentRef.current` was still null.
+
+**Problem Scenario:**
+```
+1. User sends "Show my account summary"
+2. User message handler starts LLM classifier (async)
+3. ElevenLabs agent processes and responds quickly
+4. Assistant message arrives → checks pendingQueryIntentRef → null (classifier not done!)
+5. UI card doesn't render despite correct voice response
+```
+
+**Solution: Await Classifier Promise**
+
+A `pendingLLMClassifierPromiseRef` stores the classifier promise. The message handler awaits it before checking the pending intent:
+
+```typescript
+// CRITICAL: Await LLM classifier before checking pendingIntent
+// The classifier runs async in user message handler and may not have finished yet
+if (!tradeUI && pendingLLMClassifierPromiseRef.current) {
+  console.log('⏳ [Voice Mode] Awaiting LLM classifier promise...');
+  await pendingLLMClassifierPromiseRef.current;
+  pendingLLMClassifierPromiseRef.current = null;  // Clear after awaiting
+  console.log('✅ [Voice Mode] LLM classifier promise resolved');
+}
+
+// Now safe to check pendingQueryIntentRef
+const pendingIntent = pendingQueryIntentRef.current;
+```
+
+**Applied in both modes:**
+- Text mode: Lines ~1590-1596 in `UnifiedAssistant.tsx`
+- Voice mode: Lines ~2475-2485 in `UnifiedAssistant.tsx`
+
+**Debug logs:**
+- `⏳ [Text/Voice Mode] Awaiting LLM classifier promise...` - Waiting for classifier
+- `✅ [Text/Voice Mode] LLM classifier promise resolved` - Classifier complete, safe to proceed
+
 ### Tool Functions Must Pass time_period
 
 **CRITICAL:** When adding or modifying tool functions in `UnifiedAssistant.tsx`, always pass `time_period` and `date_filter` to webhook endpoints that support time filtering.

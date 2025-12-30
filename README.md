@@ -847,6 +847,33 @@ When users ask follow-up questions like "What about September?" after "Apple tra
 | Regex detection order | Check `short_interest` before `debit_interest`, bulk options before "last option" |
 | Different data sources | Voice webhooks return `uiData` for UI to use directly |
 | Symbol extraction failures | Wait for LLM classification before fetching UI data |
+| LLM classifier race condition | Await `pendingLLMClassifierPromiseRef` before checking pending intent |
+
+#### LLM Classifier Race Condition Fix
+
+When a user sends a message, the LLM classifier runs asynchronously to detect intent. However, the assistant's response may arrive BEFORE the classifier completes, causing UI cards not to render.
+
+**Problem:**
+```
+1. User sends "Show my account summary"
+2. User message handler starts LLM classifier (async)
+3. ElevenLabs agent responds quickly
+4. Assistant message arrives → checks pendingQueryIntentRef → null (classifier not done!)
+5. UI card doesn't render
+```
+
+**Solution:** The message handler awaits `pendingLLMClassifierPromiseRef.current` before checking `pendingQueryIntentRef.current`:
+
+```typescript
+// CRITICAL: Await LLM classifier before checking pendingIntent
+if (!tradeUI && pendingLLMClassifierPromiseRef.current) {
+  await pendingLLMClassifierPromiseRef.current;
+  pendingLLMClassifierPromiseRef.current = null;
+}
+const pendingIntent = pendingQueryIntentRef.current;
+```
+
+This fix is applied in both text mode and voice mode message handlers in `UnifiedAssistant.tsx`.
 
 #### Double Date Offset Fix
 

@@ -653,7 +653,9 @@ Only proceed with the tool call once you have a clear expiration period.
 - "market_value" - For "Market value of my positions"
 - "debit_balances" - For "Debit balances for the month" (returns average, highest, lowest with dates)
 - "credit_balances" - For "Credit balances for the month" (returns average, highest, lowest with dates)
-- time_period (required for debit_balances/credit_balances): Examples: "this month", "last month", "September"
+- time_period (optional, but REQUIRED when user specifies a date): Examples: "November 14th", "last week", "October", "this month"
+  - **CRITICAL:** If user asks "market value on Nov 14th", you MUST include time_period with date_filter
+  - Works for ALL query_types, not just debit_balances/credit_balances
 
 **CRITICAL query_type mapping:**
 | User Says | query_type |
@@ -804,15 +806,19 @@ Company fundamental data: overview, metrics, financials, earnings, dividends.
  | "How much can I withdraw?" | get_account_balance (query_type: cash_balance) |
  | "What are my available funds?" | get_account_balance (query_type: cash_balance) |
  | "What is my cash balance?" | get_account_balance (query_type: cash_balance) |
+ | "Cash balance on Nov 14th" | get_account_balance (query_type: cash_balance, time_period: "November 14th" + date_filter) |
  | "How much money do I have?" | get_account_balance (query_type: cash_and_equity) |
  | "What is my buying power?" | get_account_balance (query_type: buying_power) |
+ | "Buying power last week" | get_account_balance (query_type: buying_power, time_period: "last week" + date_filter) |
  | "Show my account summary" | get_account_balance (query_type: account_summary) |
  | "Show me my account" | get_account_balance (query_type: account_summary) |
  | "What is my NLV?" | get_account_balance (query_type: nlv) |
  | "What's my overnight margin?" | get_account_balance (query_type: overnight_margin) |
  | "Market value of my positions" | get_account_balance (query_type: market_value) |
- | "Debit balances for September" | get_account_balance (query_type: debit_balances) |
- | "Credit balances for the month" | get_account_balance (query_type: credit_balances) |
+ | **"Market value on Nov 14th"** | **get_account_balance (query_type: market_value, time_period: "November 14th" + date_filter)** |
+ | **"Market value in October"** | **get_account_balance (query_type: market_value, time_period: "October" + date_filter)** |
+ | "Debit balances for September" | get_account_balance (query_type: debit_balances, time_period + date_filter) |
+ | "Credit balances for the month" | get_account_balance (query_type: credit_balances, time_period + date_filter) |
  | **FEES QUERIES:** |
  | "What were my fees paid last month?" | get_fees (fee_type: commission) |
  | "What were my total commissions last month?" | get_fees (fee_type: commission) |

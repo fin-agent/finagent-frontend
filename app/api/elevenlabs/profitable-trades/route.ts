@@ -2,7 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import { calculateRealizedMatchesFIFO, filterProfitableTrades } from '@/src/lib/profitable-trades';
 import { normalizeSymbol } from '@/src/lib/symbol-utils';
-import { realDateToDemoDate, formatDateForDB } from '@/src/lib/date-utils';
+import { formatDateForDB } from '@/src/lib/date-utils';
 import { parseTimePeriodToResolvedDates } from '@/src/lib/date-parser';
 import { checkSymbolPresence } from '@/src/lib/symbol-lookup';
 
@@ -54,15 +54,15 @@ export async function POST(req: NextRequest) {
       const [ey, em, ed] = dateFilter.endDate.split('-').map(Number);
       const realStart = new Date(sy, sm - 1, sd);
       const realEnd = new Date(ey, em - 1, ed);
-      startDate = formatDateForDB(realDateToDemoDate(realStart));
-      endDate = formatDateForDB(realDateToDemoDate(realEnd));
+      startDate = formatDateForDB(realStart);
+      endDate = formatDateForDB(realEnd);
       description = dateFilter.description || timePeriod || 'selected period';
-      console.log(`Using LLM dateFilter: real ${dateFilter.startDate} to ${dateFilter.endDate} -> demo ${startDate} to ${endDate} (${description})`);
+      console.log(`Using LLM dateFilter: ${dateFilter.startDate} to ${dateFilter.endDate} -> ${startDate} to ${endDate} (${description})`);
     } else if (dateFilter && dateFilter.type === 'discrete' && dateFilter.dates && dateFilter.dates.length > 0) {
       dates = dateFilter.dates.map(d => {
         const [y, m, day] = d.split('-').map(Number);
-        const realDate = new Date(y, m - 1, day);
-        return formatDateForDB(realDateToDemoDate(realDate));
+        const date = new Date(y, m - 1, day);
+        return formatDateForDB(date);
       });
       resolvedType = 'discrete';
       description = dateFilter.description || timePeriod || 'selected dates';

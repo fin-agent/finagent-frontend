@@ -6,7 +6,7 @@
  * (matches user timezone and market hours)
  */
 
-import { formatDateForDB, realDateToDemoDate } from './date-utils';
+import { formatDateForDB } from './date-utils';
 import type { DateFilter } from './intent-detection/types';
 
 /**
@@ -583,8 +583,8 @@ export function resolveDateFilter(filter: DateFilter): ResolvedDates {
   start.setDate(start.getDate() - 30);
   return {
     type: 'range',
-    startDate: formatDateForDB(realDateToDemoDate(start)),
-    endDate: formatDateForDB(realDateToDemoDate(today)),
+    startDate: formatDateForDB(start),
+    endDate: formatDateForDB(today),
     description: 'last 30 days'
   };
 }
@@ -604,11 +604,9 @@ export function parseTimePeriodToResolvedDates(timePeriod: string): ResolvedDate
   const today = getEasternToday();
   today.setHours(0, 0, 0, 0);
 
-  // Helper to format date WITH offset - for DB queries
-  // Absolute months/dates need offset because demo DB dates differ from real calendar dates
-  // e.g., "December" in real time maps to Oct/Nov in demo database
+  // Helper to format date for DB queries - no offset needed with real dates
   const toDBDate = (date: Date): string => {
-    return formatDateForDB(realDateToDemoDate(date));
+    return formatDateForDB(date);
   };
 
   const monthNames = 'january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sept|sep|october|oct|november|nov|december|dec';

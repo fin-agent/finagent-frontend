@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
-import { formatCalendarDate, realDateToDemoDate, formatDateForDB } from '@/src/lib/date-utils';
+import { formatCalendarDate, formatDateForDB } from '@/src/lib/date-utils';
 import { suggestDataPeriod } from '@/src/lib/data-availability';
 import { parseTimePeriodToResolvedDates } from '@/src/lib/date-parser';
 
@@ -107,21 +107,21 @@ export async function POST(req: NextRequest) {
     let resolvedType: 'range' | 'discrete' = 'range';
 
     if (dateFilter && dateFilter.type === 'range' && dateFilter.startDate && dateFilter.endDate) {
-      // LLM has resolved the dates in real calendar time - convert to demo database dates
+      // Use LLM-resolved dates directly
       const [sy, sm, sd] = dateFilter.startDate.split('-').map(Number);
       const [ey, em, ed] = dateFilter.endDate.split('-').map(Number);
       const realStart = new Date(sy, sm - 1, sd);
       const realEnd = new Date(ey, em - 1, ed);
-      startDate = formatDateForDB(realDateToDemoDate(realStart));
-      endDate = formatDateForDB(realDateToDemoDate(realEnd));
+      startDate = formatDateForDB(realStart);
+      endDate = formatDateForDB(realEnd);
       description = dateFilter.description || timePeriod || 'selected period';
-      console.log(`Using LLM dateFilter: real ${dateFilter.startDate} to ${dateFilter.endDate} -> demo ${startDate} to ${endDate} (${description})`);
+      console.log(`Using LLM dateFilter: ${dateFilter.startDate} to ${dateFilter.endDate} -> ${startDate} to ${endDate} (${description})`);
     } else if (dateFilter && dateFilter.type === 'discrete' && dateFilter.dates && dateFilter.dates.length > 0) {
-      // LLM provided discrete dates in real calendar time - convert each to demo dates
+      // LLM provided discrete dates - use directly
       dates = dateFilter.dates.map(d => {
         const [y, m, day] = d.split('-').map(Number);
-        const realDate = new Date(y, m - 1, day);
-        return formatDateForDB(realDateToDemoDate(realDate));
+        const date = new Date(y, m - 1, day);
+        return formatDateForDB(date);
       });
       resolvedType = 'discrete';
       description = dateFilter.description || timePeriod || 'selected dates';

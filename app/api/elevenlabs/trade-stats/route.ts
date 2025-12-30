@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
-import { realDateToDemoDate, formatDateForDB } from '@/src/lib/date-utils';
+import { formatDateForDB } from '@/src/lib/date-utils';
 import { normalizeSymbol } from '@/src/lib/symbol-utils';
 import { parseTimePeriodToResolvedDates } from '@/src/lib/date-parser';
 import { checkSymbolPresence } from '@/src/lib/symbol-lookup';
@@ -78,15 +78,15 @@ export async function POST(req: NextRequest) {
 
     // Resolve dates - prioritize LLM-resolved dateFilter, fall back to parsing timePeriod
     if (dateFilter && dateFilter.type === 'range' && dateFilter.startDate && dateFilter.endDate) {
-      // LLM has resolved the dates in real calendar time - convert to demo database dates
+      // Use LLM-resolved dates directly
       const [sy, sm, sd] = dateFilter.startDate.split('-').map(Number);
       const [ey, em, ed] = dateFilter.endDate.split('-').map(Number);
       const realStart = new Date(sy, sm - 1, sd);
       const realEnd = new Date(ey, em - 1, ed);
-      dateStart = formatDateForDB(realDateToDemoDate(realStart));
-      dateEnd = formatDateForDB(realDateToDemoDate(realEnd));
+      dateStart = formatDateForDB(realStart);
+      dateEnd = formatDateForDB(realEnd);
       periodDescription = dateFilter.description || timePeriod || 'selected period';
-      console.log(`Using LLM dateFilter: real ${dateFilter.startDate} to ${dateFilter.endDate} -> demo ${dateStart} to ${dateEnd} (${periodDescription})`);
+      console.log(`Using LLM dateFilter: ${dateFilter.startDate} to ${dateFilter.endDate} -> ${dateStart} to ${dateEnd} (${periodDescription})`);
     } else if (timePeriod) {
       // Fall back to parsing timePeriod string when dateFilter not provided
       const resolved = parseTimePeriodToResolvedDates(timePeriod);

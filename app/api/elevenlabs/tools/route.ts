@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
-import { realDateToDemoDate, formatDateForDB } from '@/src/lib/date-utils';
+import { formatDateForDB } from '@/src/lib/date-utils';
 import { calculateRealizedMatchesFIFO, filterProfitableTrades } from '@/src/lib/profitable-trades';
 import { normalizeSymbol } from '@/src/lib/symbol-utils';
 import { parseTimePeriodToResolvedDates } from '@/src/lib/date-parser';
@@ -57,15 +57,15 @@ async function getTradeSummary(symbol: string, timePeriod?: string, dateFilter?:
     const [ey, em, ed] = dateFilter.endDate.split('-').map(Number);
     const realStart = new Date(sy, sm - 1, sd);
     const realEnd = new Date(ey, em - 1, ed);
-    startDate = formatDateForDB(realDateToDemoDate(realStart));
-    endDate = formatDateForDB(realDateToDemoDate(realEnd));
+    startDate = formatDateForDB(realStart);
+    endDate = formatDateForDB(realEnd);
     description = dateFilter.description || timePeriod || 'selected period';
-    console.log(`getTradeSummary: LLM dateFilter real ${dateFilter.startDate} to ${dateFilter.endDate} -> demo ${startDate} to ${endDate}`);
+    console.log(`getTradeSummary: LLM dateFilter ${dateFilter.startDate} to ${dateFilter.endDate} -> ${startDate} to ${endDate}`);
   } else if (dateFilter && dateFilter.type === 'discrete' && dateFilter.dates && dateFilter.dates.length > 0) {
     dates = dateFilter.dates.map(d => {
       const [y, m, day] = d.split('-').map(Number);
-      const realDate = new Date(y, m - 1, day);
-      return formatDateForDB(realDateToDemoDate(realDate));
+      const date = new Date(y, m - 1, day);
+      return formatDateForDB(date);
     });
     resolvedType = 'discrete';
     description = dateFilter.description || timePeriod || 'selected dates';
@@ -135,8 +135,8 @@ async function getTradeStats(symbol: string, tradeType?: string, year?: number, 
     const [ey, em, ed] = dateFilter.endDate.split('-').map(Number);
     const realStart = new Date(sy, sm - 1, sd);
     const realEnd = new Date(ey, em - 1, ed);
-    dateStart = formatDateForDB(realDateToDemoDate(realStart));
-    dateEnd = formatDateForDB(realDateToDemoDate(realEnd));
+    dateStart = formatDateForDB(realStart);
+    dateEnd = formatDateForDB(realEnd);
     timePeriodDescription = dateFilter.description || timePeriod || null;
   } else if (timePeriod) {
     // Fall back to parsing timePeriod string when dateFilter not provided
@@ -246,8 +246,8 @@ async function getProfitableTrades(symbol: string, onlyProfitable: boolean = tru
     const [ey, em, ed] = dateFilter.endDate.split('-').map(Number);
     const realStart = new Date(sy, sm - 1, sd);
     const realEnd = new Date(ey, em - 1, ed);
-    dateStart = formatDateForDB(realDateToDemoDate(realStart));
-    dateEnd = formatDateForDB(realDateToDemoDate(realEnd));
+    dateStart = formatDateForDB(realStart);
+    dateEnd = formatDateForDB(realEnd);
     description = dateFilter.description || timePeriod;
   } else if (timePeriod) {
     // Fall back to parsing timePeriod string when dateFilter not provided

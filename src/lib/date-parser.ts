@@ -6,22 +6,17 @@
  * (matches user timezone and market hours)
  */
 
-import { formatDateForDB } from './date-utils';
+import { formatDateForDB, getDemoToday } from './date-utils';
 import type { DateFilter } from './intent-detection/types';
 
 /**
- * Get the current date in US Eastern timezone as a Date object
- * Eastern timezone aligns with NYSE/NASDAQ market hours and user's local time
+ * Get the "today" date for queries - uses DEMO_TODAY from date-utils
+ * This ensures "today", "this week", "this month" etc. all reference
+ * the demo database timeline, not the real current date.
  */
 function getEasternToday(): Date {
-  const now = new Date();
-  const easternDateStr = now.toLocaleDateString('en-US', {
-    timeZone: 'America/New_York',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit'
-  });
-  const [month, day, year] = easternDateStr.split('/').map(Number);
+  const demoToday = getDemoToday(); // e.g., '2025-11-20'
+  const [year, month, day] = demoToday.split('-').map(Number);
   return new Date(year, month - 1, day);
 }
 

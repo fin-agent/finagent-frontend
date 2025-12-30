@@ -602,6 +602,7 @@ export async function suggestDataPeriod(
       let rangeQuery = supabase
         .from(table)
         .select('Date')
+        .eq('AccountCode', ACCOUNT_CODE)
         .eq('Type', filters.feeType);
 
       if (filters.symbol) {
@@ -628,6 +629,7 @@ export async function suggestDataPeriod(
       let amountQuery = supabase
         .from(table)
         .select('Date, Amount')
+        .eq('AccountCode', ACCOUNT_CODE)
         .eq('Type', filters.feeType);
 
       if (filters.symbol) {

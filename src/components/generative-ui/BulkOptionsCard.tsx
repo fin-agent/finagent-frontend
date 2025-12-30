@@ -558,7 +558,7 @@ export function BulkOptionsCard({ trades, symbol, callPut, tradeType, timePeriod
 
                   return (
                     <div
-                      key={trade.TradeID ?? `trade-${i}`}
+                      key={trade.TradeID}
                       style={{
                         display: 'grid',
                         gridTemplateColumns: '70px 70px 55px 70px 50px 90px',

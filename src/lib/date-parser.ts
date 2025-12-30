@@ -787,10 +787,17 @@ export function parseTimePeriodToResolvedDates(timePeriod: string): ResolvedDate
   // Fall back to existing parseTimeExpression for relative periods
   const parsed = parseTimeExpression(timePeriod);
   if (parsed) {
+    // parseTimeExpression returns real calendar dates without demo offset
+    // Need to convert them to demo database dates using toDBDate
+    const parseYMD = (dateStr: string): Date => {
+      const [y, m, d] = dateStr.split('-').map(Number);
+      return new Date(y, m - 1, d);
+    };
+
     return {
       type: 'range',
-      startDate: parsed.dateRange.startDate,
-      endDate: parsed.dateRange.endDate,
+      startDate: toDBDate(parseYMD(parsed.dateRange.startDate)),
+      endDate: toDBDate(parseYMD(parsed.dateRange.endDate)),
       description: parsed.dateRange.description
     };
   }

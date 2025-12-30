@@ -200,7 +200,8 @@ const PARSEABLE_PERIODS = [
  * Calculate a deterministic suggested period based on how far back the data is from today
  * This ensures we ALWAYS return a parseable period that CONTAINS the actual data
  */
-function calculateDeterministicPeriod(earliestDate: string, latestDate: string): string {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function calculateDeterministicPeriod(earliestDate: string, _latestDate: string): string {
   const earliest = new Date(earliestDate);
   const today = new Date();
 

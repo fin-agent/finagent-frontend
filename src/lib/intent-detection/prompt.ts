@@ -120,6 +120,75 @@ ${intents.map(i => `### ${i.id}
   - "locate fee" / "borrow fee" / "stock borrow" -> "locate_fee"
   - "short interest" / "short borrow interest" / "shorting interest" -> "short_interest"
 
+## Database Schema Reference
+
+The following tables and columns are available in the database. Use this to understand what data exists.
+
+### TradeData Table (Trade Records)
+| Column | Type | Description |
+|--------|------|-------------|
+| TradeID | int | Unique trade identifier |
+| AccountCode | string | Account identifier (e.g., 'C40421') |
+| AccountName | string | Account holder name |
+| Date | date | Trade execution date (YYYY-MM-DD) |
+| TradeType | string | 'B' = Buy, 'S' = Sell |
+| TradeTimeStamp | time | Exact execution timestamp |
+| SecurityType | string | 'S' = Stock, 'O' = Option |
+| Symbol | string | Trading symbol (OCC format for options, e.g., 'AAPL251121C00175000') |
+| UnderlyingSymbol | string | Underlying ticker for options (e.g., 'AAPL') |
+| Expiration | date | Option expiration date |
+| Strike | decimal | Option strike price |
+| Call/Put | string | 'C' = Call, 'P' = Put |
+| StockTradePrice | decimal | Stock execution price per share |
+| OptionTradePremium | decimal | Option premium per share (multiply by 100 for per-contract) |
+| StockShareQty | int | Number of stock shares traded |
+| OptionContracts | int | Number of option contracts traded |
+| GrossAmount | decimal | Trade value before fees |
+| Commission | decimal | Commission charged |
+| ExchFees | decimal | Exchange fees |
+| NetAmount | decimal | Final value (positive = credit/sell, negative = debit/buy) |
+
+### AccountBalance Table (Daily Balances)
+| Column | Type | Description |
+|--------|------|-------------|
+| Date | date | Balance date |
+| AccountCode | string | Account identifier |
+| CashBalance | decimal | Available cash |
+| Account Equity | decimal | Total account equity |
+| DayTradingBP | decimal | Day trading buying power |
+| Stock LMV | decimal | Long stock market value |
+| Stock SMV | decimal | Short stock market value |
+| Options LMV | decimal | Long options market value |
+| Optons SMV | decimal | Short options market value |
+| CreditBalance | decimal | Credit balance |
+| DebitBalance | decimal | Debit balance |
+| HouseRequirment | decimal | House margin requirement |
+| HouseExcessDeficit | decimal | Margin excess/deficit |
+
+### FeesAndInterest Table (Fee Records)
+| Column | Type | Description |
+|--------|------|-------------|
+| Date | date | Fee date |
+| AccountCode | string | Account identifier |
+| Type | string | Fee type: 'CreditInt', 'DebitInt', 'LocateFee' |
+| Symbol | string | Related symbol (for locate fees only) |
+| Amount | decimal | Fee amount |
+
+### Column Name Mappings (User Terms → Database Columns)
+When users ask about these concepts, they map to these columns:
+- "shares" / "quantity" (stocks) → StockShareQty
+- "contracts" / "quantity" (options) → OptionContracts
+- "price" / "cost" (stocks) → StockTradePrice
+- "premium" / "price" (options) → OptionTradePremium
+- "net amount" / "total" / "value" → NetAmount
+- "buy" / "bought" / "purchased" → TradeType = 'B'
+- "sell" / "sold" / "short" / "written" → TradeType = 'S'
+- "stock" / "shares" / "equity" → SecurityType = 'S'
+- "option" / "contract" → SecurityType = 'O'
+- "locate fee" / "borrow fee" / "short interest" → Type = 'LocateFee'
+- "margin interest" / "debit interest" → Type = 'DebitInt'
+- "interest earned" / "credit interest" → Type = 'CreditInt'
+
 ## Semantic Equivalence Rules (CRITICAL)
 
 **Different phrasings of the SAME intent must route to the SAME classification.**

@@ -3,6 +3,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { formatCalendarDate, formatDateForDB } from '@/src/lib/date-utils';
 import { suggestDataPeriod } from '@/src/lib/data-availability';
 import { parseTimePeriodToResolvedDates } from '@/src/lib/date-parser';
+import {
+  parseTimePeriodWithRecovery,
+  handleQueryError,
+} from '@/src/lib/error-recovery';
 
 // LLM-resolved date filter
 interface DateFilter {
@@ -99,11 +103,28 @@ export async function POST(req: NextRequest) {
     const dateFilter: DateFilter | undefined = body.date_filter || body.parameters?.date_filter ||
                        body.body?.date_filter || body.body?.parameters?.date_filter;
 
+    // Recovery Type B: Validate and correct time period if needed
+    let correctedTimePeriod = timePeriod;
+    if (timePeriod && !dateFilter) {
+      const recovery = parseTimePeriodWithRecovery(timePeriod);
+      if (!recovery.parsed && recovery.suggestion) {
+        // Time period couldn't be parsed - return helpful message
+        console.log(`[account-balance] Invalid time period: ${timePeriod}`);
+        return NextResponse.json({
+          response: recovery.suggestion,
+        });
+      }
+      if (recovery.correctedPeriod) {
+        correctedTimePeriod = recovery.correctedPeriod;
+        console.log(`[account-balance] Corrected time period: "${timePeriod}" -> "${correctedTimePeriod}"`);
+      }
+    }
+
     // Resolve dates - prioritize LLM-resolved dateFilter, fall back to parsing timePeriod
     let startDate: string | undefined;
     let endDate: string | undefined;
     let dates: string[] | undefined;
-    let description: string = timePeriod || '';
+    let description: string = correctedTimePeriod || '';
     let resolvedType: 'range' | 'discrete' = 'range';
 
     if (dateFilter && dateFilter.type === 'range' && dateFilter.startDate && dateFilter.endDate) {
@@ -126,9 +147,9 @@ export async function POST(req: NextRequest) {
       resolvedType = 'discrete';
       description = dateFilter.description || timePeriod || 'selected dates';
       console.log(`Using LLM discrete dates: ${dateFilter.dates.join(', ')} -> demo ${dates.join(', ')} (${description})`);
-    } else if (timePeriod) {
+    } else if (correctedTimePeriod) {
       // Fall back to parsing timePeriod string when dateFilter not provided
-      const resolved = parseTimePeriodToResolvedDates(timePeriod);
+      const resolved = parseTimePeriodToResolvedDates(correctedTimePeriod);
       if (resolved) {
         if (resolved.type === 'discrete' && resolved.dates) {
           dates = resolved.dates;
@@ -137,11 +158,11 @@ export async function POST(req: NextRequest) {
           startDate = resolved.startDate;
           endDate = resolved.endDate;
         }
-        description = resolved.description || timePeriod;
-        console.log(`Parsed timePeriod "${timePeriod}": ${resolved.type}, dates: ${dates || `${startDate} to ${endDate}`}`);
+        description = resolved.description || correctedTimePeriod;
+        console.log(`Parsed timePeriod "${correctedTimePeriod}": ${resolved.type}, dates: ${dates || `${startDate} to ${endDate}`}`);
       } else {
-        description = timePeriod;
-        console.log(`Could not parse timePeriod "${timePeriod}", querying all data`);
+        description = correctedTimePeriod;
+        console.log(`Could not parse timePeriod "${correctedTimePeriod}", querying all data`);
       }
     }
 
@@ -344,9 +365,16 @@ export async function POST(req: NextRequest) {
         });
     }
   } catch (error) {
-    console.error('Account balance error:', error);
+    // Recovery Type C: Handle query failures gracefully
+    const { userMessage, logEntry } = handleQueryError(error, {
+      endpoint: 'account-balance',
+      params: { queryType: 'unknown', timePeriod: 'unknown' },
+    });
+
+    console.error(`[account-balance] [${logEntry.code}] ${logEntry.message}`);
+
     return NextResponse.json({
-      response: 'Sorry, there was an error retrieving your account balance.',
+      response: userMessage,
     });
   }
 }

@@ -2,6 +2,11 @@ import { createClient } from '@supabase/supabase-js';
 import { NextRequest, NextResponse } from 'next/server';
 import { normalizeSymbol } from '@/src/lib/symbol-utils';
 import { checkSymbolPresence } from '@/src/lib/symbol-lookup';
+import {
+  findSimilarSymbols,
+  buildSymbolSuggestionMessage,
+  handleQueryError,
+} from '@/src/lib/error-recovery';
 
 // Format date for voice output - parse as local time to avoid UTC timezone shift
 // Database stores dates as YYYY-MM-DD, we display them verbatim
@@ -359,6 +364,13 @@ export async function POST(req: NextRequest) {
       if (callPut) filterDesc += ` ${callPut} options`;
       if (expiration) filterDesc += ` expiring ${expiration}`;
 
+      // Recovery Type A: Check for similar symbols
+      let symbolSuggestion: string | null = null;
+      if (normalizedSymbol) {
+        const similarSymbols = await findSimilarSymbols(normalizedSymbol, 'TradeData');
+        symbolSuggestion = buildSymbolSuggestionMessage(normalizedSymbol, similarSymbols);
+      }
+
       // Check if symbol exists elsewhere (e.g., in fees)
       let symbolContext: string | undefined;
       if (normalizedSymbol) {
@@ -372,6 +384,8 @@ export async function POST(req: NextRequest) {
       if (symbolContext) {
         const contextLower = symbolContext.charAt(0).toLowerCase() + symbolContext.slice(1);
         responseText += ` However, ${contextLower} Would you like to see those instead?`;
+      } else if (symbolSuggestion) {
+        responseText += ` ${symbolSuggestion}`;
       }
 
       // Return empty uiData for UI card rendering - SINGLE SOURCE OF TRUTH
@@ -574,9 +588,16 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ response, uiData });
   } catch (error) {
-    console.error('Advanced query error:', error);
+    // Recovery Type C: Handle query failures gracefully
+    const { userMessage, logEntry } = handleQueryError(error, {
+      endpoint: 'advanced-query',
+      params: { symbol: 'unknown', fromDate: 'unknown' },
+    });
+
+    console.error(`[advanced-query] [${logEntry.code}] ${logEntry.message}`);
+
     return NextResponse.json({
-      response: 'Sorry, there was an error processing your query.',
+      response: userMessage,
       uiData: null,
     });
   }

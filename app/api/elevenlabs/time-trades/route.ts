@@ -14,6 +14,12 @@ import { findNearestMonthWithTrades } from '@/src/lib/data-availability';
 import { formatDisplayDate, formatDateRange } from '@/src/lib/date-utils';
 import { startTrace, formatTraceForResponse } from '@/src/lib/request-trace';
 import { checkSymbolPresence } from '@/src/lib/symbol-lookup';
+import {
+  findSimilarSymbols,
+  buildSymbolSuggestionMessage,
+  parseTimePeriodWithRecovery,
+  handleQueryError,
+} from '@/src/lib/error-recovery';
 // Context merging disabled - ElevenLabs LLM has full conversation history and handles context better
 
 // Format date for voice output - parse as local time to avoid UTC timezone shift
@@ -99,6 +105,24 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    // Recovery Type B: Validate and correct time period if needed
+    let correctedTimePeriod = timePeriod;
+
+    if (timePeriod && !dateFilter) {
+      const recovery = parseTimePeriodWithRecovery(timePeriod);
+      if (!recovery.parsed && recovery.suggestion) {
+        // Time period couldn't be parsed - return helpful message
+        trace.logError(`Invalid time period: ${timePeriod}`);
+        return NextResponse.json({
+          response: recovery.suggestion,
+        });
+      }
+      if (recovery.correctedPeriod) {
+        correctedTimePeriod = recovery.correctedPeriod;
+        trace.logInput({ correctedTimePeriod, suggestion: recovery.suggestion });
+      }
+    }
+
     // Determine trade type filter
     const normalizedTradeType = tradeType && tradeType.toLowerCase() !== 'all'
       ? (tradeType.toLowerCase().startsWith('s') ? 'sell' : 'buy')
@@ -112,7 +136,7 @@ export async function POST(req: NextRequest) {
     // Use unified query - SINGLE SOURCE OF TRUTH
     const result = await queryTrades({
       symbol: symbol || undefined,
-      timePeriod,
+      timePeriod: correctedTimePeriod,  // Use corrected time period
       dateFilter,
       tradeType: normalizedTradeType as 'buy' | 'sell' | 'all',
       instrument: normalizedSecurityType as 'stock' | 'option' | 'all',
@@ -136,6 +160,13 @@ export async function POST(req: NextRequest) {
 
     // Handle zero results with data availability suggestion and symbol lookup
     if (counts.total === 0) {
+      // Recovery Type A: Check for similar symbols if a symbol was specified
+      let symbolSuggestion: string | null = null;
+      if (symbol) {
+        const similarSymbols = await findSimilarSymbols(symbol, 'TradeData');
+        symbolSuggestion = buildSymbolSuggestionMessage(symbol, similarSymbols);
+      }
+
       // Determine trade type filter for nearest period search
       const tradeTypeFilter = normalizedTradeType === 'buy' ? 'B' : normalizedTradeType === 'sell' ? 'S' : undefined;
 
@@ -173,6 +204,9 @@ export async function POST(req: NextRequest) {
         // Make first letter lowercase to flow naturally after "However, "
         const contextLower = symbolContext.charAt(0).toLowerCase() + symbolContext.slice(1);
         responseText += ` However, ${contextLower} Would you like to see those instead?`;
+      } else if (symbolSuggestion) {
+        // Add symbol suggestion if no other suggestions available
+        responseText += ` ${symbolSuggestion}`;
       }
 
       return NextResponse.json({
@@ -298,9 +332,18 @@ export async function POST(req: NextRequest) {
       _debug: formatTraceForResponse(completedTrace),
     });
   } catch (error) {
-    trace.logError(error instanceof Error ? error : String(error));
+    // Recovery Type C: Handle query failures gracefully
+    const { userMessage, logEntry } = handleQueryError(error, {
+      endpoint: 'time-trades',
+      params: { timePeriod: 'unknown', symbol: 'unknown' },
+    });
+
+    trace.logError(`[${logEntry.code}] ${logEntry.message}`);
+    const completedTrace = trace.complete();
+
     return NextResponse.json({
-      response: 'Sorry, there was an error looking up your trades for that time period.',
+      response: userMessage,
+      _debug: formatTraceForResponse(completedTrace),
     });
   }
 }

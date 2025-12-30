@@ -5,6 +5,12 @@ import { suggestDataPeriod } from '@/src/lib/data-availability';
 import { formatDateForDB } from '@/src/lib/date-utils';
 import { parseTimePeriodToResolvedDates } from '@/src/lib/date-parser';
 import { checkSymbolPresence } from '@/src/lib/symbol-lookup';
+import {
+  findSimilarSymbols,
+  buildSymbolSuggestionMessage,
+  parseTimePeriodWithRecovery,
+  handleQueryError,
+} from '@/src/lib/error-recovery';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -73,6 +79,23 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    // Recovery Type B: Validate and correct time period if needed
+    let correctedTimePeriod = timePeriod;
+    if (timePeriod && !dateFilter) {
+      const recovery = parseTimePeriodWithRecovery(timePeriod);
+      if (!recovery.parsed && recovery.suggestion) {
+        // Time period couldn't be parsed - return helpful message
+        console.log(`[fees] Invalid time period: ${timePeriod}`);
+        return NextResponse.json({
+          response: recovery.suggestion,
+        });
+      }
+      if (recovery.correctedPeriod) {
+        correctedTimePeriod = recovery.correctedPeriod;
+        console.log(`[fees] Corrected time period: "${timePeriod}" -> "${correctedTimePeriod}"`);
+      }
+    }
+
     // Resolve dates - prioritize LLM-resolved dateFilter, fall back to parsing timePeriod
     let startDate: string | undefined;
     let endDate: string | undefined;
@@ -102,9 +125,9 @@ export async function POST(req: NextRequest) {
       description = dateFilter.description || timePeriod || 'selected dates';
       resolvedType = 'discrete';
       console.log(`Using LLM discrete dates: ${dateFilter.dates.join(', ')} -> demo ${dates.join(', ')} (${description})`);
-    } else if (timePeriod) {
+    } else if (correctedTimePeriod) {
       // Fall back to parsing timePeriod string when dateFilter not provided
-      const resolved = parseTimePeriodToResolvedDates(timePeriod);
+      const resolved = parseTimePeriodToResolvedDates(correctedTimePeriod);
       if (resolved) {
         if (resolved.type === 'discrete' && resolved.dates) {
           dates = resolved.dates;
@@ -115,11 +138,11 @@ export async function POST(req: NextRequest) {
           startDate = resolved.startDate;
           endDate = resolved.endDate;
         }
-        description = resolved.description || timePeriod;
-        console.log(`Parsed timePeriod "${timePeriod}": ${resolved.type}, dates: ${dates || `${startDate} to ${endDate}`}`);
+        description = resolved.description || correctedTimePeriod;
+        console.log(`Parsed timePeriod "${correctedTimePeriod}": ${resolved.type}, dates: ${dates || `${startDate} to ${endDate}`}`);
       } else {
-        description = timePeriod;
-        console.log(`Could not parse timePeriod "${timePeriod}", querying all data`);
+        description = correctedTimePeriod;
+        console.log(`Could not parse timePeriod "${correctedTimePeriod}", querying all data`);
       }
     } else {
       // No timePeriod and no dateFilter - use default description
@@ -269,6 +292,13 @@ export async function POST(req: NextRequest) {
       const feeTypeName = feeType.replace('_', ' ');
       const symbolText = normalizedSymbol ? ` for ${normalizedSymbol}` : '';
 
+      // Recovery Type A: Check for similar symbols if a symbol was specified
+      let symbolSuggestion: string | null = null;
+      if (normalizedSymbol) {
+        const similarSymbols = await findSimilarSymbols(normalizedSymbol, 'FeesAndInterest');
+        symbolSuggestion = buildSymbolSuggestionMessage(normalizedSymbol, similarSymbols);
+      }
+
       // Check if symbol exists elsewhere (e.g., in trades)
       let symbolContext: string | undefined;
       if (normalizedSymbol) {
@@ -304,6 +334,9 @@ export async function POST(req: NextRequest) {
       if (symbolContext) {
         const contextLower = symbolContext.charAt(0).toLowerCase() + symbolContext.slice(1);
         responseText += ` However, ${contextLower} Would you like to see those instead?`;
+      } else if (symbolSuggestion) {
+        // Add symbol suggestion if no other suggestions available
+        responseText += ` ${symbolSuggestion}`;
       }
 
       const uiData: FeesUIData = {
@@ -369,9 +402,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ response, uiData });
 
   } catch (error) {
-    console.error('Fees error:', error);
+    // Recovery Type C: Handle query failures gracefully
+    const { userMessage, logEntry } = handleQueryError(error, {
+      endpoint: 'fees',
+      params: { feeType: 'unknown', timePeriod: 'unknown' },
+    });
+
+    console.error(`[fees] [${logEntry.code}] ${logEntry.message}`);
+
     return NextResponse.json({
-      response: 'Sorry, there was an error retrieving your fee information.',
+      response: userMessage,
     });
   }
 }

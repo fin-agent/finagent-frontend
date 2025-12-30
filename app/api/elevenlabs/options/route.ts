@@ -4,6 +4,12 @@ import { normalizeSymbol } from '@/src/lib/symbol-utils';
 import { formatDateForDB } from '@/src/lib/date-utils';
 import { parseTimePeriodToResolvedDates } from '@/src/lib/date-parser';
 import { checkSymbolPresence } from '@/src/lib/symbol-lookup';
+import {
+  findSimilarSymbols,
+  buildSymbolSuggestionMessage,
+  parseTimePeriodWithRecovery,
+  handleQueryError,
+} from '@/src/lib/error-recovery';
 
 // LLM-resolved date filter
 interface DateFilter {
@@ -103,11 +109,28 @@ export async function POST(req: NextRequest) {
       query = query.filter('"Call/Put"', 'eq', cp);
     }
 
+    // Recovery Type B: Validate and correct time period if needed
+    let correctedTimePeriod = timePeriod;
+    if (timePeriod && !dateFilter) {
+      const recovery = parseTimePeriodWithRecovery(timePeriod);
+      if (!recovery.parsed && recovery.suggestion) {
+        console.log(`[options] Invalid time period: ${timePeriod}`);
+        return NextResponse.json({
+          response: recovery.suggestion,
+          uiData: null,
+        });
+      }
+      if (recovery.correctedPeriod) {
+        correctedTimePeriod = recovery.correctedPeriod;
+        console.log(`[options] Corrected time period: "${timePeriod}" -> "${correctedTimePeriod}"`);
+      }
+    }
+
     // Apply date range for trade date - prioritize LLM-resolved dateFilter, fall back to parsing timePeriod
     let startDate: string | undefined;
     let endDate: string | undefined;
     let dates: string[] | undefined;
-    let description: string = timePeriod || '';
+    let description: string = correctedTimePeriod || '';
     let resolvedType: 'range' | 'discrete' = 'range';
 
     if (dateFilter && dateFilter.type === 'range' && dateFilter.startDate && dateFilter.endDate) {
@@ -130,9 +153,9 @@ export async function POST(req: NextRequest) {
       resolvedType = 'discrete';
       description = dateFilter.description || timePeriod || 'selected dates';
       console.log(`Using LLM discrete dates: ${dateFilter.dates.join(', ')} -> demo ${dates.join(', ')} (${description})`);
-    } else if (timePeriod) {
+    } else if (correctedTimePeriod) {
       // Fall back to parsing timePeriod string when dateFilter not provided
-      const resolved = parseTimePeriodToResolvedDates(timePeriod);
+      const resolved = parseTimePeriodToResolvedDates(correctedTimePeriod);
       if (resolved) {
         if (resolved.type === 'discrete' && resolved.dates) {
           dates = resolved.dates;
@@ -141,11 +164,11 @@ export async function POST(req: NextRequest) {
           startDate = resolved.startDate;
           endDate = resolved.endDate;
         }
-        description = resolved.description || timePeriod;
-        console.log(`Parsed timePeriod "${timePeriod}": ${resolved.type}, dates: ${dates || `${startDate} to ${endDate}`}`);
+        description = resolved.description || correctedTimePeriod;
+        console.log(`Parsed timePeriod "${correctedTimePeriod}": ${resolved.type}, dates: ${dates || `${startDate} to ${endDate}`}`);
       } else {
-        description = timePeriod;
-        console.log(`Could not parse timePeriod "${timePeriod}", querying all data`);
+        description = correctedTimePeriod;
+        console.log(`Could not parse timePeriod "${correctedTimePeriod}", querying all data`);
       }
     }
 
@@ -215,8 +238,15 @@ export async function POST(req: NextRequest) {
       let filterDesc = normalizedSymbol ? ` for ${normalizedSymbol}` : '';
       if (callPut) filterDesc += ` ${callPut}`;
       filterDesc += ' options';
-      if (timePeriod) filterDesc += ` ${timePeriod}`;
+      if (correctedTimePeriod) filterDesc += ` ${correctedTimePeriod}`;
       if (expiration) filterDesc += ` expiring ${expiration}`;
+
+      // Recovery Type A: Check for similar symbols
+      let symbolSuggestion: string | null = null;
+      if (normalizedSymbol) {
+        const similarSymbols = await findSimilarSymbols(normalizedSymbol, 'TradeData');
+        symbolSuggestion = buildSymbolSuggestionMessage(normalizedSymbol, similarSymbols);
+      }
 
       // Check if symbol exists elsewhere (trades or fees)
       let symbolContext: string | undefined;
@@ -231,6 +261,8 @@ export async function POST(req: NextRequest) {
       if (symbolContext) {
         const contextLower = symbolContext.charAt(0).toLowerCase() + symbolContext.slice(1);
         responseText += ` However, ${contextLower} Would you like to see those instead?`;
+      } else if (symbolSuggestion) {
+        responseText += ` ${symbolSuggestion}`;
       }
 
       return NextResponse.json({
@@ -238,7 +270,7 @@ export async function POST(req: NextRequest) {
         uiData: {
           queryType,
           symbol: normalizedSymbol || null,
-          timePeriod: description || timePeriod || null,
+          timePeriod: description || correctedTimePeriod || null,
           expiration: expiration || null,
           tradeType: tradeType || null,
           callPut: callPut || null,
@@ -369,9 +401,16 @@ export async function POST(req: NextRequest) {
       uiData,
     });
   } catch (error) {
-    console.error('Options webhook error:', error);
+    // Recovery Type C: Handle query failures gracefully
+    const { userMessage, logEntry } = handleQueryError(error, {
+      endpoint: 'options',
+      params: { queryType: 'unknown', symbol: 'unknown', timePeriod: 'unknown' },
+    });
+
+    console.error(`[options] [${logEntry.code}] ${logEntry.message}`);
+
     return NextResponse.json({
-      response: 'Sorry, there was an error processing your options query.',
+      response: userMessage,
       uiData: null,
     });
   }

@@ -5,6 +5,12 @@ import { normalizeSymbol } from '@/src/lib/symbol-utils';
 import { parseTimePeriodToResolvedDates } from '@/src/lib/date-parser';
 import { checkSymbolPresence } from '@/src/lib/symbol-lookup';
 import { findNearestMonthWithTrades } from '@/src/lib/data-availability';
+import {
+  findSimilarSymbols,
+  buildSymbolSuggestionMessage,
+  parseTimePeriodWithRecovery,
+  handleQueryError,
+} from '@/src/lib/error-recovery';
 
 // LLM-resolved date filter
 interface DateFilter {
@@ -70,6 +76,23 @@ export async function POST(req: NextRequest) {
 
     const normalizedSymbol = normalizeSymbol(symbol);
 
+    // Recovery Type B: Validate and correct time period if needed
+    let correctedTimePeriod = timePeriod;
+    if (timePeriod && !dateFilter) {
+      const recovery = parseTimePeriodWithRecovery(timePeriod);
+      if (!recovery.parsed && recovery.suggestion) {
+        console.log(`[trade-stats] Invalid time period: ${timePeriod}`);
+        return NextResponse.json({
+          response: recovery.suggestion,
+          uiData: null,
+        });
+      }
+      if (recovery.correctedPeriod) {
+        correctedTimePeriod = recovery.correctedPeriod;
+        console.log(`[trade-stats] Corrected time period: "${timePeriod}" -> "${correctedTimePeriod}"`);
+      }
+    }
+
     const userYear = new Date().getFullYear();
 
     let dateStart: string | undefined;
@@ -87,17 +110,17 @@ export async function POST(req: NextRequest) {
       dateEnd = formatDateForDB(realEnd);
       periodDescription = dateFilter.description || timePeriod || 'selected period';
       console.log(`Using LLM dateFilter: ${dateFilter.startDate} to ${dateFilter.endDate} -> ${dateStart} to ${dateEnd} (${periodDescription})`);
-    } else if (timePeriod) {
+    } else if (correctedTimePeriod) {
       // Fall back to parsing timePeriod string when dateFilter not provided
-      const resolved = parseTimePeriodToResolvedDates(timePeriod);
+      const resolved = parseTimePeriodToResolvedDates(correctedTimePeriod);
       if (resolved && resolved.startDate && resolved.endDate) {
         dateStart = resolved.startDate;
         dateEnd = resolved.endDate;
-        periodDescription = resolved.description || timePeriod;
-        console.log(`Parsed timePeriod "${timePeriod}": ${dateStart} to ${dateEnd} (${periodDescription})`);
+        periodDescription = resolved.description || correctedTimePeriod;
+        console.log(`Parsed timePeriod "${correctedTimePeriod}": ${dateStart} to ${dateEnd} (${periodDescription})`);
       } else {
-        periodDescription = timePeriod;
-        console.log(`Could not parse timePeriod "${timePeriod}", querying all data`);
+        periodDescription = correctedTimePeriod;
+        console.log(`Could not parse timePeriod "${correctedTimePeriod}", querying all data`);
       }
     } else {
       periodDescription = `${userYear}`;
@@ -163,12 +186,18 @@ export async function POST(req: NextRequest) {
         });
       }
 
+      // Recovery Type A: Check for similar symbols
+      const similarSymbols = await findSimilarSymbols(normalizedSymbol, 'TradeData');
+      const symbolSuggestion = buildSymbolSuggestionMessage(normalizedSymbol, similarSymbols);
+
       // No trades found for this symbol at all - check if symbol exists elsewhere (e.g., in fees)
       const presence = await checkSymbolPresence(normalizedSymbol, 'TradeData');
       let responseText = `No ${typeLabel} trades found for ${normalizedSymbol} ${periodDescription}.`;
       if (presence.context) {
         const contextLower = presence.context.charAt(0).toLowerCase() + presence.context.slice(1);
         responseText += ` However, ${contextLower} Would you like to see those instead?`;
+      } else if (symbolSuggestion) {
+        responseText += ` ${symbolSuggestion}`;
       }
 
       return NextResponse.json({
@@ -240,9 +269,16 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ response, uiData });
   } catch (error) {
-    console.error('Trade stats error:', error);
+    // Recovery Type C: Handle query failures gracefully
+    const { userMessage, logEntry } = handleQueryError(error, {
+      endpoint: 'trade-stats',
+      params: { symbol: 'unknown', timePeriod: 'unknown' },
+    });
+
+    console.error(`[trade-stats] [${logEntry.code}] ${logEntry.message}`);
+
     return NextResponse.json({
-      response: 'Sorry, there was an error getting the trade statistics.',
+      response: userMessage,
       uiData: null,
     });
   }

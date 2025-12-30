@@ -5,6 +5,12 @@ import { normalizeSymbol } from '@/src/lib/symbol-utils';
 import { formatDateForDB } from '@/src/lib/date-utils';
 import { parseTimePeriodToResolvedDates } from '@/src/lib/date-parser';
 import { checkSymbolPresence } from '@/src/lib/symbol-lookup';
+import {
+  findSimilarSymbols,
+  buildSymbolSuggestionMessage,
+  parseTimePeriodWithRecovery,
+  handleQueryError,
+} from '@/src/lib/error-recovery';
 
 // LLM-resolved date filter
 interface DateFilter {
@@ -42,11 +48,29 @@ export async function POST(req: NextRequest) {
 
     const normalizedSymbol = normalizeSymbol(symbol);
 
+    // Recovery Type B: Validate and correct time period if needed
+    let correctedTimePeriod = timePeriod;
+    if (timePeriod && !dateFilter) {
+      const recovery = parseTimePeriodWithRecovery(timePeriod);
+      if (!recovery.parsed && recovery.suggestion) {
+        // Time period couldn't be parsed - return helpful message
+        console.log(`[profitable-trades] Invalid time period: ${timePeriod}`);
+        return NextResponse.json({
+          response: recovery.suggestion,
+          uiData: null,
+        });
+      }
+      if (recovery.correctedPeriod) {
+        correctedTimePeriod = recovery.correctedPeriod;
+        console.log(`[profitable-trades] Corrected time period: "${timePeriod}" -> "${correctedTimePeriod}"`);
+      }
+    }
+
     // Resolve dates for filtering profitable trades by sell date
     let startDate: string | undefined;
     let endDate: string | undefined;
     let dates: string[] | undefined;
-    let description: string = timePeriod || '';
+    let description: string = correctedTimePeriod || '';
     let resolvedType: 'range' | 'discrete' = 'range';
 
     if (dateFilter && dateFilter.type === 'range' && dateFilter.startDate && dateFilter.endDate) {
@@ -67,8 +91,8 @@ export async function POST(req: NextRequest) {
       resolvedType = 'discrete';
       description = dateFilter.description || timePeriod || 'selected dates';
       console.log(`Using LLM discrete dates: ${dateFilter.dates.join(', ')} -> demo ${dates.join(', ')} (${description})`);
-    } else if (timePeriod) {
-      const resolved = parseTimePeriodToResolvedDates(timePeriod);
+    } else if (correctedTimePeriod) {
+      const resolved = parseTimePeriodToResolvedDates(correctedTimePeriod);
       if (resolved) {
         if (resolved.type === 'discrete' && resolved.dates) {
           dates = resolved.dates;
@@ -77,11 +101,11 @@ export async function POST(req: NextRequest) {
           startDate = resolved.startDate;
           endDate = resolved.endDate;
         }
-        description = resolved.description || timePeriod;
-        console.log(`Parsed timePeriod "${timePeriod}": ${resolved.type}, dates: ${dates || `${startDate} to ${endDate}`}`);
+        description = resolved.description || correctedTimePeriod;
+        console.log(`Parsed timePeriod "${correctedTimePeriod}": ${resolved.type}, dates: ${dates || `${startDate} to ${endDate}`}`);
       } else {
-        description = timePeriod;
-        console.log(`Could not parse timePeriod "${timePeriod}", showing all profitable trades`);
+        description = correctedTimePeriod;
+        console.log(`Could not parse timePeriod "${correctedTimePeriod}", showing all profitable trades`);
       }
     }
 
@@ -106,12 +130,19 @@ export async function POST(req: NextRequest) {
 
     const allTrades = trades || [];
     if (allTrades.length === 0) {
+      // Recovery Type A: Check for similar symbols
+      const similarSymbols = await findSimilarSymbols(normalizedSymbol, 'TradeData');
+      const symbolSuggestion = buildSymbolSuggestionMessage(normalizedSymbol, similarSymbols);
+
       // Check if symbol exists elsewhere (e.g., in fees)
       const presence = await checkSymbolPresence(normalizedSymbol, 'TradeData');
       let responseText = `No trades found for ${normalizedSymbol}${periodLabelFor}.`;
       if (presence.context) {
         const contextLower = presence.context.charAt(0).toLowerCase() + presence.context.slice(1);
         responseText += ` However, ${contextLower} Would you like to see those instead?`;
+      } else if (symbolSuggestion) {
+        // Add symbol suggestion if no other context available
+        responseText += ` ${symbolSuggestion}`;
       }
 
       return NextResponse.json({
@@ -189,9 +220,16 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ response, uiData });
   } catch (error) {
-    console.error('Profitable trades error:', error);
+    // Recovery Type C: Handle query failures gracefully
+    const { userMessage, logEntry } = handleQueryError(error, {
+      endpoint: 'profitable-trades',
+      params: { symbol: 'unknown', timePeriod: 'unknown' },
+    });
+
+    console.error(`[profitable-trades] [${logEntry.code}] ${logEntry.message}`);
+
     return NextResponse.json({
-      response: 'Sorry, there was an error getting the profitable trades.',
+      response: userMessage,
       uiData: null,
     });
   }

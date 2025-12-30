@@ -15,6 +15,8 @@ npm run build        # Build for production
 npm run lint         # Run ESLint
 ```
 
+**IMPORTANT FOR CLAUDE:** When starting the dev server (`npm run dev`), automatically open the localhost URL in Chrome using the **Chrome DevTools MCP** (`mcp__chrome-devtools__new_page`), NOT Playwright. If Chrome DevTools MCP shows a "browser already running" error, kill the stale session with `pkill -f "chrome-devtools-mcp/chrome-profile"` and retry.
+
 ## Deployment
 
 ### Production

@@ -11,6 +11,12 @@ import { queryTrades, buildVoiceResponse, buildUIData, validateConsistency } fro
 import { DateFilter } from '@/src/lib/query-resolver';
 import { startTrace, formatTraceForResponse } from '@/src/lib/request-trace';
 import { buildNoResultsMessage } from '@/src/lib/symbol-lookup';
+import {
+  findSimilarSymbols,
+  buildSymbolSuggestionMessage,
+  parseTimePeriodWithRecovery,
+  handleQueryError,
+} from '@/src/lib/error-recovery';
 // Context merging disabled - ElevenLabs LLM has full conversation history and handles context better
 
 export async function POST(req: NextRequest) {
@@ -40,10 +46,27 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    // Recovery Type B: Validate and correct time period if needed
+    let correctedTimePeriod = timePeriod;
+    if (timePeriod && !dateFilter) {
+      const recovery = parseTimePeriodWithRecovery(timePeriod);
+      if (!recovery.parsed && recovery.suggestion) {
+        trace.logError(`Invalid time period: ${timePeriod}`);
+        return NextResponse.json({
+          response: recovery.suggestion,
+          uiData: null,
+        });
+      }
+      if (recovery.correctedPeriod) {
+        correctedTimePeriod = recovery.correctedPeriod;
+        trace.logInput({ correctedTimePeriod, suggestion: recovery.suggestion });
+      }
+    }
+
     // Use unified query - SINGLE SOURCE OF TRUTH
     const result = await queryTrades({
       symbol,
-      timePeriod,
+      timePeriod: correctedTimePeriod,
       dateFilter,
     });
 
@@ -59,21 +82,30 @@ export async function POST(req: NextRequest) {
 
     // Handle zero results with intelligent symbol lookup
     if (result.counts.total === 0) {
+      // Recovery Type A: Check for similar symbols
+      const similarSymbols = await findSimilarSymbols(symbol, 'TradeData');
+      const symbolSuggestion = buildSymbolSuggestionMessage(symbol, similarSymbols);
+
       const noResultsMsg = await buildNoResultsMessage(
         result.metadata.symbol,
         'trades',
         result.metadata.dateRange.description
       );
 
+      // Combine no results message with symbol suggestion if available
+      const finalNoResultsMsg = symbolSuggestion
+        ? `${noResultsMsg} ${symbolSuggestion}`
+        : noResultsMsg;
+
       trace.logResponse({
-        voiceText: noResultsMsg,
-        uiDataSummary: '0 trades',
+        voiceText: finalNoResultsMsg,
+        uiDataSummary: `0 trades${symbolSuggestion ? ' (suggestion: ' + symbolSuggestion + ')' : ''}`,
       }, 'passed');
 
       const completedTrace = trace.complete();
 
       return NextResponse.json({
-        response: noResultsMsg,
+        response: finalNoResultsMsg,
         uiData: buildUIData(result),
         _debug: formatTraceForResponse(completedTrace),
       });
@@ -115,10 +147,19 @@ export async function POST(req: NextRequest) {
       _debug: formatTraceForResponse(completedTrace),
     });
   } catch (error) {
-    trace.logError(error instanceof Error ? error : String(error));
+    // Recovery Type C: Handle query failures gracefully
+    const { userMessage, logEntry } = handleQueryError(error, {
+      endpoint: 'trade-summary',
+      params: { symbol: 'unknown', timePeriod: 'unknown' },
+    });
+
+    trace.logError(`[${logEntry.code}] ${logEntry.message}`);
+    const completedTrace = trace.complete();
+
     return NextResponse.json({
-      response: 'Sorry, there was an error looking up the trade summary.',
+      response: userMessage,
       uiData: null,
+      _debug: formatTraceForResponse(completedTrace),
     });
   }
 }

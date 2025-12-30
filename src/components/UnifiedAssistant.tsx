@@ -21,6 +21,7 @@ import { FeesSummary, type FeeType } from './generative-ui/FeesSummary';
 import { StockQuoteCard } from './generative-ui/StockQuoteCard';
 import { CompanyOverviewCard } from './generative-ui/CompanyOverviewCard';
 import { OptionQuoteCard } from './generative-ui/OptionQuoteCard';
+import DebitBalanceSummary from './generative-ui/DebitBalanceSummary';
 import type { ClassificationResult } from '@/src/lib/intent-detection';
 import { formatCalendarDate } from '@/src/lib/date-utils';
 import { getOptionPremiumUSD, safeParseNumber } from '@/src/lib/trade-math';
@@ -37,7 +38,7 @@ interface Conversation {
 }
 
 interface TradeUIData {
-  type: 'summary' | 'detailed' | 'stats' | 'profitable' | 'time-based' | 'option-stats' | 'average-price' | 'advanced-options' | 'highest-strike' | 'total-premium' | 'expiring-options' | 'last-option' | 'account-balance' | 'fees' | 'options'
+  type: 'summary' | 'detailed' | 'stats' | 'profitable' | 'time-based' | 'option-stats' | 'average-price' | 'advanced-options' | 'highest-strike' | 'total-premium' | 'expiring-options' | 'last-option' | 'account-balance' | 'debit-balance-summary' | 'fees' | 'options'
     // Market data types
     | 'stock-quote' | 'option-quote' | 'price-chart' | 'news' | 'halt-status'
     // Fundamentals types
@@ -1925,6 +1926,18 @@ const UnifiedAssistant: React.FC = () => {
         const voicePayload = await res.json();
         const uiData = voicePayload?.uiData || voicePayload;
         return { type, symbol: '', accountQueryType: extraParams?.accountQueryType, data: uiData };
+      } else if (type === 'debit-balance-summary') {
+        // SINGLE FETCH: Use voice endpoint with uiData for debit balance summary
+        endpoint = '/api/elevenlabs/debit-balance';
+        body = { time_period: timePeriod || 'this month' };
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const voicePayload = await res.json();
+        const uiData = voicePayload?.uiData || voicePayload;
+        return { type, symbol: '', timePeriod, data: uiData };
       } else if (type === 'fees') {
         // SINGLE FETCH: Use voice endpoint with uiData
         endpoint = '/api/elevenlabs/fees';
@@ -3900,6 +3913,46 @@ const UnifiedAssistant: React.FC = () => {
               fedRequirement={accountData.fedRequirement}
               fedExcessDeficit={accountData.fedExcessDeficit}
               balanceTrend={balanceTrend}
+            />
+          </div>
+        );
+      }
+    }
+
+    if (type === 'debit-balance-summary') {
+      console.log('🎨 Rendering debit balance summary card with data:', data);
+      const debitData = data as {
+        accountCode: string;
+        accountName: string;
+        timePeriod: string;
+        currentBalance: number;
+        currentBalanceDate: string;
+        average: number;
+        highest: number;
+        highestDate: string;
+        lowest: number;
+        lowestDate: string;
+        dailyBalances: Array<{
+          date: string;
+          debitBalance: number;
+        }>;
+      };
+
+      if (debitData.dailyBalances && debitData.dailyBalances.length > 0) {
+        return (
+          <div style={{ marginTop: '12px' }}>
+            <DebitBalanceSummary
+              accountCode={debitData.accountCode}
+              accountName={debitData.accountName}
+              timePeriod={debitData.timePeriod}
+              currentBalance={debitData.currentBalance}
+              currentBalanceDate={debitData.currentBalanceDate}
+              average={debitData.average}
+              highest={debitData.highest}
+              highestDate={debitData.highestDate}
+              lowest={debitData.lowest}
+              lowestDate={debitData.lowestDate}
+              dailyBalances={debitData.dailyBalances}
             />
           </div>
         );

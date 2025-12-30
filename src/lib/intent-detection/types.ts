@@ -19,6 +19,7 @@ export type CardType =
   | 'expiring-options'
   | 'last-option'
   | 'account-balance'
+  | 'debit-balance-summary'
   | 'fees'
   // Market data card types
   | 'stock-quote'

@@ -222,10 +222,29 @@ export const intentRegistry: IntentDefinition[] = [
 
   // === ACCOUNT DOMAIN ===
   {
+    id: 'account.debit_balance_summary',
+    domain: 'account',
+    cardType: 'debit-balance-summary',
+    description: 'User asks specifically for debit balance with details, daily breakdown, or wants to see all debit balances for a period. Keywords: "debit balance", "current debit balance", "show debit balances", "debit balance summary", "daily debit balances".',
+    examples: [
+      'What is my current debit balance?',
+      'Show my debit balance for this month',
+      'Debit balance summary',
+      'Show all debit balances',
+      'What is my debit balance?',
+      'Daily debit balances for November',
+      'Show debit balance with breakdown',
+      'Debit balance for the month',
+      'Current debit balance for C40421',
+    ],
+    requiredEntities: [],
+    optionalEntities: ['timePeriod'],
+  },
+  {
     id: 'account.summary',
     domain: 'account',
     cardType: 'account-balance',
-    description: 'User asks about account balance, equity, buying power, margin, or general account info',
+    description: 'User asks about account balance, equity, buying power, margin, or general account info. NOT for debit balance queries (use account.debit_balance_summary).',
     examples: [
       'What is my account balance?',
       'How much money can I withdraw?',
@@ -236,7 +255,6 @@ export const intentRegistry: IntentDefinition[] = [
       'What is my margin requirement?',
       'Cash balance in my account',
       'Net liquidation value',
-      'Debit balances for the month',
       'Credit balances for the month',
     ],
     requiredEntities: ['accountQueryType'],

@@ -4,7 +4,6 @@ import { normalizeSymbol, parseOptionSymbol } from '@/src/lib/symbol-utils';
 import { suggestDataPeriod } from '@/src/lib/data-availability';
 import { formatDateForDB } from '@/src/lib/date-utils';
 import { parseTimePeriodToResolvedDates } from '@/src/lib/date-parser';
-import { checkSymbolPresence } from '@/src/lib/symbol-lookup';
 import {
   findSimilarSymbols,
   buildSymbolSuggestionMessage,
@@ -292,22 +291,7 @@ export async function POST(req: NextRequest) {
       const feeTypeName = feeType.replace('_', ' ');
       const symbolText = normalizedSymbol ? ` for ${normalizedSymbol}` : '';
 
-      // Recovery Type A: Check for similar symbols if a symbol was specified
-      let symbolSuggestion: string | null = null;
-      if (normalizedSymbol) {
-        const similarSymbols = await findSimilarSymbols(normalizedSymbol, 'FeesAndInterest');
-        symbolSuggestion = buildSymbolSuggestionMessage(normalizedSymbol, similarSymbols);
-      }
-
-      // Check if symbol exists elsewhere (e.g., in trades)
-      let symbolContext: string | undefined;
-      if (normalizedSymbol) {
-        const presence = await checkSymbolPresence(normalizedSymbol, 'FeesAndInterest');
-        if (presence.context) {
-          symbolContext = presence.context;
-        }
-      }
-
+      // If there's fee data for a different time period, suggest that (STAY WITHIN SAME DOMAIN)
       if (suggestion && suggestion.amount > 0) {
         const uiData: FeesUIData = {
           feeType,
@@ -329,13 +313,18 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      // If no suggestion but symbol has trades, mention that
+      // Recovery Type A: Check for similar symbols ONLY if a symbol was specified and no fee data exists
+      // NOTE: We intentionally do NOT suggest trades when user asks about fees - stay within same domain
+      let symbolSuggestion: string | null = null;
+      if (normalizedSymbol) {
+        const similarSymbols = await findSimilarSymbols(normalizedSymbol, 'FeesAndInterest');
+        symbolSuggestion = buildSymbolSuggestionMessage(normalizedSymbol, similarSymbols);
+      }
+
+      // Simple response - no cross-domain suggestions (don't suggest trades when user asked about fees)
       let responseText = `No ${feeTypeName} data found${symbolText} for ${description}.`;
-      if (symbolContext) {
-        const contextLower = symbolContext.charAt(0).toLowerCase() + symbolContext.slice(1);
-        responseText += ` However, ${contextLower} Would you like to see those instead?`;
-      } else if (symbolSuggestion) {
-        // Add symbol suggestion if no other suggestions available
+      if (symbolSuggestion) {
+        // Only suggest similar symbols within the SAME fee type
         responseText += ` ${symbolSuggestion}`;
       }
 

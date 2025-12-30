@@ -327,35 +327,90 @@ async function getProfitableTrades(symbol: string, onlyProfitable: boolean = tru
 }
 
 // Tool: Get detailed trades
-async function getDetailedTrades(symbol: string) {
+// Supports filtering by trade_type (buy/sell) and security_type (stock/option)
+async function getDetailedTrades(
+  symbol: string,
+  timePeriod?: string,
+  dateFilter?: DateFilter,
+  tradeType?: string,
+  securityType?: string
+) {
   const normalizedSymbol = normalizeSymbol(symbol);
 
-  const { data, error } = await supabase
+  // Resolve dates
+  let startDate: string | undefined;
+  let endDate: string | undefined;
+  let description: string = timePeriod || '';
+
+  if (dateFilter && dateFilter.type === 'range' && dateFilter.startDate && dateFilter.endDate) {
+    const [sy, sm, sd] = dateFilter.startDate.split('-').map(Number);
+    const [ey, em, ed] = dateFilter.endDate.split('-').map(Number);
+    const realStart = new Date(sy, sm - 1, sd);
+    const realEnd = new Date(ey, em - 1, ed);
+    startDate = formatDateForDB(realStart);
+    endDate = formatDateForDB(realEnd);
+    description = dateFilter.description || timePeriod || 'selected period';
+  } else if (timePeriod) {
+    const resolved = parseTimePeriodToResolvedDates(timePeriod);
+    if (resolved && resolved.startDate && resolved.endDate) {
+      startDate = resolved.startDate;
+      endDate = resolved.endDate;
+      description = resolved.description || timePeriod;
+    }
+  }
+
+  let query = supabase
     .from('TradeData')
     .select('*')
     .eq('AccountCode', ACCOUNT_CODE)
-    .or(`Symbol.eq.${normalizedSymbol},UnderlyingSymbol.eq.${normalizedSymbol}`)
-    .order('Date', { ascending: false });
+    .or(`Symbol.eq.${normalizedSymbol},UnderlyingSymbol.eq.${normalizedSymbol}`);
+
+  // Apply date filters
+  if (startDate && endDate) {
+    query = query.gte('Date', startDate).lte('Date', endDate);
+  }
+
+  // Apply trade type filter (buy/sell)
+  if (tradeType) {
+    const normalizedTradeType = tradeType.toLowerCase();
+    if (normalizedTradeType === 'buy' || normalizedTradeType === 'bought') {
+      query = query.eq('TradeType', 'B');
+    } else if (normalizedTradeType === 'sell' || normalizedTradeType === 'sold') {
+      query = query.eq('TradeType', 'S');
+    }
+  }
+
+  // Apply security type filter (stock/option)
+  if (securityType) {
+    const normalizedSecurityType = securityType.toLowerCase();
+    if (normalizedSecurityType === 'stock' || normalizedSecurityType === 'stocks') {
+      query = query.eq('SecurityType', 'S');
+    } else if (normalizedSecurityType === 'option' || normalizedSecurityType === 'options') {
+      query = query.eq('SecurityType', 'O');
+    }
+  }
+
+  const { data, error } = await query.order('Date', { ascending: false });
 
   if (error) {
     return { error: error.message, symbol: normalizedSymbol };
   }
 
-  // Calculate totals for stock trades
-  const stockTrades = data?.filter(t => t.SecurityType === 'S') || [];
-  const optionTrades = data?.filter(t => t.SecurityType === 'O') || [];
-  const buyTrades = stockTrades.filter(t => t.TradeType === 'B');
+  const allTrades = data || [];
 
-  const totalSharesPurchased = buyTrades.reduce((sum, t) =>
+  // Calculate counts
+  const stockTrades = allTrades.filter(t => t.SecurityType === 'S');
+  const optionTrades = allTrades.filter(t => t.SecurityType === 'O');
+  const buyTrades = allTrades.filter(t => t.TradeType === 'B');
+  const sellTrades = allTrades.filter(t => t.TradeType === 'S');
+
+  // Calculate totals
+  const totalShares = stockTrades.reduce((sum, t) =>
     sum + parseFloat(t.StockShareQty || '0'), 0);
-  const totalCost = buyTrades.reduce((sum, t) =>
+  const totalContracts = optionTrades.reduce((sum, t) =>
+    sum + parseFloat(t.OptionContracts || '0'), 0);
+  const totalValue = allTrades.reduce((sum, t) =>
     sum + Math.abs(parseFloat(t.NetAmount || '0')), 0);
-
-  // Estimate current value using last trade price
-  const lastPrice = stockTrades[0]?.StockTradePrice
-    ? parseFloat(stockTrades[0].StockTradePrice)
-    : 0;
-  const currentValue = totalSharesPurchased * lastPrice;
 
   // Format trades for display
   const formattedStockTrades = stockTrades.map(t => ({
@@ -379,20 +434,51 @@ async function getDetailedTrades(symbol: string) {
     netAmount: parseFloat(t.NetAmount || '0'),
   }));
 
+  // Build natural response based on filters applied
+  let responseMessage = '';
+  const hasTradeTypeFilter = tradeType && (tradeType.toLowerCase() === 'buy' || tradeType.toLowerCase() === 'sell');
+  const hasSecurityTypeFilter = securityType && (securityType.toLowerCase() === 'stock' || securityType.toLowerCase() === 'option');
+
+  if (hasTradeTypeFilter && hasSecurityTypeFilter) {
+    // Both filters: "You bought 180 shares of AAPL across 4 trades in November"
+    const action = tradeType!.toLowerCase() === 'buy' ? 'bought' : 'sold';
+    if (securityType!.toLowerCase() === 'stock') {
+      responseMessage = `You ${action} ${Math.round(totalShares)} shares of ${normalizedSymbol} across ${allTrades.length} trades${description ? ` in ${description}` : ''}.`;
+    } else {
+      responseMessage = `You ${action} ${Math.round(totalContracts)} option contracts on ${normalizedSymbol} across ${allTrades.length} trades${description ? ` in ${description}` : ''}.`;
+    }
+  } else if (hasTradeTypeFilter) {
+    // Only trade type filter: "You made 5 buy trades for AAPL"
+    const action = tradeType!.toLowerCase() === 'buy' ? 'buy' : 'sell';
+    responseMessage = `You made ${allTrades.length} ${action} trades for ${normalizedSymbol}${description ? ` in ${description}` : ''}. ${stockTrades.length} stock trades and ${optionTrades.length} option trades.`;
+  } else if (hasSecurityTypeFilter) {
+    // Only security type filter
+    if (securityType!.toLowerCase() === 'stock') {
+      responseMessage = `Found ${stockTrades.length} stock trades for ${normalizedSymbol}${description ? ` in ${description}` : ''}. ${buyTrades.length} buys and ${sellTrades.length} sells. Total: ${Math.round(totalShares)} shares.`;
+    } else {
+      responseMessage = `Found ${optionTrades.length} option trades for ${normalizedSymbol}${description ? ` in ${description}` : ''}. ${buyTrades.length} buys and ${sellTrades.length} sells. Total: ${Math.round(totalContracts)} contracts.`;
+    }
+  } else {
+    // No filters: standard response
+    responseMessage = `For ${normalizedSymbol}${description ? ` ${description}` : ''}: ${stockTrades.length} stock trades and ${optionTrades.length} option trades. Total: ${allTrades.length} trades with value $${totalValue.toFixed(2)}.`;
+  }
+
   return {
     symbol: normalizedSymbol,
-    summary: {
-      totalSharesPurchased,
-      totalCost,
-      currentValue,
-      lastTradePrice: lastPrice,
-      profitLoss: currentValue - totalCost,
-      profitLossPercent: totalCost > 0 ? ((currentValue - totalCost) / totalCost) * 100 : 0,
-    },
-    stockTrades: formattedStockTrades,
-    optionTrades: formattedOptionTrades,
+    timePeriod: description || undefined,
+    tradeType: tradeType || undefined,
+    securityType: securityType || undefined,
+    responseMessage,
+    totalTrades: allTrades.length,
     stockTradeCount: stockTrades.length,
     optionTradeCount: optionTrades.length,
+    buyCount: buyTrades.length,
+    sellCount: sellTrades.length,
+    totalShares: Math.round(totalShares),
+    totalContracts: Math.round(totalContracts),
+    totalValue,
+    stockTrades: formattedStockTrades,
+    optionTrades: formattedOptionTrades,
   };
 }
 
@@ -421,7 +507,13 @@ export async function POST(req: NextRequest) {
 
       case 'getDetailedTrades':
       case 'get_detailed_trades':
-        result = await getDetailedTrades(parameters.symbol);
+        result = await getDetailedTrades(
+          parameters.symbol,
+          parameters.time_period || parameters.timePeriod,
+          parameters.date_filter || parameters.dateFilter,
+          parameters.trade_type || parameters.tradeType,
+          parameters.security_type || parameters.securityType
+        );
         break;
 
       case 'getTradeStats':
@@ -466,10 +558,8 @@ export async function POST(req: NextRequest) {
     } else if (tool_name === 'getDetailedTrades' || tool_name === 'get_detailed_trades') {
       if ('error' in result && result.error) {
         responseText = `Error getting trade details: ${result.error}`;
-      } else if ('summary' in result && result.summary) {
-        const summary = result.summary;
-        const sharesText = Math.round(summary.totalSharesPurchased).toString();
-        responseText = `For ${result.symbol}, you bought ${sharesText} shares for a total cost of $${summary.totalCost.toFixed(2)} with an estimated current value of $${summary.currentValue.toFixed(2)}, for a profit or loss of $${summary.profitLoss.toFixed(2)} or ${summary.profitLossPercent.toFixed(2)} percent. You have ${result.stockTradeCount} stock trades and ${result.optionTradeCount} option trades.`;
+      } else if ('responseMessage' in result && result.responseMessage) {
+        responseText = result.responseMessage as string;
       }
     } else if (tool_name === 'getTradeStats' || tool_name === 'get_trade_stats') {
       if ('error' in result && result.error) {

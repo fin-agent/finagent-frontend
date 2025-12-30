@@ -956,3 +956,35 @@ const securityType = body.security_type || body.parameters?.security_type ||
 ```
 
 If `security_type` is nested inside `date_filter` in the schema, none of these paths will find it.
+
+## Commit Guidelines
+
+### Always Update Documentation
+
+**IMPORTANT: When committing and pushing changes, ALWAYS update README.md and CLAUDE.md with any new relevant details.**
+
+Before each commit, consider:
+1. Does this change introduce new patterns or conventions? → Update CLAUDE.md
+2. Does this change affect how tools/endpoints work? → Update both README.md and CLAUDE.md
+3. Does this fix a bug that others should know about? → Document the fix and root cause
+4. Does this change ElevenLabs tool configurations? → Update the tool documentation sections
+
+### Documentation Checklist
+
+- [ ] **CLAUDE.md** - Developer guide for Claude Code (architecture, patterns, troubleshooting)
+- [ ] **README.md** - User-facing documentation (features, configuration, usage)
+- [ ] **prompts/finagent-neo.md** - ElevenLabs agent system prompt (if tool behavior changes)
+
+### Commit Message Format
+
+Use conventional commits with clear descriptions:
+```
+docs: Add documentation for [feature/fix]
+feat: Implement [new feature]
+fix: Resolve [issue description]
+```
+
+Include in the body:
+- What changed
+- Why it changed
+- Any breaking changes or migration steps

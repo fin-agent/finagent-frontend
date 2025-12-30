@@ -51,6 +51,35 @@ The full voice agent flow uses production webhooks. Test API logic locally with 
 
 After making voice endpoint changes, remind the user: "This change affects the voice agent. I'll commit and push to Vercel so you can test the voice flow."
 
+### Cross-Check System Prompt and ElevenLabs Tools
+
+**IMPORTANT FOR CLAUDE:** When making changes that affect voice agent behavior, ALWAYS cross-check these three locations for consistency:
+
+1. **System Prompt** (`prompts/finagent-neo.md`)
+   - Agent behavior rules, response formatting, domain-aware suggestions
+   - Must be manually copied to ElevenLabs dashboard after updates
+   - Remind user: "Updated system prompt - please copy to ElevenLabs dashboard"
+
+2. **ElevenLabs Tool Schemas** (in ElevenLabs dashboard)
+   - Tool parameter definitions (body parameters must be TOP-LEVEL, not nested)
+   - Enum values for parameters like `security_type`, `query_type`
+   - If webhook expects a new parameter, the tool schema must also define it
+
+3. **Webhook Code** (`app/api/elevenlabs/*.ts`)
+   - Actual logic that processes tool calls and returns responses
+   - Response format must match what the system prompt tells the agent to expect
+
+**Common issues when these are out of sync:**
+- Webhook returns correct data, but agent speaks wrong response → System prompt issue
+- Agent doesn't pass expected parameter → ElevenLabs tool schema issue
+- Voice says one thing, UI shows another → Webhook logic issue
+
+**Checklist for voice-related changes:**
+- [ ] Update webhook code (`app/api/elevenlabs/`)
+- [ ] Update system prompt if agent behavior rules change (`prompts/finagent-neo.md`)
+- [ ] Check if ElevenLabs tool schema needs parameter updates
+- [ ] Commit, push to Vercel, and remind user to update ElevenLabs dashboard if needed
+
 ## Architecture
 
 ### Core Data Flow

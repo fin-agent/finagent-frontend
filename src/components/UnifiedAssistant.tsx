@@ -61,6 +61,7 @@ interface TradeUIData {
   optionData?: unknown; // For combined stock + option stats
   accountQueryType?: AccountQueryType; // For account balance queries
   feeType?: FeeType; // For fees queries
+  responseText?: string; // Voice response text from webhook - use this for chat message
 }
 
 interface TranscriptMessage {
@@ -238,6 +239,12 @@ function getElevenLabsDynamicVariables(): Record<string, string> {
 
 function buildAnswerOverride(intent: QueryIntent | null, tradeUI: TradeUIData | null): string | null {
   if (!intent || !tradeUI) return null;
+
+  // SINGLE SOURCE OF TRUTH: Use voice response text if available
+  // This ensures UI text matches exactly what the voice agent says
+  if (tradeUI.responseText) {
+    return tradeUI.responseText;
+  }
 
   if (tradeUI.type === 'time-based') {
     const d = tradeUI.data as {
@@ -1056,8 +1063,10 @@ const UnifiedAssistant: React.FC = () => {
 
       // Store UI data from voice response (guaranteed sync)
       // CRITICAL: Include timePeriod and dateFilter for proper date filtering in UI
+      // CRITICAL: Include responseText to sync UI text with voice
       if (voicePayload && typeof voicePayload === 'object' && 'uiData' in voicePayload) {
-        toolUIDataRef.current = { type: 'detailed', symbol: symbol || '', data: voicePayload.uiData, timePeriod, dateFilter: dateFilter as TradeUIData['dateFilter'] };
+        const responseText = typeof voicePayload.response === 'string' ? voicePayload.response : undefined;
+        toolUIDataRef.current = { type: 'detailed', symbol: symbol || '', data: voicePayload.uiData, timePeriod, dateFilter: dateFilter as TradeUIData['dateFilter'], responseText };
         console.log('📊 [Detailed Trades Tool] Set toolUIDataRef from voice response:', toolUIDataRef.current);
         resolveToolDataPromise(toolUIDataRef.current);
       } else {
@@ -1205,16 +1214,26 @@ const UnifiedAssistant: React.FC = () => {
       const dateFilter = rawDateFilter || llmDateFilter;
 
       const calculation = getString(parameters, 'calculation');
-      const tradeType = getString(parameters, 'trade_type');
 
-      console.log('📊 [Time Based Trades] Using symbol:', symbol, '| timePeriod:', timePeriod, '| dateFilter:', dateFilter);
+      // CRITICAL: Extract trade_type and security_type from both parameters AND LLM intent
+      const rawTradeType = getString(parameters, 'trade_type');
+      const llmTradeType = llmIntent?.tradeType;
+      const tradeType = rawTradeType || llmTradeType;
+
+      const rawSecurityType = getString(parameters, 'security_type');
+      const llmSecurityType = llmIntent?.securityType;
+      const securityType = rawSecurityType || llmSecurityType;
+
+      console.log('📊 [Time Based Trades] Using symbol:', symbol, '| timePeriod:', timePeriod, '| tradeType:', tradeType, '| securityType:', securityType, '| dateFilter:', dateFilter);
 
       // SINGLE FETCH: Voice endpoint returns BOTH response AND uiData
-      const voicePayload = await postJson('/api/elevenlabs/time-trades', { symbol, time_period: timePeriod, calculation, trade_type: tradeType, date_filter: dateFilter });
+      const voicePayload = await postJson('/api/elevenlabs/time-trades', { symbol, time_period: timePeriod, calculation, trade_type: tradeType, security_type: securityType, date_filter: dateFilter });
 
       // Store UI data from voice response (guaranteed sync)
+      // CRITICAL: Include responseText to sync UI text with voice
       if (voicePayload && typeof voicePayload === 'object' && 'uiData' in voicePayload) {
-        toolUIDataRef.current = { type: 'time-based', symbol: symbol || '', timePeriod, data: voicePayload.uiData };
+        const responseText = typeof voicePayload.response === 'string' ? voicePayload.response : undefined;
+        toolUIDataRef.current = { type: 'time-based', symbol: symbol || '', timePeriod, data: voicePayload.uiData, responseText };
         console.log('📊 [Time Based Trades Tool] Set toolUIDataRef from voice response:', toolUIDataRef.current);
         // Resolve promise so message handler knows data is ready
         resolveToolDataPromise(toolUIDataRef.current);
@@ -1683,7 +1702,13 @@ const UnifiedAssistant: React.FC = () => {
                 };
               }
             }
-            setTranscript(prev => prev.map((m) => m.id === newMessageId ? { ...m, tradeUI } : m));
+            // Update both tradeUI AND content (if responseText available)
+            // This ensures UI text matches voice response exactly
+            setTranscript(prev => prev.map((m) => m.id === newMessageId ? {
+              ...m,
+              tradeUI,
+              content: tradeUI.responseText || m.content,
+            } : m));
           }
         })();
       }
@@ -2616,7 +2641,13 @@ const UnifiedAssistant: React.FC = () => {
                   };
                 }
               }
-              setTranscript(prev => prev.map((m) => m.id === newMessageId ? { ...m, tradeUI } : m));
+              // Update both tradeUI AND content (if responseText available)
+              // This ensures UI text matches voice response exactly
+              setTranscript(prev => prev.map((m) => m.id === newMessageId ? {
+                ...m,
+                tradeUI,
+                content: tradeUI.responseText || m.content,
+              } : m));
             }
           })();
         }
@@ -3119,29 +3150,28 @@ const UnifiedAssistant: React.FC = () => {
       }
     }
 
-		    // Store intent and prefetch the trade UI, but render it only after the assistant replies.
-		    pendingQueryIntentRef.current = intent;
-		    pendingTradeUIRequestRef.current = intent
-		      ? fetchTradeData(
-		          intent.symbol || '',
-		          intent.cardType,
-		          intent.tradeType,
-		          intent.timePeriod,
-		          {
-		            callPut: intent.callPut,
-		            expiration: intent.expiration,
-		            accountQueryType: intent.accountQueryType,
-		            feeType: intent.feeType,
-		            dateFilter: intent.dateFilter,
-		            securityType: intent.securityType,
-		          }
-		        )
-		      : null;
-		    if (pendingTradeUIRequestRef.current) {
-		      pendingAnswerOverrideRef.current = pendingTradeUIRequestRef.current.then((tradeUI) => buildAnswerOverride(intent, tradeUI));
-		    } else if (!pendingAnswerOverrideRef.current) {
-		      pendingAnswerOverrideRef.current = null;
-		    }
+    // Store intent and prefetch the trade UI, but render it only after the assistant replies.
+    pendingQueryIntentRef.current = intent;
+    pendingTradeUIRequestRef.current = intent
+      ? fetchTradeData(
+          intent.symbol || '',
+          intent.cardType,
+          intent.tradeType,
+          intent.timePeriod,
+          {
+            callPut: intent.callPut,
+            expiration: intent.expiration,
+            accountQueryType: intent.accountQueryType,
+            feeType: intent.feeType,
+            dateFilter: intent.dateFilter,
+            securityType: intent.securityType,
+          }
+        )
+      : null;
+    // VOICE MODE: Do NOT set pendingAnswerOverrideRef!
+    // The raw ElevenLabs message IS what the voice says - using it ensures voice/text match exactly.
+    // We still prefetch UI data for the card, but the message content should be the agent's response.
+    pendingAnswerOverrideRef.current = null;
 
     // Send message to ElevenLabs agent (will respond with voice)
     elevenLabsConversation.sendUserMessage(message);

@@ -891,3 +891,68 @@ The `onDisconnect` handler categorizes disconnections:
 2. **Console logs**: Look for `🔴 [Disconnect]` messages with reason details
 3. **Reconnection logs**: `🔄 [Reconnect]` shows automatic reconnection attempts
 4. **Keepalive logs**: `🔄 Sent keepalive ping` every 30 seconds confirms connection is active
+
+## ElevenLabs Tool Schema Configuration
+
+### CRITICAL: Parameter Placement in Tool Schemas
+
+**Body parameters MUST be at the top level in ElevenLabs tool schemas, NOT nested inside other parameters.**
+
+**Problem Example:**
+```
+User: "How many buy stock trades in Apple in Nov"
+Expected: 4 stock trades
+Actual: 9 trades (4 stock + 5 options)
+```
+
+**Root Cause:** `security_type` parameter was nested inside `date_filter` object instead of being a top-level body parameter. The webhook received an empty `security_type` and didn't filter.
+
+**Correct Schema Structure:**
+```
+Body Parameters (top-level):
+├── symbol (string)
+├── time_period (string)
+├── trade_type (string, enum: "buy", "sell")
+├── security_type (string, enum: "stock", "option")  ← TOP LEVEL
+└── date_filter (object)
+    ├── type (string)
+    ├── startDate (string)
+    └── endDate (string)
+```
+
+**WRONG (nested - will not work):**
+```
+date_filter (object)
+├── security_type (string)  ← WRONG - nested inside date_filter
+├── type (string)
+└── ...
+```
+
+### Tools Requiring `security_type` Parameter
+
+These tools need `security_type` as a **top-level body parameter** with enum values `["stock", "option"]`:
+
+| Tool | Purpose |
+|------|---------|
+| `get_time_based_trades` | Time-period trade queries |
+| `get_detailed_trades` | Detailed trade history |
+
+### How to Verify in ElevenLabs Dashboard
+
+1. Go to ElevenLabs Conversational AI dashboard
+2. Select agent → Tools section
+3. Click on the tool (e.g., `get_time_based_trades`)
+4. Check "Body" parameters section
+5. Verify `security_type` is listed at the TOP LEVEL (not inside `date_filter`)
+6. Verify enum values include: `stock`, `option`
+
+### Webhook Parameter Extraction
+
+The webhook extracts `security_type` from multiple possible locations:
+
+```typescript
+const securityType = body.security_type || body.parameters?.security_type ||
+                     body.body?.security_type || body.body?.parameters?.security_type;
+```
+
+If `security_type` is nested inside `date_filter` in the schema, none of these paths will find it.

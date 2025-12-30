@@ -568,7 +568,22 @@ FIFO-matched profitable trades with realized gains.
   - "June 1st to the 7th" (date range)
   - "August and September" (multi-month)
   - "July 1st and August 1st" (discrete dates)
-- symbol (optional), calculation (optional: "average"), trade_type (optional)
+- symbol (optional): Stock ticker
+- trade_type (optional): "buy" or "sell"
+- security_type (optional): "stock" or "option" - **CRITICAL: Include this when user says "stock trades" or "option trades"**
+- calculation (optional: "average")
+
+**CRITICAL: security_type parameter extraction:**
+| User Says | security_type |
+|-----------|---------------|
+| "stock trades", "buy stock trades", "sell stock trades" | "stock" |
+| "option trades", "buy option trades", "sell option trades" | "option" |
+| "trades" (no qualifier) | omit (returns all) |
+
+**Examples:**
+- "How many buy stock trades in Apple in Nov?" → symbol: AAPL, trade_type: buy, security_type: stock, time_period: November
+- "Show my option trades last week" → security_type: option, time_period: last week
+- "Sell stock trades for Tesla this month" → symbol: TSLA, trade_type: sell, security_type: stock, time_period: this month
 ## get_options (PREFERRED FOR ALL OPTION QUERIES)
 **Dedicated options tool with 5 query types. ALWAYS use this for option-related queries instead of get_advanced_trades.**
 
@@ -768,6 +783,9 @@ Company fundamental data: overview, metrics, financials, earnings, dividends.
  | "Profitable trades for Nvidia" | get_profitable_trades |
  | "Trades from last week" | get_time_based_trades |
  | "Apple trades last month" | get_time_based_trades + symbol |
+ | **"Buy stock trades in Apple in Nov"** | **get_time_based_trades + symbol + trade_type: buy + security_type: stock** |
+ | **"Option trades last week"** | **get_time_based_trades + security_type: option** |
+ | **"Sell stock trades this month"** | **get_time_based_trades + trade_type: sell + security_type: stock** |
  | "Highest sell price for Google?" | get_trade_stats |
  | "Average price I bought Apple?" | get_trade_stats + time_period |
  | **OPTIONS QUERIES - USE get_options:** |

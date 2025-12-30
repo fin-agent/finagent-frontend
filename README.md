@@ -290,6 +290,66 @@ Provides company fundamental data from **Alpha Vantage API** (free tier: 25 call
 - `metric_type` (required for metric): One of `pe_ratio`, `market_cap`, `beta`, `eps`, `dividend_yield`, `52_week_high`, `52_week_low`, etc.
 - `statement_type` (optional for financials): `income`, `balance`, or `cashflow`
 
+### Tool Schema Configuration (CRITICAL)
+
+**Body parameters MUST be at the top level in ElevenLabs tool schemas, NOT nested inside other parameters.**
+
+When configuring tools in the ElevenLabs dashboard, parameters that should filter webhook queries must be placed at the **top level** of the Body Parameters section. Nesting them inside other objects (like `date_filter`) causes the webhook to not receive them.
+
+#### Problem Example
+
+```
+User: "How many buy stock trades in Apple in Nov"
+Expected: 4 stock trades
+Actual: 9 trades (4 stock + 5 options)
+```
+
+**Root Cause:** The `security_type` parameter was nested inside the `date_filter` object instead of being a top-level body parameter, so the webhook received `security_type: undefined`.
+
+#### Correct Schema Structure
+
+```
+Body Parameters (top-level):
+├── symbol (string)
+├── time_period (string)
+├── trade_type (string, enum: "buy", "sell")
+├── security_type (string, enum: "stock", "option")  ← MUST BE TOP LEVEL
+└── date_filter (object)
+    ├── type (string)
+    ├── startDate (string)
+    ├── endDate (string)
+    └── description (string)
+```
+
+#### Wrong Schema Structure (causes bugs)
+
+```
+Body Parameters:
+├── symbol
+├── time_period
+├── trade_type
+└── date_filter (object)
+    ├── type
+    ├── startDate
+    ├── endDate
+    ├── description
+    └── security_type  ← WRONG! Webhook won't receive this
+```
+
+#### Tools Requiring `security_type` Parameter
+
+| Tool | Parameter | Enum Values |
+|------|-----------|-------------|
+| `get_time_based_trades` | `security_type` | `"stock"`, `"option"` |
+| `get_detailed_trades` | `security_type` | `"stock"`, `"option"` |
+
+#### How to Verify in ElevenLabs Dashboard
+
+1. Go to **Tools** section in ElevenLabs agent configuration
+2. Click on the tool (e.g., `get_time_based_trades`)
+3. Under **Body Parameters**, verify `security_type` is at the TOP LEVEL (same indent as `symbol`, `time_period`, etc.)
+4. Verify `security_type` has **enum values**: `stock`, `option`
+
 ### Connection Stability
 
 The voice agent includes automatic reconnection and keepalive mechanisms:

@@ -234,9 +234,15 @@ export async function POST(req: NextRequest) {
       const maxDate = data.find(d => d[balanceField] === max)?.Date;
       const minDate = data.find(d => d[balanceField] === min)?.Date;
 
+      // Get current (most recent) balance - first entry since ordered descending
+      const currentRecord = data[0];
+      const currentBalance = currentRecord?.[balanceField] || 0;
+      const currentBalanceDate = currentRecord?.Date || '';
+
       const balanceType = queryType === 'debit_balances' ? 'debit' : 'credit';
       const periodLabel = description || timePeriod || 'the period';
       // Use formatted dates for voice response
+      const currentDateFormatted = formatDate(currentBalanceDate);
       const highestDateFormatted = formatDate(maxDate || '');
       const lowestDateFormatted = formatDate(minDate || '');
 
@@ -244,16 +250,19 @@ export async function POST(req: NextRequest) {
       const uiData: AccountBalanceUIData = {
         queryType,
         timePeriod: periodLabel,
-        asOfDate: data[0]?.Date || '',
+        asOfDate: currentBalanceDate,
         avgBalance: avg,
         maxBalance: max,
         minBalance: min,
         maxBalanceDate: maxDate || '', // Raw date for UI
         minBalanceDate: minDate || '', // Raw date for UI
+        debitBalance: queryType === 'debit_balances' ? currentBalance : undefined,
+        creditBalance: queryType === 'credit_balances' ? currentBalance : undefined,
       };
 
+      // Voice response starts with current balance, then stats
       return NextResponse.json({
-        response: `Your Average ${balanceType} balance for ${periodLabel} is ${formatCurrency(avg)}. The Highest ${balanceType} balance was on ${highestDateFormatted} in the amount of ${formatCurrency(max)}. The Lowest ${balanceType} balance was on ${lowestDateFormatted} in the amount of ${formatCurrency(min)}`,
+        response: `Your ${balanceType} balance as of ${currentDateFormatted} is ${formatCurrency(currentBalance)}. Your average ${balanceType} balance for ${periodLabel} is ${formatCurrency(avg)}. The highest ${balanceType} balance was ${formatCurrency(max)} on ${highestDateFormatted}. The lowest ${balanceType} balance was ${formatCurrency(min)} on ${lowestDateFormatted}.`,
         uiData,
       });
     }

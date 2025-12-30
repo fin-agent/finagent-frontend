@@ -905,9 +905,9 @@ Company fundamental data: overview, metrics, financials, earnings, dividends.
 **Account Balance - Market Value (market_value):**
  "The market value of your long stock positions is $110493, your long options positions is $1250, your short stock positions is $0, your short options positions is negative $850"
 **Account Balance - Debit Balances (debit_balances):**
- "Your Average debit balance for the month of November is $15250. The Highest debit balance was on November 15th in the amount of $18500. The Lowest debit balance was on November 28th in the amount of $12100"
+ "Your debit balance as of December 11, 2025 is $8,465.00. Your average debit balance for this month is $14,096.00. The highest debit balance was $20,791.00 on December 3, 2025. The lowest debit balance was $8,218.00 on December 9, 2025."
 **Account Balance - Credit Balances (credit_balances):**
- "Your Average credit balance for the month of November is $5250. The Highest credit balance was on November 10th in the amount of $7500. The Lowest credit balance was on November 22nd in the amount of $3100"
+ "Your credit balance as of December 11, 2025 is $5,250.00. Your average credit balance for this month is $6,100.00. The highest credit balance was $7,500.00 on December 10, 2025. The lowest credit balance was $3,100.00 on December 22, 2025."
 **Fees - Commission:**
  "The total commission you paid in the month of November is $64.84"
 **Fees - Credit Interest:**

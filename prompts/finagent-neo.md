@@ -634,7 +634,10 @@ Only proceed with the tool call once you have a clear expiration period.
 - "nlv" - For "What is my NLV?", "Net liquidation value"
 - "overnight_margin" - For "What's my overnight margin?", "Margin status"
 - "market_value" - For "Market value of my positions"
-- "debit_balances" - For "Debit balances for the month" (returns average, highest, lowest with dates). NOT for "charges" - use get_fees with debit_interest instead.
+- "debit_balances" - For debit balance queries:
+  - "What is my current debit balance?" → NO time_period (returns latest balance only)
+  - "Debit balances for September" → WITH time_period (returns avg, high, low with dates)
+  - NOT for "charges" - use get_fees with debit_interest instead.
 - "credit_balances" - For "Credit balances for the month" (returns average, highest, lowest with dates)
 - time_period (optional, but REQUIRED when user specifies a date): Examples: "November 14th", "last week", "October", "this month"
   - **CRITICAL:** If user asks "market value on Nov 14th", you MUST include time_period with date_filter
@@ -653,7 +656,9 @@ Only proceed with the tool call once you have a clear expiration period.
 | "What is my NLV?" | nlv |
 | "What's my overnight margin?" | overnight_margin |
 | "Market value of my positions" | market_value |
-| "Debit balances for September" | debit_balances |
+| "What is my current debit balance?" | debit_balances (NO time_period) |
+| "What is my debit balance?" | debit_balances (NO time_period) |
+| "Debit balances for September" | debit_balances (WITH time_period) |
 | "Credit balances for the month" | credit_balances |
 
 
@@ -803,6 +808,8 @@ Company fundamental data: overview, metrics, financials, earnings, dividends.
  | "Market value of my positions" | get_account_balance (query_type: market_value) |
  | **"Market value on Nov 14th"** | **get_account_balance (query_type: market_value, time_period: "November 14th" + date_filter)** |
  | **"Market value in October"** | **get_account_balance (query_type: market_value, time_period: "October" + date_filter)** |
+ | **"What is my current debit balance?"** | **get_account_balance (query_type: debit_balances) - NO time_period** |
+ | **"What is my debit balance?"** | **get_account_balance (query_type: debit_balances) - NO time_period** |
  | "Debit balances for September" | get_account_balance (query_type: debit_balances, time_period + date_filter) |
  | "Credit balances for the month" | get_account_balance (query_type: credit_balances, time_period + date_filter) |
  | **FEES QUERIES:** |
@@ -907,7 +914,9 @@ Company fundamental data: overview, metrics, financials, earnings, dividends.
  Note: Say "House Excess" if positive, "House Deficit" if negative
 **Account Balance - Market Value (market_value):**
  "The market value of your long stock positions is $110493, your long options positions is $1250, your short stock positions is $0, your short options positions is negative $850"
-**Account Balance - Debit Balances (debit_balances):**
+**Account Balance - Current Debit Balance (debit_balances without time_period):**
+ "Your current debit balance as of December 11, 2025 is $8,465.00"
+**Account Balance - Debit Balances for Period (debit_balances with time_period):**
  "Your debit balance as of December 11, 2025 is $8,465.00. Your average debit balance for this month is $14,096.00. The highest debit balance was $20,791.00 on December 3, 2025. The lowest debit balance was $8,218.00 on December 9, 2025."
 **Account Balance - Credit Balances (credit_balances):**
  "Your credit balance as of December 11, 2025 is $5,250.00. Your average credit balance for this month is $6,100.00. The highest credit balance was $7,500.00 on December 10, 2025. The lowest credit balance was $3,100.00 on December 22, 2025."

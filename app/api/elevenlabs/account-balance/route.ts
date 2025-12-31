@@ -175,6 +175,48 @@ export async function POST(req: NextRequest) {
 
     // For balance trends (debit/credit balances), get multiple records
     if (queryType === 'debit_balances' || queryType === 'credit_balances') {
+      // Detect if this is a single-date query (e.g., "Dec 11th")
+      // In this case, we want to show that date's balance BUT calculate avg/high/low for the entire MONTH
+      const isSingleDateQuery = startDate && endDate && startDate === endDate;
+      let specificDateBalance: number | null = null;
+      let specificDate: string | null = null;
+      let monthLabel: string = '';
+
+      if (isSingleDateQuery) {
+        // First, get the specific date's balance
+        const { data: specificData } = await supabase
+          .from('AccountBalance')
+          .select('Date, DebitBalance, CreditBalance')
+          .eq('AccountCode', ACCOUNT_CODE)
+          .eq('Date', startDate)
+          .single();
+
+        if (specificData) {
+          const balanceField = queryType === 'debit_balances' ? 'DebitBalance' : 'CreditBalance';
+          specificDateBalance = specificData[balanceField] || 0;
+          specificDate = specificData.Date;
+        }
+
+        // Expand to entire month for avg/high/low calculations
+        const dateParts = startDate.split('-');
+        const year = dateParts[0];
+        const month = dateParts[1];
+        const monthStart = `${year}-${month}-01`;
+        // Get last day of month
+        const lastDay = new Date(parseInt(year), parseInt(month), 0).getDate();
+        const monthEnd = `${year}-${month}-${String(lastDay).padStart(2, '0')}`;
+
+        // Get month name for label
+        const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
+                          'July', 'August', 'September', 'October', 'November', 'December'];
+        monthLabel = `${monthNames[parseInt(month) - 1]} ${year}`;
+
+        // Update start/end to cover entire month
+        startDate = monthStart;
+        endDate = monthEnd;
+        console.log(`[account-balance] Single date query detected, expanding to month: ${monthStart} to ${monthEnd}`);
+      }
+
       let query = supabase
         .from('AccountBalance')
         .select('Date, DebitBalance, CreditBalance')
@@ -246,12 +288,40 @@ export async function POST(req: NextRequest) {
       const maxDate = data.find(d => d[balanceField] === max)?.Date;
       const minDate = data.find(d => d[balanceField] === min)?.Date;
 
+      const balanceType = queryType === 'debit_balances' ? 'debit' : 'credit';
+
+      // Handle single-date query differently: show specific date balance + month stats
+      if (isSingleDateQuery && specificDateBalance !== null && specificDate) {
+        const specificDateFormatted = formatDate(specificDate);
+        const highestDateFormatted = formatDate(maxDate || '');
+        const lowestDateFormatted = formatDate(minDate || '');
+
+        // Use raw dates for UI so the component can format them
+        const uiData: AccountBalanceUIData = {
+          queryType,
+          timePeriod: monthLabel,
+          asOfDate: specificDate,
+          avgBalance: avg,
+          maxBalance: max,
+          minBalance: min,
+          maxBalanceDate: maxDate || '',
+          minBalanceDate: minDate || '',
+          debitBalance: queryType === 'debit_balances' ? specificDateBalance : undefined,
+          creditBalance: queryType === 'credit_balances' ? specificDateBalance : undefined,
+        };
+
+        // Response format: specific date balance + month's avg/high/low
+        return NextResponse.json({
+          response: `Your ${balanceType} balance as of ${specificDateFormatted} is ${formatCurrency(specificDateBalance)}. Your average ${balanceType} balance for the month of ${monthLabel} is ${formatCurrency(avg)}. The highest ${balanceType} balance was on ${highestDateFormatted} in the amount of ${formatCurrency(max)}. The lowest ${balanceType} balance was on ${lowestDateFormatted} in the amount of ${formatCurrency(min)}.`,
+          uiData,
+        });
+      }
+
       // Get current (most recent) balance - first entry since ordered descending
       const currentRecord = data[0];
       const currentBalance = currentRecord?.[balanceField] || 0;
       const currentBalanceDate = currentRecord?.Date || '';
 
-      const balanceType = queryType === 'debit_balances' ? 'debit' : 'credit';
       const periodLabel = description || timePeriod || 'the period';
       // Use formatted dates for voice response
       const currentDateFormatted = formatDate(currentBalanceDate);

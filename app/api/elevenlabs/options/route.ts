@@ -201,6 +201,7 @@ export async function POST(req: NextRequest) {
         // Fall back to parsing expiration string
         const expResolved = parseTimePeriodToResolvedDates(expiration);
         if (expResolved && expResolved.startDate && expResolved.endDate) {
+          console.log(`[options] Expiration filter: ${expResolved.startDate} to ${expResolved.endDate}`);
           query = query.gte('Expiration', expResolved.startDate).lte('Expiration', expResolved.endDate);
         } else {
           console.log(`Could not parse expiration "${expiration}", skipping expiration filter`);

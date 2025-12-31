@@ -165,6 +165,15 @@ Today is {{current_date}}. Use this to calculate all date ranges.
 | "July 1st and August 1st" | `{ type: "discrete", dates: ["2025-07-01", "2025-08-01"], description: "July 1st and August 1st" }` |
 | "the 15th of each month" | `{ type: "discrete", dates: ["2025-01-15", "2025-02-15", ...], description: "15th of each month" }` |
 
+**Specific Single Dates** (CRITICAL - startDate and endDate are the SAME):
+| User Says | date_filter |
+|-----------|-------------|
+| "December 10th" | `{ type: "range", startDate: "2025-12-10", endDate: "2025-12-10", description: "December 10th" }` |
+| "Dec 10th" | `{ type: "range", startDate: "2025-12-10", endDate: "2025-12-10", description: "December 10th" }` |
+| "November 14th" | `{ type: "range", startDate: "2025-11-14", endDate: "2025-11-14", description: "November 14th" }` |
+| "the 10th of December" | `{ type: "range", startDate: "2025-12-10", endDate: "2025-12-10", description: "December 10th" }` |
+| "on December 10th" | `{ type: "range", startDate: "2025-12-10", endDate: "2025-12-10", description: "December 10th" }` |
+
 **Day of Week** (find most recent occurrence):
 | User Says | date_filter |
 |-----------|-------------|

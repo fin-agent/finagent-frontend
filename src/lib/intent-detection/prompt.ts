@@ -94,8 +94,14 @@ ${intents.map(i => `### ${i.id}
   - "first half" / "H1" → { "type": "range", "startDate": "2025-01-01", "endDate": "2025-06-30", "description": "H1 2025" }
   - "second half" / "H2" → { "type": "range", "startDate": "2025-07-01", "endDate": "2025-12-31", "description": "H2 2025" }
 
+  Single specific date examples (CRITICAL - startDate and endDate are the SAME):
+  - "December 10th" → { "type": "range", "startDate": "2025-12-10", "endDate": "2025-12-10", "description": "December 10th" }
+  - "Dec 10th" → { "type": "range", "startDate": "2025-12-10", "endDate": "2025-12-10", "description": "December 10th" }
+  - "November 14th" → { "type": "range", "startDate": "2025-11-14", "endDate": "2025-11-14", "description": "November 14th" }
+  - "the 10th of December" → { "type": "range", "startDate": "2025-12-10", "endDate": "2025-12-10", "description": "December 10th" }
+
   **IMPORTANT**: Use current calendar year (2025). If a date would be in the future relative to today, use the previous year.
-  **CRITICAL**: For quarters, single months, and half-years, ALWAYS use type "range" with resolved startDate/endDate - NOT type "relative".
+  **CRITICAL**: For quarters, single months, half-years, AND specific single dates, ALWAYS use type "range" with resolved startDate/endDate - NOT type "relative".
 - **tradeType**: "buy"/"bought"/"purchased"/"long" -> "buy", "sell"/"sold"/"short"/"written" -> "sell"
 - **securityType**: "stock"/"stocks"/"shares"/"equity" -> "stock", "option"/"options"/"contracts" -> "option"
   - IMPORTANT: Only extract securityType when explicitly mentioned. "Apple trades" = no filter. "Apple stock trades" = stock only.

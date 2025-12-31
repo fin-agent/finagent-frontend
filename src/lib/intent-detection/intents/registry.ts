@@ -302,6 +302,40 @@ export const intentRegistry: IntentDefinition[] = [
     optionalEntities: ['symbol', 'timePeriod'],
   },
 
+  // === FUND TRANSFERS DOMAIN ===
+  {
+    id: 'transfers.query',
+    domain: 'transfers',
+    cardType: 'fund-transfers',
+    description: 'User asks about fund movements, money transfers, deposits, withdrawals, wire transfers, ACH transfers, or money brought into/out of the account. Keywords: wire, ACH, deposit, withdraw, fund movement, bring in, took out.',
+    examples: [
+      // Money in/out queries
+      'Show me all money that I wired in this year',
+      'How much money did I bring into my account this year?',
+      'Show all fund movements into the account in December',
+      'How much did I deposit this month?',
+      'What deposits did I make in October?',
+      // Withdrawal queries
+      'How much did I withdraw in September?',
+      'Show my withdrawals this year',
+      'What did I take out of my account last month?',
+      // Specific amount queries
+      'Which day did I withdraw 1000?',
+      'When did I deposit 5000?',
+      // Transfer type queries
+      'How many wire transfers did I do this year?',
+      'Show me all my wire transfers',
+      'ACH transfers this month',
+      'All my ACH deposits',
+      // General fund movement queries
+      'Show all fund movements',
+      'Fund transfers this year',
+      'Account activity for December',
+    ],
+    requiredEntities: [],
+    optionalEntities: ['transferType', 'direction', 'timePeriod', 'amount'],
+  },
+
   // === MARKET DATA DOMAIN ===
   {
     id: 'market.stock_quote',

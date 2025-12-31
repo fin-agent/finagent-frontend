@@ -18,6 +18,7 @@ import { ExpiringOptionsTable } from './generative-ui/ExpiringOptionsTable';
 import { LastOptionTradeCard } from './generative-ui/LastOptionTradeCard';
 import { AccountSummary, type AccountQueryType } from './generative-ui/AccountSummary';
 import { FeesSummary, type FeeType } from './generative-ui/FeesSummary';
+import { FundTransfersCard, type TransferType, type DirectionType } from './generative-ui/FundTransfersCard';
 import { StockQuoteCard } from './generative-ui/StockQuoteCard';
 import { CompanyOverviewCard } from './generative-ui/CompanyOverviewCard';
 import { OptionQuoteCard } from './generative-ui/OptionQuoteCard';
@@ -38,7 +39,7 @@ interface Conversation {
 }
 
 interface TradeUIData {
-  type: 'summary' | 'detailed' | 'stats' | 'profitable' | 'time-based' | 'option-stats' | 'average-price' | 'advanced-options' | 'highest-strike' | 'total-premium' | 'expiring-options' | 'last-option' | 'account-balance' | 'debit-balance-summary' | 'fees' | 'options'
+  type: 'summary' | 'detailed' | 'stats' | 'profitable' | 'time-based' | 'option-stats' | 'average-price' | 'advanced-options' | 'highest-strike' | 'total-premium' | 'expiring-options' | 'last-option' | 'account-balance' | 'debit-balance-summary' | 'fees' | 'options' | 'fund-transfers'
     // Market data types
     | 'stock-quote' | 'option-quote' | 'price-chart' | 'news' | 'halt-status'
     // Fundamentals types
@@ -62,6 +63,8 @@ interface TradeUIData {
   optionData?: unknown; // For combined stock + option stats
   accountQueryType?: AccountQueryType; // For account balance queries
   feeType?: FeeType; // For fees queries
+  transferType?: TransferType; // For fund transfers queries
+  direction?: DirectionType; // For fund transfers queries
   responseText?: string; // Voice response text from webhook - use this for chat message
 }
 
@@ -86,6 +89,8 @@ interface QueryIntent {
   accountQueryType?: AccountQueryType;
   feeType?: FeeType;
   dateFilter?: { type: string; startDate?: string; endDate?: string; description: string };
+  transferType?: TransferType;  // For fund transfers: all, wire, ach, journal
+  direction?: DirectionType;    // For fund transfers: all, in, out
 }
 
 interface QueryIntentWithConfidence extends QueryIntent {
@@ -1408,6 +1413,66 @@ const UnifiedAssistant: React.FC = () => {
       return result;
     };
 
+    // Fund transfers tool for deposits, withdrawals, wire/ACH transfers
+    const get_fund_transfers = async (parameters: Record<string, unknown>) => {
+      console.log('💰 [Fund Transfers Tool] ================================');
+      console.log('💰 [Fund Transfers Tool] Parameters:', JSON.stringify(parameters, null, 2));
+
+      // CRITICAL: Await LLM classifier to get dateFilter (fixes race condition)
+      const llmIntent = await awaitLLMClassifier();
+
+      // Extract parameters from tool call and LLM intent
+      const rawTransferType = getString(parameters, 'transfer_type');
+      const llmTransferType = llmIntent?.transferType;
+      const transferType = rawTransferType || llmTransferType || 'all';
+
+      const rawDirection = getString(parameters, 'direction');
+      const llmDirection = llmIntent?.direction;
+      const direction = rawDirection || llmDirection || 'all';
+
+      const rawTimePeriod = getString(parameters, 'time_period');
+      const llmTimePeriod = llmIntent?.timePeriod;
+      const timePeriod = rawTimePeriod || llmTimePeriod || 'this year';
+
+      const rawDateFilter = parameters.date_filter as Record<string, unknown> | undefined;
+      const llmDateFilter = llmIntent?.dateFilter;
+      const dateFilter = rawDateFilter || llmDateFilter;
+
+      const amount = parameters.amount as number | undefined;
+
+      console.log('💰 [Fund Transfers Tool] Using transferType:', transferType, '| direction:', direction, '| timePeriod:', timePeriod, '| dateFilter:', dateFilter);
+
+      // SINGLE FETCH: Voice endpoint returns BOTH response AND uiData
+      const voicePayload = await postJson('/api/elevenlabs/fund-transfers', {
+        transfer_type: transferType,
+        direction,
+        time_period: timePeriod,
+        date_filter: dateFilter,
+        amount,
+      });
+
+      // Store UI data from voice response (guaranteed sync)
+      if (voicePayload && typeof voicePayload === 'object' && 'uiData' in voicePayload) {
+        toolUIDataRef.current = {
+          type: 'fund-transfers',
+          symbol: '',
+          transferType: transferType as TransferType,
+          direction: direction as DirectionType,
+          timePeriod,
+          data: voicePayload.uiData
+        };
+        console.log('💰 [Fund Transfers Tool] Set toolUIDataRef from voice response:', toolUIDataRef.current);
+        resolveToolDataPromise(toolUIDataRef.current);
+      } else {
+        resolveToolDataPromise(null);
+      }
+
+      const result = unwrapResponse(voicePayload);
+      console.log('💰 [Fund Transfers Tool] Webhook Response:', result);
+      console.log('💰 [Fund Transfers Tool] ================================');
+      return result;
+    };
+
     // Dedicated Options tool for all options queries
     // Query types: bulk, last, expiring, highest_strike, total_premium
     const get_options = async (parameters: Record<string, unknown>) => {
@@ -1499,6 +1564,7 @@ const UnifiedAssistant: React.FC = () => {
       get_options,
       get_account_balance,
       get_fees,
+      get_fund_transfers,
 
       // Aliases (in case tool names are camelCased in ElevenLabs UI)
       getTradeSummary: get_trade_summary,
@@ -1510,6 +1576,7 @@ const UnifiedAssistant: React.FC = () => {
       getOptions: get_options,
       getAccountBalance: get_account_balance,
       getFees: get_fees,
+      getFundTransfers: get_fund_transfers,
     };
   }, []);
 
@@ -1726,7 +1793,7 @@ const UnifiedAssistant: React.FC = () => {
     type: TradeUIData['type'],
     tradeType?: 'buy' | 'sell' | 'all',
     timePeriod?: string,
-    extraParams?: { callPut?: 'call' | 'put'; expiration?: string; aggregation?: string; accountQueryType?: AccountQueryType; feeType?: FeeType; includeTrades?: boolean; dateFilter?: { type: string; startDate?: string; endDate?: string; description: string }; queryType?: string; strike?: number; chartPeriod?: string; securityType?: 'stock' | 'option' }
+    extraParams?: { callPut?: 'call' | 'put'; expiration?: string; aggregation?: string; accountQueryType?: AccountQueryType; feeType?: FeeType; includeTrades?: boolean; dateFilter?: { type: string; startDate?: string; endDate?: string; description: string }; queryType?: string; strike?: number; chartPeriod?: string; securityType?: 'stock' | 'option'; transferType?: TransferType; direction?: DirectionType; amount?: number }
   ): Promise<TradeUIData | null> => {
     try {
       let endpoint: string;
@@ -1954,6 +2021,23 @@ const UnifiedAssistant: React.FC = () => {
         const voicePayload = await res.json();
         const uiData = voicePayload?.uiData || voicePayload;
         return { type, symbol, feeType: extraParams?.feeType, timePeriod, data: uiData };
+      } else if (type === 'fund-transfers') {
+        // SINGLE FETCH: Use voice endpoint with uiData
+        endpoint = '/api/elevenlabs/fund-transfers';
+        body = {
+          transfer_type: extraParams?.transferType || 'all',
+          direction: extraParams?.direction || 'all',
+          time_period: timePeriod,
+          amount: extraParams?.amount,
+        };
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const voicePayload = await res.json();
+        const uiData = voicePayload?.uiData || voicePayload;
+        return { type, symbol: '', transferType: extraParams?.transferType, direction: extraParams?.direction, timePeriod, data: uiData };
       } else if (type === 'average-price') {
         endpoint = '/api/average-price';
         const includeTrades = extraParams?.includeTrades ?? true;
@@ -3992,6 +4076,55 @@ const UnifiedAssistant: React.FC = () => {
               symbol={feesData.symbol}
               breakdown={feesData.breakdown}
               suggestion={feesData.suggestion}
+            />
+          </div>
+        );
+      }
+    }
+
+    if (type === 'fund-transfers') {
+      console.log('🎨 Rendering fund transfers card with data:', data);
+      const transfersData = data as {
+        transferType: TransferType;
+        direction: DirectionType;
+        totalAmount: number;
+        transactionCount: number;
+        timePeriod: string;
+        totalIn: number;
+        totalOut: number;
+        countIn: number;
+        countOut: number;
+        transfers?: Array<{
+          date: string;
+          type: string;
+          direction: 'in' | 'out';
+          amount: number;
+          transNumber: string;
+        }>;
+        suggestion?: {
+          period: string;
+          amount: number;
+          count: number;
+          startDate: string;
+          endDate: string;
+        } | null;
+      };
+
+      if (transfersData.timePeriod) {
+        return (
+          <div style={{ marginTop: '12px' }}>
+            <FundTransfersCard
+              transferType={tradeUI.transferType || transfersData.transferType}
+              direction={tradeUI.direction || transfersData.direction}
+              totalAmount={transfersData.totalAmount}
+              transactionCount={transfersData.transactionCount}
+              timePeriod={transfersData.timePeriod}
+              totalIn={transfersData.totalIn}
+              totalOut={transfersData.totalOut}
+              countIn={transfersData.countIn}
+              countOut={transfersData.countOut}
+              transfers={transfersData.transfers}
+              suggestion={transfersData.suggestion}
             />
           </div>
         );

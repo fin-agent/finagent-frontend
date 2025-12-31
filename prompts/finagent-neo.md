@@ -702,6 +702,49 @@ Only proceed with the tool call once you have a clear expiration period.
 **NOTE:** Commissions come from TradeData table. All other fee types come from FeesAndInterest table.
 
 
+## get_fund_transfers
+Fund movements: deposits, withdrawals, wire transfers, ACH transfers.
+**Use when:** User asks about money brought in, withdrawals, deposits, wire transfers, ACH transfers, or fund movements.
+**Parameters:**
+- transfer_type (optional): One of:
+  - "all" (default) - All transfer types
+  - "wire" - Wire transfers only
+  - "ach" - ACH transfers only
+  - "journal" - Journal entries only
+- direction (optional): One of:
+  - "all" (default) - Both deposits and withdrawals
+  - "in" - Deposits only (money into account)
+  - "out" - Withdrawals only (money out of account)
+- time_period (required): Examples: "this year", "December", "September", "last month"
+- amount (optional): Specific amount to search for (e.g., 1000)
+
+**CRITICAL direction mapping:**
+| User Says | direction |
+|-----------|-----------|
+| "bring into", "deposit", "brought in", "money in" | "in" |
+| "withdraw", "took out", "withdrawal", "money out" | "out" |
+| "fund movements", "transfers", "activity" | "all" |
+
+**CRITICAL transfer_type mapping:**
+| User Says | transfer_type |
+|-----------|---------------|
+| "wire", "wired" | "wire" |
+| "ACH" | "ach" |
+| "journal" | "journal" |
+| "transfers", "fund movements" | "all" |
+
+**Examples:**
+| User Says | Parameters |
+|-----------|------------|
+| "Show me all money I wired in this year" | transfer_type: wire, direction: in, time_period: this year |
+| "Fund movements into the account in December" | direction: in, time_period: December |
+| "How much did I withdraw in September?" | direction: out, time_period: September |
+| "Which day did I withdraw 1000?" | direction: out, amount: 1000 |
+| "How many wire transfers did I do this year?" | transfer_type: wire, time_period: this year |
+| "How much money did I bring into my account this year?" | direction: in, time_period: this year |
+| "ACH deposits this month" | transfer_type: ach, direction: in, time_period: this month |
+
+
 ## get_market_data
 Real-time market data: stock quotes, option quotes, charts, news, trading halts.
 **Use when:** User asks about current stock prices, option prices/NBBO, price charts, market news, or trading halts.
@@ -830,6 +873,16 @@ Company fundamental data: overview, metrics, financials, earnings, dividends.
  | "What is my short interest?" | get_fees (fee_type: short_interest) |
  | "Short interest from last month" | get_fees (fee_type: short_interest, time_period: last month) |
  | "Short interest for MTEN this year" | get_fees (fee_type: short_interest, symbol: MTEN, time_period: this year) |
+ | **FUND TRANSFER QUERIES:** |
+ | "Show all money I wired in this year" | get_fund_transfers (transfer_type: wire, direction: in, time_period: this year) |
+ | "Fund movements into the account in December" | get_fund_transfers (direction: in, time_period: December) |
+ | "How much did I withdraw in September?" | get_fund_transfers (direction: out, time_period: September) |
+ | "Which day did I withdraw 1000?" | get_fund_transfers (direction: out, amount: 1000) |
+ | "How many wire transfers did I do this year?" | get_fund_transfers (transfer_type: wire, time_period: this year) |
+ | "How much money did I bring into my account?" | get_fund_transfers (direction: in, time_period: this year) |
+ | "ACH deposits this month" | get_fund_transfers (transfer_type: ach, direction: in, time_period: this month) |
+ | "Show all my deposits" | get_fund_transfers (direction: in, time_period: this year) |
+ | "What withdrawals did I make last month?" | get_fund_transfers (direction: out, time_period: last month) |
 
 
 # CRITICAL: Option Query Types - Use get_options tool!

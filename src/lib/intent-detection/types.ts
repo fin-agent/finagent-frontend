@@ -21,6 +21,7 @@ export type CardType =
   | 'account-balance'
   | 'debit-balance-summary'
   | 'fees'
+  | 'fund-transfers'
   // Market data card types
   | 'stock-quote'
   | 'option-quote'
@@ -37,7 +38,7 @@ export type CardType =
   | 'none'; // Used for entity extraction from agent responses (no UI card)
 
 // Domain categories for intents
-export type IntentDomain = 'trades' | 'options' | 'account' | 'fees' | 'positions' | 'dividends' | 'tax' | 'market' | 'fundamentals' | 'contextual';
+export type IntentDomain = 'trades' | 'options' | 'account' | 'fees' | 'transfers' | 'positions' | 'dividends' | 'tax' | 'market' | 'fundamentals' | 'contextual';
 
 // Intent definition for the registry
 export interface IntentDefinition {

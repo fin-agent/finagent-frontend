@@ -358,8 +358,13 @@ export async function POST(req: NextRequest) {
           parts.push(`${shortPuts.length} short put${shortPuts.length === 1 ? '' : 's'} (${symbols})`);
         }
 
-        const breakdown = parts.length > 0 ? ` ${parts.join(' and ')}.` : '';
-        response = `${data.length} option${data.length === 1 ? '' : 's'} ${data.length === 1 ? 'is' : 'are'} expiring on ${expiration || 'soon'}.${breakdown}`;
+        // Format expiration date with year for natural speech
+        const formattedExpiration = data[0]?.Expiration
+          ? formatDateForVoice(data[0].Expiration)
+          : expiration || 'soon';
+
+        const breakdown = parts.length > 0 ? `: ${parts.join(' and ')}.` : '.';
+        response = `You have ${data.length} option${data.length === 1 ? '' : 's'} expiring on ${formattedExpiration}${breakdown}`;
         break;
       }
 

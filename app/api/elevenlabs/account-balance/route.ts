@@ -198,7 +198,8 @@ export async function POST(req: NextRequest) {
         }
 
         // Expand to entire month for avg/high/low calculations
-        const dateParts = startDate.split('-');
+        // Non-null assertion is safe here because isSingleDateQuery checks startDate && endDate
+        const dateParts = startDate!.split('-');
         const year = dateParts[0];
         const month = dateParts[1];
         const monthStart = `${year}-${month}-01`;

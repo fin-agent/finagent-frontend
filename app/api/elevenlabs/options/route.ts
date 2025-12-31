@@ -334,12 +334,32 @@ export async function POST(req: NextRequest) {
       }
 
       case 'expiring': {
-        // Options expiring on a date
-        const totalContracts = data.reduce((sum, t) => sum + parseFloat(t.OptionContracts || '0'), 0);
-        const callCount = data.filter(t => t['Call/Put'] === 'C').length;
-        const putCount = data.filter(t => t['Call/Put'] === 'P').length;
+        // Options expiring on a date - build detailed response with symbols
+        const longCalls = data.filter(t => t['Call/Put'] === 'C' && t.TradeType === 'B');
+        const shortCalls = data.filter(t => t['Call/Put'] === 'C' && t.TradeType === 'S');
+        const longPuts = data.filter(t => t['Call/Put'] === 'P' && t.TradeType === 'B');
+        const shortPuts = data.filter(t => t['Call/Put'] === 'P' && t.TradeType === 'S');
 
-        response = `You have ${data.length} option${data.length === 1 ? '' : 's'} expiring ${expiration || 'soon'} totaling ${totalContracts} contracts. That's ${callCount} call${callCount === 1 ? '' : 's'} and ${putCount} put${putCount === 1 ? '' : 's'}.`;
+        const parts: string[] = [];
+        if (longCalls.length > 0) {
+          const symbols = longCalls.map(t => t.UnderlyingSymbol).join(', ');
+          parts.push(`${longCalls.length} long call${longCalls.length === 1 ? '' : 's'} (${symbols})`);
+        }
+        if (shortCalls.length > 0) {
+          const symbols = shortCalls.map(t => t.UnderlyingSymbol).join(', ');
+          parts.push(`${shortCalls.length} short call${shortCalls.length === 1 ? '' : 's'} (${symbols})`);
+        }
+        if (longPuts.length > 0) {
+          const symbols = longPuts.map(t => t.UnderlyingSymbol).join(', ');
+          parts.push(`${longPuts.length} long put${longPuts.length === 1 ? '' : 's'} (${symbols})`);
+        }
+        if (shortPuts.length > 0) {
+          const symbols = shortPuts.map(t => t.UnderlyingSymbol).join(', ');
+          parts.push(`${shortPuts.length} short put${shortPuts.length === 1 ? '' : 's'} (${symbols})`);
+        }
+
+        const breakdown = parts.length > 0 ? ` ${parts.join(' and ')}.` : '';
+        response = `${data.length} option${data.length === 1 ? '' : 's'} ${data.length === 1 ? 'is' : 'are'} expiring on ${expiration || 'soon'}.${breakdown}`;
         break;
       }
 

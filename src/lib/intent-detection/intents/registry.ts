@@ -173,7 +173,7 @@ export const intentRegistry: IntentDefinition[] = [
     id: 'options.expiring',
     domain: 'options',
     cardType: 'expiring-options',
-    description: 'User asks about options EXPIRING soon (tomorrow, this week, this month). Keywords: "expiring", "expire", "expiration".',
+    description: 'User asks about options EXPIRING on a date or time period. Keywords: "expiring", "expire", "expired", "expiration". CRITICAL: Use this intent when user mentions options + expiration date (even specific dates like "Dec 20th", "December 20th", "on the 20th").',
     examples: [
       'What options expire tomorrow?',
       'Options expiring this week',
@@ -181,6 +181,14 @@ export const intentRegistry: IntentDefinition[] = [
       'Show me all options expiring tomorrow',
       'Which options are expiring this week?',
       'Any positions expiring soon?',
+      // Specific date examples
+      'Show me all options that expired on Dec 20th',
+      'Options expiring on December 20th',
+      'What options expire on the 20th?',
+      'Show options that expired Dec 20',
+      'Options expired on Dec 20th',
+      'What options expired yesterday?',
+      'Show me options expiring January 15th',
     ],
     requiredEntities: ['expiration'],
     optionalEntities: ['symbol'],

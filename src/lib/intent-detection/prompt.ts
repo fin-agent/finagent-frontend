@@ -248,8 +248,11 @@ IMPORTANT: When a query contains overlapping signals, use these rules:
 4. **Highest/lowest strike**: Questions about "highest strike" or "lowest strike" go to options.highest_strike.
    - "Highest strike call I sold on AAPL" → options.highest_strike
 
-5. **Expiring options**: Questions about expiration dates go to options.expiring.
-   - "Options expiring tomorrow" → options.expiring
+5. **Expiring options**: Questions about option expiration dates go to options.expiring. CRITICAL: Keywords "expire", "expired", "expiring", "expiration" with options = options.expiring intent. The date mentioned is the EXPIRATION date, not trade date.
+   - "Options expiring tomorrow" → options.expiring (expiration: "tomorrow")
+   - "Show me all options that expired on Dec 20th" → options.expiring (expiration: "Dec 20th")
+   - "Options expired on December 20th" → options.expiring (expiration: "December 20th")
+   - "What options expire on the 15th?" → options.expiring (expiration: "the 15th")
 
 6. **Time-based trades (no option keywords)**: Only use trades.time_based when asking about GENERAL trades with a time period and NO option-specific keywords.
    - "What did I trade yesterday?" → trades.time_based
@@ -319,6 +322,18 @@ Response: {"intent": "trades.detailed", "confidence": 0.93, "entities": {"symbol
 
 Query: "What options expire tomorrow?"
 Response: {"intent": "options.expiring", "confidence": 0.98, "entities": {"expiration": "tomorrow"}}
+
+Query: "Show me all options that expired on Dec 20th"
+Response: {"intent": "options.expiring", "confidence": 0.97, "entities": {"expiration": "Dec 20th"}}
+
+Query: "Options expiring on December 20th"
+Response: {"intent": "options.expiring", "confidence": 0.96, "entities": {"expiration": "December 20th"}}
+
+Query: "What options expired yesterday?"
+Response: {"intent": "options.expiring", "confidence": 0.95, "entities": {"expiration": "yesterday"}}
+
+Query: "Show me options expiring January 15th"
+Response: {"intent": "options.expiring", "confidence": 0.96, "entities": {"expiration": "January 15th"}}
 
 Query: "How much buying power do I have?"
 Response: {"intent": "account.summary", "confidence": 0.92, "entities": {"accountQueryType": "buying_power"}}

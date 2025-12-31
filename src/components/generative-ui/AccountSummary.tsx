@@ -215,20 +215,84 @@ export function AccountSummary(props: AccountSummaryProps) {
     const isDebit = queryType === 'debit_balances';
     const accentColor = isDebit ? colors.red : colors.green;
 
+    // Get the specific date's balance (for single-date queries)
+    const specificDateBalance = isDebit ? props.debitBalance : props.creditBalance;
+    const hasSpecificDateBalance = specificDateBalance !== undefined && specificDateBalance !== null && date;
+    const balanceLabel = isDebit ? 'Debit Balance' : 'Credit Balance';
+
     return (
       <div style={cardStyle} data-testid="account-summary-card" data-query-type={queryType}>
         <AccentLine color={accentColor} />
         <div style={headerStyle}>
           <h3 style={titleStyle}>
-            {isDebit ? 'Debit Balance Trend' : 'Credit Balance Trend'}
+            {isDebit ? 'Debit Balance' : 'Credit Balance'}
           </h3>
           <span style={dateStyle} data-testid="account-card-header-right">{balanceTrend.period}</span>
         </div>
 
+        {/* Featured Specific Date Balance - shown when a single date was queried */}
+        {hasSpecificDateBalance && (
+          <div style={{
+            padding: '20px 18px',
+            background: `linear-gradient(135deg, ${colors.bgCardSecondary} 0%, ${colors.bgCard} 100%)`,
+            borderBottom: `1px solid ${colors.border}`,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div style={{
+                width: '40px',
+                height: '40px',
+                borderRadius: '10px',
+                background: `linear-gradient(135deg, ${accentColor}15 0%, ${accentColor}08 100%)`,
+                border: `1px solid ${accentColor}30`,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: `0 0 12px ${accentColor}10`,
+              }}>
+                <span style={{ fontSize: '18px' }}>{isDebit ? '📉' : '📈'}</span>
+              </div>
+              <div>
+                <div style={{
+                  fontSize: '10px',
+                  fontWeight: 600,
+                  letterSpacing: '0.1em',
+                  textTransform: 'uppercase',
+                  color: colors.textMuted,
+                  marginBottom: '2px',
+                }}>
+                  {balanceLabel}
+                </div>
+                <div style={{
+                  fontSize: '12px',
+                  fontWeight: 500,
+                  color: accentColor,
+                  letterSpacing: '0.02em',
+                }}>
+                  {formatCalendarDate(date)}
+                </div>
+              </div>
+            </div>
+            <div style={{
+              fontSize: '24px',
+              fontWeight: 700,
+              letterSpacing: '-0.02em',
+              color: accentColor,
+              textShadow: `0 0 20px ${accentColor}30`,
+            }}>
+              {formatCurrency(specificDateBalance)}
+            </div>
+          </div>
+        )}
+
+        {/* Month Statistics Section */}
+        <SectionHeader title={`${balanceTrend.period} Statistics`} color={accentColor} />
         <DataRow
           label="Average Balance"
           value={formatCurrency(balanceTrend.average)}
-          valueColor={accentColor}
+          valueColor={colors.textValue}
         />
         <DataRow
           label={`Highest (${formatCalendarDate(balanceTrend.highestDate)})`}

@@ -103,6 +103,8 @@ export async function POST(req: NextRequest) {
     const dateFilter: DateFilter | undefined = body.date_filter || body.parameters?.date_filter ||
                        body.body?.date_filter || body.body?.parameters?.date_filter;
 
+    console.log(`[account-balance] Extracted params: queryType=${queryType}, timePeriod=${timePeriod}, dateFilter=${JSON.stringify(dateFilter)}`);
+
     // Check if this is a "current balance" query - these should skip date parsing
     // and just return the latest available data from the database
     const isCurrentBalanceQuery = !timePeriod ||
@@ -173,6 +175,8 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    console.log(`[account-balance] Resolved dates: type=${resolvedType}, startDate=${startDate}, endDate=${endDate}, dates=${dates ? dates.join(',') : 'none'}`);
+
     // For balance trends (debit/credit balances), get multiple records
     if (queryType === 'debit_balances' || queryType === 'credit_balances') {
       // Detect if this is a single-date query (e.g., "Dec 11th")
@@ -184,17 +188,25 @@ export async function POST(req: NextRequest) {
 
       if (isSingleDateQuery) {
         // First, get the specific date's balance
-        const { data: specificData } = await supabase
+        console.log(`[account-balance] Single-date query detected, fetching balance for date: ${startDate}`);
+        const { data: specificData, error: specificError } = await supabase
           .from('AccountBalance')
           .select('Date, DebitBalance, CreditBalance')
           .eq('AccountCode', ACCOUNT_CODE)
           .eq('Date', startDate)
           .single();
 
+        if (specificError) {
+          console.log(`[account-balance] Specific date query error: ${specificError.message}`);
+        }
+
         if (specificData) {
           const balanceField = queryType === 'debit_balances' ? 'DebitBalance' : 'CreditBalance';
           specificDateBalance = specificData[balanceField] || 0;
           specificDate = specificData.Date;
+          console.log(`[account-balance] Found specific date balance: ${specificDate} = ${specificDateBalance}`);
+        } else {
+          console.log(`[account-balance] No data found for specific date ${startDate}`);
         }
 
         // Expand to entire month for avg/high/low calculations
@@ -292,6 +304,7 @@ export async function POST(req: NextRequest) {
       const balanceType = queryType === 'debit_balances' ? 'debit' : 'credit';
 
       // Handle single-date query differently: show specific date balance + month stats
+      console.log(`[account-balance] Single-date handler check: isSingleDateQuery=${isSingleDateQuery}, specificDateBalance=${specificDateBalance}, specificDate=${specificDate}`);
       if (isSingleDateQuery && specificDateBalance !== null && specificDate) {
         const specificDateFormatted = formatDate(specificDate);
         const highestDateFormatted = formatDate(maxDate || '');

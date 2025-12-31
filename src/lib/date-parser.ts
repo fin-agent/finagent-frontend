@@ -120,9 +120,44 @@ export function parseTimeExpression(expression: string): ParsedDateQuery | null 
     };
   }
 
-  // Pattern: Specific calendar date - "November 18th", "Nov 18", "December 3rd"
+  // Pattern: Specific calendar date - "November 18th", "Nov 18", "December 3rd", "the 10th of December"
   // Matches: full/abbreviated month name + day number + optional ordinal suffix
   const monthNames = 'january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sept|sep|october|oct|november|nov|december|dec';
+
+  // Also match "the 10th of December" format
+  const reverseDateMatch = lowerExpr.match(new RegExp(`^(?:the\\s+)?(\\d{1,2})(?:st|nd|rd|th)?\\s+of\\s+(${monthNames})$`, 'i'));
+  if (reverseDateMatch) {
+    const day = parseInt(reverseDateMatch[1]);
+    const monthStr = reverseDateMatch[2].toLowerCase();
+    const month = monthNameToNumber[monthStr];
+
+    if (month !== undefined && day >= 1 && day <= 31) {
+      let year = today.getFullYear();
+      const targetDate = new Date(year, month, day);
+      targetDate.setHours(0, 0, 0, 0);
+
+      if (targetDate > today) {
+        year -= 1;
+        targetDate.setFullYear(year);
+      }
+
+      const monthDisplay = targetDate.toLocaleDateString('en-US', { month: 'long' });
+      const ordinal = day === 1 || day === 21 || day === 31 ? 'st'
+                    : day === 2 || day === 22 ? 'nd'
+                    : day === 3 || day === 23 ? 'rd' : 'th';
+
+      return {
+        type: 'specific',
+        dateRange: {
+          startDate: toDBDate(targetDate),
+          endDate: toDBDate(targetDate),
+          description: `${monthDisplay} ${day}${ordinal}`,
+          tradingDays: 1
+        }
+      };
+    }
+  }
+
   const calendarDateMatch = lowerExpr.match(new RegExp(`^(?:on\\s+)?(${monthNames})\\s+(\\d{1,2})(?:st|nd|rd|th)?$`, 'i'));
   if (calendarDateMatch) {
     const monthStr = calendarDateMatch[1].toLowerCase();

@@ -2968,7 +2968,8 @@ const UnifiedAssistant: React.FC = () => {
               // Pattern requires company name to be followed by either:
               // - ". Is" (market orders end with "of Apple. Is this correct?")
               // - " at " (limit orders have "of Apple at a price of $X")
-              const orderPattern = /Placing\s+(Market|Limit)\s+order\s+to\s+(buy|sell)\s+(\d+)\s+shares?\s+of\s+([A-Za-z][A-Za-z\s]*?)(?:\.|\s+at\s+(?:a\s+price\s+of\s+)?\$?([\d,.]+))/i;
+              // NOTE: Sell orders may include "long" or "short" after "sell" (e.g., "sell short 200 shares")
+              const orderPattern = /Placing\s+(Market|Limit)\s+order\s+to\s+(buy|sell)\s+(?:long\s+|short\s+)?(\d+)\s+shares?\s+of\s+([A-Za-z][A-Za-z\s]*?)(?:\.|\s+at\s+(?:a\s+price\s+of\s+)?\$?([\d,.]+))/i;
               const orderMatch = assistantContent.match(orderPattern);
 
               if (orderMatch) {

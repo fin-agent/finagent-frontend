@@ -22,7 +22,7 @@ export interface OrderConfirmationProps {
     longQty: number;
     shortQty: number;
   } | null;
-  marketStatus: {
+  marketStatus?: {
     isOpen: boolean;
     nextOpen: string;
     nextClose: string;
@@ -236,7 +236,7 @@ export function OrderConfirmationCard(props: OrderConfirmationProps) {
           <StatusBadge text={sideLabel} color={accentColor} />
           <StatusBadge text={orderTypeLabel} color={orderType === 'limit' ? colors.gold : colors.cyan} />
         </div>
-        {!marketStatus.isOpen && (
+        {marketStatus && !marketStatus.isOpen && (
           <StatusBadge text="Market Closed" color={colors.purple} />
         )}
       </div>

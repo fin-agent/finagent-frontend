@@ -140,6 +140,12 @@ const voicePayload = await postJson('/api/elevenlabs/trade-summary', {
 ### Single-Fetch Architecture
 Webhooks return both `response` (voice) AND `uiData` (UI) to prevent drift.
 
+### responseText Pattern (Anti-Truncation)
+ElevenLabs' `useConversation` hook sends truncated transcription via `onMessage` when speech is interrupted (`agent_response_correction` event). To prevent truncation in UI:
+- Tool functions store `responseText: voicePayload.response` in `toolUIDataRef.current`
+- Message handler uses `tradeUI.responseText || m.content` when updating transcript
+- Ensures full webhook response displays even if ElevenLabs truncates
+
 ### "Wait for LLM" Pattern
 When regex can't extract symbol but query likely has one, wait for LLM classification before UI fetch.
 

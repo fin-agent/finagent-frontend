@@ -29,7 +29,7 @@ import DebitBalanceSummary from './generative-ui/DebitBalanceSummary';
 import type { ClassificationResult } from '@/src/lib/intent-detection';
 import { formatCalendarDate } from '@/src/lib/date-utils';
 import { getOptionPremiumUSD, safeParseNumber } from '@/src/lib/trade-math';
-import { parseOptionSymbol } from '@/src/lib/symbol-utils';
+import { parseOptionSymbol, normalizeSymbol } from '@/src/lib/symbol-utils';
 
 type InputMode = 'voice' | 'text';
 type View = 'chat' | 'history';
@@ -950,14 +950,16 @@ const UnifiedAssistant: React.FC = () => {
   function startToolDataPromise(): void {
     pendingToolDataPromiseRef.current = new Promise((resolve) => {
       resolveToolDataPromiseRef.current = resolve;
-      // Auto-resolve after 5 seconds to prevent infinite waiting if tool doesn't complete
+      // Auto-resolve after 2 seconds to prevent blocking when tools don't run
+      // ElevenLabs order webhooks bypass client tools, so we can't wait long
+      // Client tools (when they do run) typically complete in <500ms
       setTimeout(() => {
         if (resolveToolDataPromiseRef.current === resolve) {
-          console.log('⚠️ [Tool Data Promise] Auto-resolved after 5s timeout');
+          console.log('⚠️ [Tool Data Promise] Auto-resolved after 2s timeout');
           resolve(null);
           resolveToolDataPromiseRef.current = null;
         }
-      }, 5000);
+      }, 2000);
     });
     console.log('🔧 [Tool Data Promise] Created new promise, awaiting tool data...');
   }
@@ -1676,11 +1678,14 @@ const UnifiedAssistant: React.FC = () => {
       });
 
       // Store UI data from voice response
+      // CRITICAL: Include responseText to prevent truncation from ElevenLabs transcription
       if (voicePayload && typeof voicePayload === 'object' && 'uiData' in voicePayload) {
+        const responseText = typeof voicePayload.response === 'string' ? voicePayload.response : undefined;
         toolUIDataRef.current = {
           type: 'order-confirmation',
           symbol: symbol || '',
-          data: voicePayload.uiData
+          data: voicePayload.uiData,
+          responseText,
         };
         console.log('📊 [Place Order Tool] Set toolUIDataRef from voice response:', toolUIDataRef.current);
         resolveToolDataPromise(toolUIDataRef.current);
@@ -2568,7 +2573,9 @@ const UnifiedAssistant: React.FC = () => {
           console.log('📝 [fetchTradeData order-confirmation] No uiData - error response, skipping card');
           return null;
         }
-        return { type, symbol, data: uiData };
+        // Include responseText to prevent truncation from ElevenLabs transcription
+        const responseText = typeof voicePayload?.response === 'string' ? voicePayload.response : undefined;
+        return { type, symbol, data: uiData, responseText };
       } else if (type === 'order-execution') {
         // Order execution should come from tool function, not fetchTradeData
         // Return null to let the tool handle it
@@ -2876,14 +2883,21 @@ const UnifiedAssistant: React.FC = () => {
             // Clear toolUIDataRef to prevent stale data - the promise already captured the correct value
             toolUIDataRef.current = null;
 
-            // CRITICAL: Await LLM classifier before checking pendingIntent
+            // CRITICAL: Await LLM classifier with timeout before checking pendingIntent
             // The classifier runs async in user message handler and may not have finished yet
-            // This fixes the race condition where assistant message arrives before LLM classification completes
+            // ElevenLabs webhooks can respond faster than the LLM classifier (~1s vs ~2-3s)
+            // Without timeout, voice mode handler blocks indefinitely waiting for classifier
             if (!tradeUI && pendingLLMClassifierPromiseRef.current) {
-              console.log('⏳ [Voice Mode] Awaiting LLM classifier promise...');
-              await pendingLLMClassifierPromiseRef.current;
+              console.log('⏳ [Voice Mode] Awaiting LLM classifier promise (3s timeout)...');
+              const classifierTimeout = new Promise<null>((resolve) => {
+                setTimeout(() => {
+                  console.log('⚠️ [Voice Mode] LLM classifier timed out after 3s');
+                  resolve(null);
+                }, 3000);
+              });
+              await Promise.race([pendingLLMClassifierPromiseRef.current, classifierTimeout]);
               pendingLLMClassifierPromiseRef.current = null;  // Clear after awaiting
-              console.log('✅ [Voice Mode] LLM classifier promise resolved');
+              console.log('✅ [Voice Mode] LLM classifier promise resolved or timed out');
             }
 
             // PRIMARY: Use stored intent from user's query (deterministic)
@@ -2944,10 +2958,61 @@ const UnifiedAssistant: React.FC = () => {
               }
             }
 
-            // NOTE: Regex-based fallbacks have been REMOVED.
-            // The LLM classifier + tool function architecture is the single source of truth.
-            // If toolUIDataRef.current is not set, the tool function didn't run or failed.
-            // No secondary fetches based on regex parsing of agent responses.
+            // RESPONSE-BASED ORDER DETECTION: For follow-up order modifications
+            // When user says "No, make it thirty-five", the LLM classifier won't detect orders.place
+            // But the agent responds with "Placing [Market/Limit] order to buy/sell X shares..."
+            // We detect this pattern and fetch the order confirmation UI
+            if (!tradeUI) {
+              console.log('🔍 [Response Order Detection] Checking for order pattern in:', assistantContent.substring(0, 150));
+
+              // Pattern requires company name to be followed by either:
+              // - ". Is" (market orders end with "of Apple. Is this correct?")
+              // - " at " (limit orders have "of Apple at a price of $X")
+              const orderPattern = /Placing\s+(Market|Limit)\s+order\s+to\s+(buy|sell)\s+(\d+)\s+shares?\s+of\s+([A-Za-z][A-Za-z\s]*?)(?:\.|\s+at\s+(?:a\s+price\s+of\s+)?\$?([\d,.]+))/i;
+              const orderMatch = assistantContent.match(orderPattern);
+
+              if (orderMatch) {
+                const orderType = orderMatch[1].toLowerCase() as 'market' | 'limit';
+                const side = orderMatch[2].toLowerCase() as 'buy' | 'sell';
+                const quantity = parseInt(orderMatch[3], 10);
+                const companyName = orderMatch[4].trim();
+                const limitPrice = orderMatch[5] ? parseFloat(orderMatch[5].replace(/,/g, '')) : undefined;
+
+                console.log('🔍 [Response Order Detection] Found order pattern in agent response:', {
+                  orderType, side, quantity, companyName, limitPrice
+                });
+
+                // Resolve company name to symbol
+                const symbol = normalizeSymbol(companyName) || companyName.toUpperCase();
+                console.log('🔍 [Response Order Detection] Resolved symbol:', symbol);
+
+                // Fetch order confirmation UI data
+                try {
+                  const orderData = await fetchTradeData(
+                    symbol,
+                    'order-confirmation',
+                    undefined,
+                    undefined,
+                    {
+                      orderSide: side,
+                      orderType: orderType,
+                      orderQuantity: quantity,
+                      orderPrice: limitPrice,
+                    }
+                  );
+
+                  if (orderData) {
+                    tradeUI = orderData;
+                    console.log('✅ [Response Order Detection] Fetched order confirmation UI for modified order');
+                  }
+                } catch (err) {
+                  console.warn('⚠️ [Response Order Detection] Failed to fetch order UI:', err);
+                }
+              } else {
+                console.log('🔍 [Response Order Detection] No order pattern match');
+              }
+            }
+
             if (!tradeUI) {
               console.log('⚠️ [Voice Mode] No UI data available - toolUIDataRef was not set by tool function');
             }

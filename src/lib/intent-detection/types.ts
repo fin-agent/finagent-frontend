@@ -35,11 +35,14 @@ export type CardType =
   | 'financials'
   | 'earnings'
   | 'dividend'
+  // Order card types
+  | 'order-confirmation'
+  | 'order-execution'
   | 'contextual-followup' // For time period change follow-ups (uses previous query context)
   | 'none'; // Used for entity extraction from agent responses (no UI card)
 
 // Domain categories for intents
-export type IntentDomain = 'trades' | 'options' | 'account' | 'fees' | 'transfers' | 'positions' | 'dividends' | 'tax' | 'market' | 'fundamentals' | 'contextual';
+export type IntentDomain = 'trades' | 'options' | 'account' | 'fees' | 'transfers' | 'positions' | 'dividends' | 'tax' | 'market' | 'fundamentals' | 'orders' | 'contextual';
 
 // Intent definition for the registry
 export interface IntentDefinition {
@@ -88,6 +91,12 @@ export interface ExtractedEntities {
   amount?: number;
   // Positions entities
   positionType?: 'all' | 'long' | 'short' | 'flat';
+  // Order entities
+  orderSide?: 'buy' | 'sell';
+  orderType?: 'market' | 'limit';
+  orderQuantity?: number;
+  orderPrice?: number;
+  sellPosition?: boolean;  // "sell my position in AAPL"
 }
 
 // Result from GPT classification

@@ -372,6 +372,55 @@ export const intentRegistry: IntentDefinition[] = [
     optionalEntities: ['symbol', 'securityType', 'positionType', 'expiration', 'callPut'],
   },
 
+  // === ORDERS DOMAIN ===
+  {
+    id: 'orders.place',
+    domain: 'orders',
+    cardType: 'order-confirmation',
+    description: 'User wants to place a buy or sell order for stocks. Keywords: buy, sell, purchase, order. May include quantity, symbol, and price.',
+    examples: [
+      // Buy orders
+      'Buy 100 shares of AAPL at 273',
+      'Buy 100 shares of Apple',
+      'Buy 100 shares of AAPL at market',
+      'Purchase 50 shares of Tesla',
+      'Buy 200 Google at 175.50',
+      'I want to buy 100 shares of Microsoft',
+      // Sell orders
+      'Sell my position in NVDA',
+      'Sell my current position in NVDA at market',
+      'Sell my current position in NVDA at a price of 190',
+      'Sell 200 shares of AMD',
+      'Sell 200 shares of AMD at market',
+      'Sell 200 shares of AMD at a price of 190',
+      'Sell 50 Tesla at 250',
+      'Close my Apple position',
+    ],
+    requiredEntities: ['symbol', 'orderSide'],
+    optionalEntities: ['orderQuantity', 'orderPrice', 'orderType', 'sellPosition'],
+  },
+  {
+    id: 'orders.confirm',
+    domain: 'orders',
+    cardType: 'order-execution',
+    description: 'User confirms or cancels a pending order with Yes or No after being asked for confirmation.',
+    examples: [
+      'Yes',
+      'Yes, place the order',
+      'Confirm',
+      'Yes, that is correct',
+      'Go ahead',
+      'Proceed',
+      'No',
+      'Cancel',
+      'No, cancel the order',
+      'Never mind',
+      'Stop',
+    ],
+    requiredEntities: [],
+    optionalEntities: [],
+  },
+
   // === MARKET DATA DOMAIN ===
   {
     id: 'market.stock_quote',

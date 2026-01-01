@@ -20,6 +20,8 @@ import { AccountSummary, type AccountQueryType } from './generative-ui/AccountSu
 import { FeesSummary, type FeeType } from './generative-ui/FeesSummary';
 import { FundTransfersCard, type TransferType, type DirectionType } from './generative-ui/FundTransfersCard';
 import { PositionsCard, type SecurityFilterType, type PositionFilterType } from './generative-ui/PositionsCard';
+import { OrderConfirmationCard, type OrderConfirmationProps } from './generative-ui/OrderConfirmationCard';
+import { OrderExecutionCard, type OrderExecutionProps } from './generative-ui/OrderExecutionCard';
 import { StockQuoteCard } from './generative-ui/StockQuoteCard';
 import { CompanyOverviewCard } from './generative-ui/CompanyOverviewCard';
 import { OptionQuoteCard } from './generative-ui/OptionQuoteCard';
@@ -45,6 +47,8 @@ interface TradeUIData {
     | 'stock-quote' | 'option-quote' | 'price-chart' | 'news' | 'halt-status'
     // Fundamentals types
     | 'company-overview' | 'fundamental-metric' | 'financials' | 'earnings' | 'dividend'
+    // Order types
+    | 'order-confirmation' | 'order-execution'
     // Contextual follow-up (detected by LLM, merged with previous context)
     | 'contextual-followup';
   symbol: string;
@@ -1614,6 +1618,94 @@ const UnifiedAssistant: React.FC = () => {
       return result;
     };
 
+    const place_order = async (parameters: Record<string, unknown>) => {
+      console.log('📊 [Place Order Tool] ================================');
+      console.log('📊 [Place Order Tool] Parameters:', JSON.stringify(parameters, null, 2));
+
+      // Extract parameters
+      const rawSymbol = getToolSymbol(parameters);
+      const rawQuantity = parameters.quantity as number | undefined;
+      const rawSide = getString(parameters, 'side');
+      const rawOrderType = getString(parameters, 'order_type');
+      const rawLimitPrice = parameters.limit_price as number | undefined;
+      const rawSellPosition = parameters.sell_position as boolean | undefined;
+
+      console.log('📊 [Place Order Tool] symbol:', rawSymbol, '| quantity:', rawQuantity, '| side:', rawSide, '| orderType:', rawOrderType, '| limitPrice:', rawLimitPrice, '| sellPosition:', rawSellPosition);
+
+      // Call place-order webhook
+      const voicePayload = await postJson('/api/elevenlabs/place-order', {
+        symbol: rawSymbol,
+        quantity: rawQuantity,
+        side: rawSide,
+        order_type: rawOrderType,
+        limit_price: rawLimitPrice,
+        sell_position: rawSellPosition,
+      });
+
+      // Store UI data from voice response
+      if (voicePayload && typeof voicePayload === 'object' && 'uiData' in voicePayload) {
+        toolUIDataRef.current = {
+          type: 'order-confirmation',
+          symbol: rawSymbol || '',
+          data: voicePayload.uiData
+        };
+        console.log('📊 [Place Order Tool] Set toolUIDataRef from voice response:', toolUIDataRef.current);
+        resolveToolDataPromise(toolUIDataRef.current);
+      } else {
+        resolveToolDataPromise(null);
+      }
+
+      const result = unwrapResponse(voicePayload);
+      console.log('📊 [Place Order Tool] Webhook Response:', result);
+      console.log('📊 [Place Order Tool] ================================');
+      return result;
+    };
+
+    const confirm_order = async (parameters: Record<string, unknown>) => {
+      console.log('📊 [Confirm Order Tool] ================================');
+      console.log('📊 [Confirm Order Tool] Parameters:', JSON.stringify(parameters, null, 2));
+
+      // Extract all order parameters (passed from agent memory)
+      const rawSymbol = getToolSymbol(parameters);
+      const rawQuantity = parameters.quantity as number | undefined;
+      const rawSide = getString(parameters, 'side');
+      const rawOrderType = getString(parameters, 'order_type');
+      const rawLimitPrice = parameters.limit_price as number | undefined;
+      const confirmed = parameters.confirmed as boolean | undefined;
+      const splitOrder = parameters.split_order as { long_qty: number; short_qty: number } | undefined;
+
+      console.log('📊 [Confirm Order Tool] symbol:', rawSymbol, '| confirmed:', confirmed, '| splitOrder:', splitOrder);
+
+      // Call confirm-order webhook
+      const voicePayload = await postJson('/api/elevenlabs/confirm-order', {
+        symbol: rawSymbol,
+        quantity: rawQuantity,
+        side: rawSide,
+        order_type: rawOrderType,
+        limit_price: rawLimitPrice,
+        confirmed,
+        split_order: splitOrder,
+      });
+
+      // Store UI data from voice response
+      if (voicePayload && typeof voicePayload === 'object' && 'uiData' in voicePayload) {
+        toolUIDataRef.current = {
+          type: 'order-execution',
+          symbol: rawSymbol || '',
+          data: voicePayload.uiData
+        };
+        console.log('📊 [Confirm Order Tool] Set toolUIDataRef from voice response:', toolUIDataRef.current);
+        resolveToolDataPromise(toolUIDataRef.current);
+      } else {
+        resolveToolDataPromise(null);
+      }
+
+      const result = unwrapResponse(voicePayload);
+      console.log('📊 [Confirm Order Tool] Webhook Response:', result);
+      console.log('📊 [Confirm Order Tool] ================================');
+      return result;
+    };
+
     return {
       get_trade_summary,
       get_detailed_trades,
@@ -1626,6 +1718,8 @@ const UnifiedAssistant: React.FC = () => {
       get_fees,
       get_fund_transfers,
       get_positions,
+      place_order,
+      confirm_order,
 
       // Aliases (in case tool names are camelCased in ElevenLabs UI)
       getTradeSummary: get_trade_summary,
@@ -1639,6 +1733,8 @@ const UnifiedAssistant: React.FC = () => {
       getFees: get_fees,
       getFundTransfers: get_fund_transfers,
       getPositions: get_positions,
+      placeOrder: place_order,
+      confirmOrder: confirm_order,
     };
   }, []);
 
@@ -4271,6 +4367,47 @@ const UnifiedAssistant: React.FC = () => {
             expiration={positionsData.expiration}
             positions={positionsData.positions}
             summary={positionsData.summary}
+          />
+        </div>
+      );
+    }
+
+    // === ORDER CARDS ===
+
+    if (type === 'order-confirmation') {
+      console.log('🎨 Rendering order confirmation card with data:', data);
+      const confirmData = data as OrderConfirmationProps;
+
+      return (
+        <div style={{ marginTop: '12px' }}>
+          <OrderConfirmationCard
+            symbol={confirmData.symbol}
+            companyName={confirmData.companyName}
+            side={confirmData.side}
+            quantity={confirmData.quantity}
+            orderType={confirmData.orderType}
+            limitPrice={confirmData.limitPrice}
+            currentPrice={confirmData.currentPrice}
+            estimatedTotal={confirmData.estimatedTotal}
+            currentPosition={confirmData.currentPosition}
+            positionAction={confirmData.positionAction}
+            splitOrder={confirmData.splitOrder}
+            marketStatus={confirmData.marketStatus}
+          />
+        </div>
+      );
+    }
+
+    if (type === 'order-execution') {
+      console.log('🎨 Rendering order execution card with data:', data);
+      const execData = data as OrderExecutionProps;
+
+      return (
+        <div style={{ marginTop: '12px' }}>
+          <OrderExecutionCard
+            success={execData.success}
+            orders={execData.orders}
+            message={execData.message}
           />
         </div>
       );

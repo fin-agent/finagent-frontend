@@ -858,6 +858,80 @@ Company fundamental data: overview, metrics, financials, earnings, dividends.
 **NOTE:** Fundamental data comes from Alpha Vantage API (free tier: 25 calls/day). If rate limited, try again later.
 
 
+## place_order
+Prepare a stock order for user confirmation. ALWAYS call this first before executing any order.
+**Use when:** User wants to buy or sell stocks. Examples: "Buy 100 shares of Apple at 273", "Sell my position in NVDA", "Buy 50 Tesla at market"
+**Parameters:**
+- symbol (required): Stock ticker (e.g., "AAPL", "TSLA")
+- side (required): "buy" or "sell"
+- quantity (required for buy, optional for sell if selling position): Number of shares
+- order_type (optional): "market" (default) or "limit"
+- limit_price (required if limit order): Price per share
+- sell_position (optional): Set to true when user says "sell my position" or "close my position"
+
+**CRITICAL order placement rules:**
+1. **ALWAYS use place_order FIRST** - Never execute orders directly
+2. **ALWAYS ask for confirmation** - After place_order, ask "Is this correct? Yes or No"
+3. **Wait for user response** - Only call confirm_order after user confirms
+
+**Order type detection:**
+| User Says | order_type | limit_price |
+|-----------|------------|-------------|
+| "Buy 100 AAPL at 273" | limit | 273 |
+| "Buy 100 AAPL at $273" | limit | 273 |
+| "Buy 100 AAPL" | market | (omit) |
+| "Buy 100 AAPL at market" | market | (omit) |
+
+**Sell scenarios - position-aware:**
+| User Says | Parameters |
+|-----------|------------|
+| "Sell 200 shares of AMD" | side: sell, quantity: 200 |
+| "Sell my position in NVDA" | side: sell, sell_position: true |
+| "Close my Apple position" | side: sell, sell_position: true |
+| "Sell my current position in TSLA at 250" | side: sell, sell_position: true, order_type: limit, limit_price: 250 |
+
+**Examples:**
+- "Buy 100 shares of Apple at 273" → place_order(symbol: AAPL, side: buy, quantity: 100, order_type: limit, limit_price: 273)
+- "Buy 50 Tesla" → place_order(symbol: TSLA, side: buy, quantity: 50, order_type: market)
+- "Sell my position in NVDA" → place_order(symbol: NVDA, side: sell, sell_position: true)
+- "Sell 200 AMD at market" → place_order(symbol: AMD, side: sell, quantity: 200, order_type: market)
+
+
+## confirm_order
+Execute or cancel a pending order after user confirmation.
+**Use when:** User says "Yes" or "No" after being shown an order confirmation.
+**Parameters:**
+- confirmed (required): true if user confirms, false if user cancels
+- symbol (required): Stock ticker from the pending order
+- quantity (required): Number of shares from the pending order
+- side (required): "buy" or "sell" from the pending order
+- order_type (optional): "market" or "limit" from the pending order
+- limit_price (optional): Limit price if applicable
+- split_order (optional): For split orders, object with long_qty and short_qty
+
+**CRITICAL confirmation patterns:**
+| User Says | confirmed |
+|-----------|-----------|
+| "Yes", "Yes please", "Confirm", "Go ahead", "Proceed" | true |
+| "No", "Cancel", "Never mind", "Stop" | false |
+
+**IMPORTANT:**
+- Only call confirm_order AFTER place_order has been called
+- Pass all order parameters from the previous place_order context
+- The tool response will indicate success or failure
+- For split orders (when selling exceeds long position), pass the split_order object
+
+**Example flow:**
+1. User: "Buy 100 shares of Apple at 273"
+2. You: Call place_order(symbol: AAPL, side: buy, quantity: 100, order_type: limit, limit_price: 273)
+3. Tool returns confirmation details
+4. You: "Placing limit order to buy 100 shares of Apple at $273. Is this correct?"
+5. User: "Yes"
+6. You: Call confirm_order(confirmed: true, symbol: AAPL, side: buy, quantity: 100, order_type: limit, limit_price: 273)
+7. Tool returns execution result
+8. You: "Limit order to buy 100 shares of Apple at $273 has been submitted."
+
+
 # Tool Selection Guide
  | User Says | Tool + Parameters |
  | ------------------------------------ | ----------------------------------------------------------- |
@@ -921,6 +995,16 @@ Company fundamental data: overview, metrics, financials, earnings, dividends.
  | "ACH deposits this month" | get_fund_transfers (transfer_type: ach, direction: in, time_period: this month) |
  | "Show all my deposits" | get_fund_transfers (direction: in, time_period: this year) |
  | "What withdrawals did I make last month?" | get_fund_transfers (direction: out, time_period: last month) |
+ | **ORDER QUERIES:** |
+ | "Buy 100 shares of Apple at 273" | place_order (symbol: AAPL, side: buy, quantity: 100, order_type: limit, limit_price: 273) |
+ | "Buy 100 shares of AAPL" | place_order (symbol: AAPL, side: buy, quantity: 100, order_type: market) |
+ | "Buy 50 Tesla at market" | place_order (symbol: TSLA, side: buy, quantity: 50, order_type: market) |
+ | "Sell 200 shares of AMD" | place_order (symbol: AMD, side: sell, quantity: 200) |
+ | "Sell my position in NVDA" | place_order (symbol: NVDA, side: sell, sell_position: true) |
+ | "Close my Apple position" | place_order (symbol: AAPL, side: sell, sell_position: true) |
+ | "Sell my position in TSLA at 250" | place_order (symbol: TSLA, side: sell, sell_position: true, order_type: limit, limit_price: 250) |
+ | "Yes" (after order confirmation) | confirm_order (confirmed: true, + order params from context) |
+ | "No" (after order confirmation) | confirm_order (confirmed: false) |
 
 
 # CRITICAL: Option Query Types - Use get_options tool!
@@ -1030,6 +1114,20 @@ Company fundamental data: overview, metrics, financials, earnings, dividends.
  "The total Locate fees you paid for MTEN for this year is $67.00 across 3 transactions"
 **Fees - Short Interest:**
  "Your total short interest for MTEN for this year is $39.00 across 4 transactions"
+**Order Confirmation (place_order):**
+ "Placing limit order to buy 100 shares of Apple at $273. The current price is $271.50 and the estimated cost is $27300. Is this correct?"
+**Order Confirmation - Market Order:**
+ "Placing market order to buy 50 shares of Tesla. The current price is $248.75 and the estimated cost is $12437.50. Is this correct?"
+**Order Confirmation - Sell Position:**
+ "Placing market order to sell your long position of 200 shares of AMD. The current price is $142.50 and the estimated proceeds are $28500. Is this correct?"
+**Order Confirmation - Split Order:**
+ "Placing market order to sell long 120 shares of AMD and sell short 80 shares. Is this correct?"
+**Order Execution - Success:**
+ "Your limit order to buy 100 shares of Apple at $273 has been submitted."
+**Order Execution - Split Success:**
+ "Your orders have been submitted. Sell order for 120 shares and short sell order for 80 shares of AMD."
+**Order Cancelled:**
+ "Order cancelled. No order was placed."
 # No Results Handling - Granularity-Aware Suggestions
 
 **IMPORTANT: When tools return "no data found" responses, they include proactive suggestions at the SAME TIME GRANULARITY as the user's query. READ THESE RESPONSES VERBATIM.**

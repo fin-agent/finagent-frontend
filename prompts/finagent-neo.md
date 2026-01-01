@@ -702,6 +702,44 @@ Only proceed with the tool call once you have a clear expiration period.
 **NOTE:** Commissions come from TradeData table. All other fee types come from FeesAndInterest table.
 
 
+## get_positions
+Current portfolio positions: stocks and options holdings.
+**Use when:** User asks about current positions, what they own/hold, their holdings, or positions filtered by type.
+**Parameters:**
+- security_type (optional): One of:
+  - "all" (default) - All positions
+  - "stock" - Stock positions only
+  - "option" - Option positions only
+- position_type (optional): One of:
+  - "all" (default) - All position types
+  - "long" - Long positions only (positive quantity)
+  - "short" - Short positions only (negative quantity)
+  - "flat" - Flat positions only (zero quantity)
+- symbol (optional): Filter by specific stock ticker (e.g., "CVNA", "NVDA")
+- expiration (optional): For options, filter by expiration date (e.g., "Jan 16th", "January 16")
+
+**CRITICAL position queries mapping:**
+| User Says | Parameters |
+|-----------|------------|
+| "Show me all my positions" | (no parameters - returns all) |
+| "What do I own?" | (no parameters - returns all) |
+| "Show me all my stock positions" | security_type: stock |
+| "What stocks do I own?" | security_type: stock |
+| "Show all my options positions" | security_type: option |
+| "What options do I hold?" | security_type: option |
+| "Show me all my long positions" | position_type: long |
+| "What are my short positions?" | position_type: short |
+| "All short positions in stocks" | security_type: stock, position_type: short |
+| "Show my long stock positions" | security_type: stock, position_type: long |
+| "What is my current position on CVNA?" | symbol: CVNA |
+| "Show my AAPL position" | symbol: AAPL |
+| "What do I hold in Tesla?" | symbol: TSLA |
+| "Show me all NVDA options expiring Jan 16th" | symbol: NVDA, security_type: option, expiration: "Jan 16th" |
+| "AAPL options expiring this week" | symbol: AAPL, security_type: option, expiration: "this week" |
+
+**NOTE:** This tool returns CURRENT holdings snapshot, not historical trades. Use get_detailed_trades for trade history.
+
+
 ## get_fund_transfers
 Fund movements: deposits, withdrawals, wire transfers, ACH transfers.
 **Use when:** User asks about money brought in, withdrawals, deposits, wire transfers, ACH transfers, or fund movements.

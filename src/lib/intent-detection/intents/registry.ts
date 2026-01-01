@@ -336,6 +336,42 @@ export const intentRegistry: IntentDefinition[] = [
     optionalEntities: ['transferType', 'direction', 'timePeriod', 'amount'],
   },
 
+  // === POSITIONS DOMAIN ===
+  {
+    id: 'positions.query',
+    domain: 'positions',
+    cardType: 'positions',
+    description: 'User asks about current positions, holdings, what they own/hold. Keywords: positions, holdings, what do I own, what do I hold, my [symbol], current position, long position, short position. IMPORTANT: This is for CURRENT holdings, not historical trades.',
+    examples: [
+      // All positions
+      'Show me all my positions',
+      'What do I own?',
+      'What are my current holdings?',
+      'Show all my holdings',
+      // By security type
+      'Show me all my stock positions',
+      'What stocks do I own?',
+      'Show all my options positions',
+      'What options do I hold?',
+      // By position type
+      'Show me all my long positions',
+      'What are my short positions?',
+      'All short positions in stocks',
+      'Show my long stock positions',
+      // Symbol-specific
+      'What is my current position on CVNA?',
+      'Show my AAPL position',
+      'What do I hold in Tesla?',
+      'My position in Apple',
+      // Options with expiration
+      'Show me all NVDA options expiring Jan 16th',
+      'AAPL options expiring this week',
+      'Options expiring tomorrow for SPY',
+    ],
+    requiredEntities: [],
+    optionalEntities: ['symbol', 'securityType', 'positionType', 'expiration', 'callPut'],
+  },
+
   // === MARKET DATA DOMAIN ===
   {
     id: 'market.stock_quote',

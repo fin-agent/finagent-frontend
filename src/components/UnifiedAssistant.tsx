@@ -19,6 +19,7 @@ import { LastOptionTradeCard } from './generative-ui/LastOptionTradeCard';
 import { AccountSummary, type AccountQueryType } from './generative-ui/AccountSummary';
 import { FeesSummary, type FeeType } from './generative-ui/FeesSummary';
 import { FundTransfersCard, type TransferType, type DirectionType } from './generative-ui/FundTransfersCard';
+import { PositionsCard, type SecurityFilterType, type PositionFilterType } from './generative-ui/PositionsCard';
 import { StockQuoteCard } from './generative-ui/StockQuoteCard';
 import { CompanyOverviewCard } from './generative-ui/CompanyOverviewCard';
 import { OptionQuoteCard } from './generative-ui/OptionQuoteCard';
@@ -39,7 +40,7 @@ interface Conversation {
 }
 
 interface TradeUIData {
-  type: 'summary' | 'detailed' | 'stats' | 'profitable' | 'time-based' | 'option-stats' | 'average-price' | 'advanced-options' | 'highest-strike' | 'total-premium' | 'expiring-options' | 'last-option' | 'account-balance' | 'debit-balance-summary' | 'fees' | 'options' | 'fund-transfers'
+  type: 'summary' | 'detailed' | 'stats' | 'profitable' | 'time-based' | 'option-stats' | 'average-price' | 'advanced-options' | 'highest-strike' | 'total-premium' | 'expiring-options' | 'last-option' | 'account-balance' | 'debit-balance-summary' | 'fees' | 'options' | 'fund-transfers' | 'positions'
     // Market data types
     | 'stock-quote' | 'option-quote' | 'price-chart' | 'news' | 'halt-status'
     // Fundamentals types
@@ -92,6 +93,7 @@ interface QueryIntent {
   transferType?: TransferType;  // For fund transfers: all, wire, ach, journal
   direction?: DirectionType;    // For fund transfers: all, in, out
   amount?: number;              // For fund transfers: specific amount lookup
+  positionType?: PositionFilterType; // For positions: all, long, short, flat
 }
 
 interface QueryIntentWithConfidence extends QueryIntent {
@@ -1558,6 +1560,60 @@ const UnifiedAssistant: React.FC = () => {
       return unwrapResponse(voicePayload);
     };
 
+    // Positions tool for querying current holdings
+    const get_positions = async (parameters: Record<string, unknown>) => {
+      console.log('📊 [Positions Tool] ================================');
+      console.log('📊 [Positions Tool] Parameters:', JSON.stringify(parameters, null, 2));
+
+      // CRITICAL: Await LLM classifier to get intent details
+      const llmIntent = await awaitLLMClassifier();
+
+      // Extract parameters from tool call and LLM intent
+      const rawSymbol = getToolSymbol(parameters);
+      const llmSymbol = llmIntent?.symbol;
+      const symbol = llmSymbol || rawSymbol;
+
+      const rawSecurityType = getString(parameters, 'security_type');
+      const llmSecurityType = llmIntent?.securityType;
+      const securityType = rawSecurityType || llmSecurityType || 'all';
+
+      const rawPositionType = getString(parameters, 'position_type');
+      const llmPositionType = llmIntent?.positionType;
+      const positionType = rawPositionType || llmPositionType || 'all';
+
+      const rawExpiration = getString(parameters, 'expiration');
+      const llmExpiration = llmIntent?.expiration;
+      const expiration = rawExpiration || llmExpiration;
+
+      console.log('📊 [Positions Tool] Using symbol:', symbol, '| securityType:', securityType, '| positionType:', positionType, '| expiration:', expiration);
+
+      // SINGLE FETCH: Voice endpoint returns BOTH response AND uiData
+      const voicePayload = await postJson('/api/elevenlabs/positions', {
+        symbol,
+        security_type: securityType,
+        position_type: positionType,
+        expiration,
+      });
+
+      // Store UI data from voice response (guaranteed sync)
+      if (voicePayload && typeof voicePayload === 'object' && 'uiData' in voicePayload) {
+        toolUIDataRef.current = {
+          type: 'positions',
+          symbol: symbol || '',
+          data: voicePayload.uiData
+        };
+        console.log('📊 [Positions Tool] Set toolUIDataRef from voice response:', toolUIDataRef.current);
+        resolveToolDataPromise(toolUIDataRef.current);
+      } else {
+        resolveToolDataPromise(null);
+      }
+
+      const result = unwrapResponse(voicePayload);
+      console.log('📊 [Positions Tool] Webhook Response:', result);
+      console.log('📊 [Positions Tool] ================================');
+      return result;
+    };
+
     return {
       get_trade_summary,
       get_detailed_trades,
@@ -1569,6 +1625,7 @@ const UnifiedAssistant: React.FC = () => {
       get_account_balance,
       get_fees,
       get_fund_transfers,
+      get_positions,
 
       // Aliases (in case tool names are camelCased in ElevenLabs UI)
       getTradeSummary: get_trade_summary,
@@ -1581,6 +1638,7 @@ const UnifiedAssistant: React.FC = () => {
       getAccountBalance: get_account_balance,
       getFees: get_fees,
       getFundTransfers: get_fund_transfers,
+      getPositions: get_positions,
     };
   }, []);
 
@@ -1728,6 +1786,7 @@ const UnifiedAssistant: React.FC = () => {
                   transferType: pendingIntent.transferType,
                   direction: pendingIntent.direction,
                   amount: pendingIntent.amount,
+                  positionType: pendingIntent.positionType,
                 }
               );
               if (data) {
@@ -1802,7 +1861,7 @@ const UnifiedAssistant: React.FC = () => {
     type: TradeUIData['type'],
     tradeType?: 'buy' | 'sell' | 'all',
     timePeriod?: string,
-    extraParams?: { callPut?: 'call' | 'put'; expiration?: string; aggregation?: string; accountQueryType?: AccountQueryType; feeType?: FeeType; includeTrades?: boolean; dateFilter?: { type: string; startDate?: string; endDate?: string; description: string }; queryType?: string; strike?: number; chartPeriod?: string; securityType?: 'stock' | 'option'; transferType?: TransferType; direction?: DirectionType; amount?: number }
+    extraParams?: { callPut?: 'call' | 'put'; expiration?: string; aggregation?: string; accountQueryType?: AccountQueryType; feeType?: FeeType; includeTrades?: boolean; dateFilter?: { type: string; startDate?: string; endDate?: string; description: string }; queryType?: string; strike?: number; chartPeriod?: string; securityType?: 'stock' | 'option'; transferType?: TransferType; direction?: DirectionType; amount?: number; positionType?: PositionFilterType }
   ): Promise<TradeUIData | null> => {
     try {
       let endpoint: string;
@@ -2048,6 +2107,23 @@ const UnifiedAssistant: React.FC = () => {
         const voicePayload = await res.json();
         const uiData = voicePayload?.uiData || voicePayload;
         return { type, symbol: '', transferType: extraParams?.transferType, direction: extraParams?.direction, timePeriod, data: uiData };
+      } else if (type === 'positions') {
+        // SINGLE FETCH: Use voice endpoint with uiData
+        endpoint = '/api/elevenlabs/positions';
+        body = {
+          symbol: symbol || undefined,
+          security_type: extraParams?.securityType || 'all',
+          position_type: extraParams?.positionType || 'all',
+          expiration: extraParams?.expiration,
+        };
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const voicePayload = await res.json();
+        const uiData = voicePayload?.uiData || voicePayload;
+        return { type, symbol: symbol || '', data: uiData };
       } else if (type === 'average-price') {
         endpoint = '/api/average-price';
         const includeTrades = extraParams?.includeTrades ?? true;
@@ -2665,6 +2741,7 @@ const UnifiedAssistant: React.FC = () => {
                     transferType: pendingIntent.transferType,
                     direction: pendingIntent.direction,
                     amount: pendingIntent.amount,
+                    positionType: pendingIntent.positionType,
                   }
                 );
                 if (data) {
@@ -3142,6 +3219,7 @@ const UnifiedAssistant: React.FC = () => {
                 transferType: intent.transferType,
                 direction: intent.direction,
                 amount: intent.amount,
+                positionType: intent.positionType,
               }
             )
           : null;
@@ -3210,6 +3288,7 @@ const UnifiedAssistant: React.FC = () => {
 		              transferType: intent.transferType,
 		              direction: intent.direction,
 		              amount: intent.amount,
+		              positionType: intent.positionType,
 		            }
 		          )
 		        : null;
@@ -3282,6 +3361,7 @@ const UnifiedAssistant: React.FC = () => {
             transferType: intent.transferType,
             direction: intent.direction,
             amount: intent.amount,
+            positionType: intent.positionType,
           }
         )
       : null;
@@ -4151,6 +4231,49 @@ const UnifiedAssistant: React.FC = () => {
           </div>
         );
       }
+    }
+
+    if (type === 'positions') {
+      console.log('🎨 Rendering positions card with data:', data);
+      const positionsData = data as {
+        securityType: SecurityFilterType;
+        positionType: PositionFilterType;
+        symbol?: string;
+        expiration?: string;
+        positions: Array<{
+          symbol: string;
+          securityType: 'stock' | 'option';
+          qty: number;
+          closePrice: number;
+          marketValue: number;
+          underlyingSymbol?: string;
+          expiration?: string;
+          strike?: number;
+          callPut?: 'C' | 'P';
+        }>;
+        summary: {
+          totalPositions: number;
+          totalLong: number;
+          totalShort: number;
+          totalFlat: number;
+          totalMarketValue: number;
+          longMarketValue: number;
+          shortMarketValue: number;
+        };
+      };
+
+      return (
+        <div style={{ marginTop: '12px' }}>
+          <PositionsCard
+            securityType={positionsData.securityType}
+            positionType={positionsData.positionType}
+            symbol={positionsData.symbol}
+            expiration={positionsData.expiration}
+            positions={positionsData.positions}
+            summary={positionsData.summary}
+          />
+        </div>
+      );
     }
 
     // === MARKET DATA CARDS ===

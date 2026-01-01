@@ -139,6 +139,11 @@ ${intents.map(i => `### ${i.id}
   - If not specified (general fund movements) -> "all"
 - **amount**: For fund transfer queries, extract specific dollar amounts mentioned:
   - "withdraw 1000" / "deposit 5000" / "$10,000" -> extract as number (1000, 5000, 10000)
+- **positionType**: For positions queries, infer from context:
+  - "long" / "long positions" / "what I own" -> "long"
+  - "short" / "short positions" / "shorts" -> "short"
+  - "flat" / "zero positions" -> "flat"
+  - If not specified (all positions) -> "all"
 
 ## Database Schema Reference
 
@@ -193,6 +198,22 @@ The following tables and columns are available in the database. Use this to unde
 | Type | string | Fee type: 'CreditInt', 'DebitInt', 'LocateFee' |
 | Symbol | string | Related symbol (for locate fees only) |
 | Amount | decimal | Fee amount |
+
+### AccountPositions Table (Current Holdings)
+| Column | Type | Description |
+|--------|------|-------------|
+| PositionID | int | Unique position identifier |
+| AccountCode | string | Account identifier (e.g., 'C40421') |
+| Date | date | Position snapshot date |
+| Symbol | string | Trading symbol (OCC format for options) |
+| UnderlyingSymbol | string | Underlying ticker for options (e.g., 'NVDA') |
+| SecurityType | string | 'S' = Stock, 'O' = Option |
+| Expiration | date | Option expiration date |
+| Strike | decimal | Option strike price |
+| Call/Put | string | 'C' = Call, 'P' = Put |
+| Qty | decimal | Position quantity: positive = long, negative = short, 0 = flat |
+| ClosePrice | decimal | Most recent close price |
+| MarketValue | decimal | Current market value of position |
 
 ### Column Name Mappings (User Terms → Database Columns)
 When users ask about these concepts, they map to these columns:
@@ -470,5 +491,29 @@ Query: "How much money did I bring into my account this year?"
 Response: {"intent": "transfers.query", "confidence": 0.93, "entities": {"direction": "in", "timePeriod": "this year", "dateFilter": {"type": "relative", "period": "this year", "description": "this year"}}}
 
 Query: "ACH deposits this month"
-Response: {"intent": "transfers.query", "confidence": 0.92, "entities": {"transferType": "ach", "direction": "in", "timePeriod": "this month", "dateFilter": {"type": "relative", "period": "this month", "description": "this month"}}}`;
+Response: {"intent": "transfers.query", "confidence": 0.92, "entities": {"transferType": "ach", "direction": "in", "timePeriod": "this month", "dateFilter": {"type": "relative", "period": "this month", "description": "this month"}}}
+
+Query: "Show me all my stock positions"
+Response: {"intent": "positions.query", "confidence": 0.95, "entities": {"securityType": "stock"}}
+
+Query: "Show me all my options positions"
+Response: {"intent": "positions.query", "confidence": 0.95, "entities": {"securityType": "option"}}
+
+Query: "What is my current position on CVNA?"
+Response: {"intent": "positions.query", "confidence": 0.94, "entities": {"symbol": "CVNA"}}
+
+Query: "Show me all NVDA options expiring Jan 16th"
+Response: {"intent": "positions.query", "confidence": 0.96, "entities": {"symbol": "NVDA", "securityType": "option", "expiration": "Jan 16th"}}
+
+Query: "All short positions in stocks"
+Response: {"intent": "positions.query", "confidence": 0.95, "entities": {"securityType": "stock", "positionType": "short"}}
+
+Query: "What do I own?"
+Response: {"intent": "positions.query", "confidence": 0.92, "entities": {}}
+
+Query: "Show my long stock positions"
+Response: {"intent": "positions.query", "confidence": 0.94, "entities": {"securityType": "stock", "positionType": "long"}}
+
+Query: "What options do I hold in Tesla?"
+Response: {"intent": "positions.query", "confidence": 0.93, "entities": {"symbol": "TSLA", "securityType": "option"}}`;
 }

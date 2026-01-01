@@ -22,6 +22,7 @@ export type CardType =
   | 'debit-balance-summary'
   | 'fees'
   | 'fund-transfers'
+  | 'positions'
   // Market data card types
   | 'stock-quote'
   | 'option-quote'
@@ -85,6 +86,8 @@ export interface ExtractedEntities {
   transferType?: 'all' | 'wire' | 'ach' | 'journal';
   direction?: 'all' | 'in' | 'out';
   amount?: number;
+  // Positions entities
+  positionType?: 'all' | 'long' | 'short' | 'flat';
 }
 
 // Result from GPT classification

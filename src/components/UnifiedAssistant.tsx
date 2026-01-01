@@ -1635,23 +1635,43 @@ const UnifiedAssistant: React.FC = () => {
       console.log('📊 [Place Order Tool] ================================');
       console.log('📊 [Place Order Tool] Parameters:', JSON.stringify(parameters, null, 2));
 
-      // Extract parameters
+      // CRITICAL: Await LLM classifier to get entities (fixes missing symbol issue)
+      const llmIntent = await awaitLLMClassifier();
+
+      // Extract parameters - use LLM classifier values as fallback
       const rawSymbol = getToolSymbol(parameters);
+      const llmSymbol = llmIntent?.symbol;
+      const symbol = rawSymbol || llmSymbol;
+
       const rawQuantity = parameters.quantity as number | undefined;
+      const llmQuantity = llmIntent?.orderQuantity;
+      const quantity = rawQuantity ?? llmQuantity;
+
       const rawSide = getString(parameters, 'side');
+      const llmSide = llmIntent?.orderSide;
+      const side = rawSide || llmSide;
+
       const rawOrderType = getString(parameters, 'order_type');
       const rawLimitPrice = parameters.limit_price as number | undefined;
+      const llmPrice = llmIntent?.orderPrice;
+      const limitPrice = rawLimitPrice ?? llmPrice;
+      // Infer order type from limit price presence
+      const orderType = rawOrderType || (limitPrice ? 'limit' : 'market');
+
       const rawSellPosition = parameters.sell_position as boolean | undefined;
 
-      console.log('📊 [Place Order Tool] symbol:', rawSymbol, '| quantity:', rawQuantity, '| side:', rawSide, '| orderType:', rawOrderType, '| limitPrice:', rawLimitPrice, '| sellPosition:', rawSellPosition);
+      console.log('📊 [Place Order Tool] Raw symbol:', rawSymbol, '| LLM symbol:', llmSymbol, '| Using:', symbol);
+      console.log('📊 [Place Order Tool] Raw quantity:', rawQuantity, '| LLM quantity:', llmQuantity, '| Using:', quantity);
+      console.log('📊 [Place Order Tool] Raw side:', rawSide, '| LLM side:', llmSide, '| Using:', side);
+      console.log('📊 [Place Order Tool] orderType:', orderType, '| limitPrice:', limitPrice, '| sellPosition:', rawSellPosition);
 
       // Call place-order webhook
       const voicePayload = await postJson('/api/elevenlabs/place-order', {
-        symbol: rawSymbol,
-        quantity: rawQuantity,
-        side: rawSide,
-        order_type: rawOrderType,
-        limit_price: rawLimitPrice,
+        symbol,
+        quantity,
+        side,
+        order_type: orderType,
+        limit_price: limitPrice,
         sell_position: rawSellPosition,
       });
 
@@ -1659,7 +1679,7 @@ const UnifiedAssistant: React.FC = () => {
       if (voicePayload && typeof voicePayload === 'object' && 'uiData' in voicePayload) {
         toolUIDataRef.current = {
           type: 'order-confirmation',
-          symbol: rawSymbol || '',
+          symbol: symbol || '',
           data: voicePayload.uiData
         };
         console.log('📊 [Place Order Tool] Set toolUIDataRef from voice response:', toolUIDataRef.current);
@@ -1678,8 +1698,15 @@ const UnifiedAssistant: React.FC = () => {
       console.log('📊 [Confirm Order Tool] ================================');
       console.log('📊 [Confirm Order Tool] Parameters:', JSON.stringify(parameters, null, 2));
 
+      // CRITICAL: Await LLM classifier in case it has relevant context
+      const llmIntent = await awaitLLMClassifier();
+
       // Extract all order parameters (passed from agent memory)
+      // Use LLM classifier as fallback for symbol
       const rawSymbol = getToolSymbol(parameters);
+      const llmSymbol = llmIntent?.symbol;
+      const symbol = rawSymbol || llmSymbol;
+
       const rawQuantity = parameters.quantity as number | undefined;
       const rawSide = getString(parameters, 'side');
       const rawOrderType = getString(parameters, 'order_type');
@@ -1687,11 +1714,12 @@ const UnifiedAssistant: React.FC = () => {
       const confirmed = parameters.confirmed as boolean | undefined;
       const splitOrder = parameters.split_order as { long_qty: number; short_qty: number } | undefined;
 
-      console.log('📊 [Confirm Order Tool] symbol:', rawSymbol, '| confirmed:', confirmed, '| splitOrder:', splitOrder);
+      console.log('📊 [Confirm Order Tool] Raw symbol:', rawSymbol, '| LLM symbol:', llmSymbol, '| Using:', symbol);
+      console.log('📊 [Confirm Order Tool] confirmed:', confirmed, '| splitOrder:', splitOrder);
 
       // Call confirm-order webhook
       const voicePayload = await postJson('/api/elevenlabs/confirm-order', {
-        symbol: rawSymbol,
+        symbol,
         quantity: rawQuantity,
         side: rawSide,
         order_type: rawOrderType,
@@ -1711,7 +1739,7 @@ const UnifiedAssistant: React.FC = () => {
         if (isSuccessfulOrder) {
           toolUIDataRef.current = {
             type: 'order-execution',
-            symbol: rawSymbol || '',
+            symbol: symbol || '',
             data: voicePayload.uiData
           };
           console.log('📊 [Confirm Order Tool] Set toolUIDataRef from voice response:', toolUIDataRef.current);

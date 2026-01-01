@@ -162,8 +162,8 @@ export async function POST(req: NextRequest) {
         });
 
         const voiceResponse = orderType === 'limit'
-          ? `Orders confirmed. Limit order to sell long ${splitOrder.long_qty} shares and short sell ${splitOrder.short_qty} shares of ${companyName} at ${formatCurrency(limitPrice!)} have been submitted.`
-          : `Orders confirmed. Market order to sell long ${splitOrder.long_qty} shares and short sell ${splitOrder.short_qty} shares of ${companyName} have been submitted. Please check your trading app for execution details.`;
+          ? `Orders confirmed. Limit order to sell long ${splitOrder.long_qty} shares and short sell ${splitOrder.short_qty} shares of ${companyName} at ${formatCurrency(limitPrice!)} have been submitted. Is there anything else I can help you with?`
+          : `Orders confirmed. Market order to sell long ${splitOrder.long_qty} shares and short sell ${splitOrder.short_qty} shares of ${companyName} have been submitted. Is there anything else I can help you with?`;
 
         trace.logResponse({
           voiceText: voiceResponse,
@@ -229,9 +229,9 @@ export async function POST(req: NextRequest) {
       const sideStr = side === 'buy' ? 'buy' : 'sell';
 
       if (orderType === 'limit') {
-        voiceResponse = `Limit order to ${sideStr} ${quantity} shares of ${companyName} at ${formatCurrency(limitPrice!)} is confirmed.`;
+        voiceResponse = `Limit order to ${sideStr} ${quantity} shares of ${companyName} at ${formatCurrency(limitPrice!)} is confirmed. Is there anything else I can help you with?`;
       } else {
-        voiceResponse = `Market order to ${sideStr} ${quantity} shares of ${companyName} is confirmed. Please check your trading app for execution details.`;
+        voiceResponse = `Market order to ${sideStr} ${quantity} shares of ${companyName} is confirmed. Is there anything else I can help you with?`;
       }
 
       const uiData: OrderExecutionUIData = {

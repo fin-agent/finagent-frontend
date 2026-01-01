@@ -1701,14 +1701,25 @@ const UnifiedAssistant: React.FC = () => {
       });
 
       // Store UI data from voice response
+      // CRITICAL: For cancellations (confirmed: false), DON'T resolve the promise.
+      // This allows a subsequent place_order call (for modified order) to resolve it instead.
+      // Only show UI card for successful order executions.
       if (voicePayload && typeof voicePayload === 'object' && 'uiData' in voicePayload) {
-        toolUIDataRef.current = {
-          type: 'order-execution',
-          symbol: rawSymbol || '',
-          data: voicePayload.uiData
-        };
-        console.log('📊 [Confirm Order Tool] Set toolUIDataRef from voice response:', toolUIDataRef.current);
-        resolveToolDataPromise(toolUIDataRef.current);
+        const uiData = voicePayload.uiData as { success?: boolean } | null;
+        const isSuccessfulOrder = uiData?.success === true;
+
+        if (isSuccessfulOrder) {
+          toolUIDataRef.current = {
+            type: 'order-execution',
+            symbol: rawSymbol || '',
+            data: voicePayload.uiData
+          };
+          console.log('📊 [Confirm Order Tool] Set toolUIDataRef from voice response:', toolUIDataRef.current);
+          resolveToolDataPromise(toolUIDataRef.current);
+        } else {
+          // Cancellation - don't resolve promise, let place_order handle it
+          console.log('📊 [Confirm Order Tool] Order cancelled - NOT resolving promise (waiting for place_order)');
+        }
       } else {
         resolveToolDataPromise(null);
       }
@@ -2523,7 +2534,12 @@ const UnifiedAssistant: React.FC = () => {
           body: JSON.stringify(body),
         });
         const voicePayload = await res.json();
-        const uiData = voicePayload?.uiData || voicePayload;
+        // Don't fallback to voicePayload when uiData is null (e.g., insufficient buying power)
+        const uiData = voicePayload?.uiData;
+        if (!uiData) {
+          console.log('📝 [fetchTradeData order-confirmation] No uiData - error response, skipping card');
+          return null;
+        }
         return { type, symbol, data: uiData };
       } else if (type === 'order-execution') {
         // Order execution should come from tool function, not fetchTradeData
@@ -4446,6 +4462,12 @@ const UnifiedAssistant: React.FC = () => {
     if (type === 'order-confirmation') {
       console.log('🎨 Rendering order confirmation card with data:', data);
       const confirmData = data as OrderConfirmationProps;
+
+      // Safety check: Don't render card if data is invalid (e.g., error response like insufficient buying power)
+      if (!confirmData || !confirmData.symbol || confirmData.quantity === undefined || isNaN(confirmData.quantity)) {
+        console.log('🎨 [order-confirmation] Invalid data, skipping card render');
+        return null;
+      }
 
       // Handler for Yes button - confirms the order via API
       const handleConfirmOrder = async () => {

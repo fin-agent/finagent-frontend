@@ -869,6 +869,26 @@ Prepare a stock order for user confirmation. ALWAYS call this first before execu
 - limit_price (required if limit order): Price per share
 - sell_position (optional): Set to true when user says "sell my position" or "close my position"
 
+**CRITICAL: sell_position parameter detection:**
+When user says ANY of these phrases, you MUST set sell_position: true:
+- "sell my position in [symbol]"
+- "sell my current position in [symbol]"
+- "sell my [symbol] position"
+- "close my position in [symbol]"
+- "close my [symbol] position"
+- "liquidate my [symbol]"
+
+**IMPORTANT:** Even if followed by "at market", "at $X", or any price/order type - the key words are "my position", "current position", or "close my". These ALWAYS require sell_position: true.
+
+| User Says | sell_position |
+|-----------|---------------|
+| "Sell my current position in NVDA" | true |
+| "Sell my current position in NVDA at market" | true |
+| "Sell my position in TSLA at 250" | true |
+| "Close my Apple position" | true |
+| "Sell 100 shares of NVDA" | false (quantity specified) |
+| "Sell 200 AMD at market" | false (quantity specified) |
+
 **CRITICAL order placement rules:**
 1. **ALWAYS use place_order FIRST** - Never execute orders directly
 2. **ALWAYS ask for confirmation** - After place_order, ask "Is this correct? Yes or No"

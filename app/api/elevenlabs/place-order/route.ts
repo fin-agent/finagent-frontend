@@ -77,6 +77,17 @@ export async function POST(req: NextRequest) {
     const rawLimitPrice = body.limit_price || body.parameters?.limit_price || body.body?.limit_price || body.body?.parameters?.limit_price;
     const sellPosition = body.sell_position || body.parameters?.sell_position || body.body?.sell_position || body.body?.parameters?.sell_position;
 
+    // Enhanced debug logging - capture full raw body for sell orders
+    console.log('📊 [Place Order] Full params from ElevenLabs:', {
+      symbol: rawSymbol,
+      quantity: rawQuantity,
+      side: rawSide,
+      orderType: rawOrderType,
+      limitPrice: rawLimitPrice,
+      sellPosition,
+      rawBodySnippet: JSON.stringify(body).substring(0, 800)
+    });
+
     trace.logInput({ rawSymbol, rawQuantity, rawSide, rawOrderType, rawLimitPrice, sellPosition });
 
     // Validate required parameters

@@ -51,6 +51,8 @@ interface FundTransfersUIData {
     startDate: string;
     endDate: string;
   } | null;
+  // For specific amount queries like "Which day did I withdraw 1000"
+  searchedAmount?: number;
 }
 
 function formatCurrency(value: number): string {
@@ -334,6 +336,8 @@ export async function POST(req: NextRequest) {
         amount: t.Amount || 0,
         transNumber: t.TransNumber,
       })),
+      // Include searchedAmount for specific amount queries
+      ...(amount ? { searchedAmount: amount } : {}),
     };
 
     return NextResponse.json({ response, uiData });

@@ -30,6 +30,8 @@ export interface FundTransfersProps {
     startDate: string;
     endDate: string;
   } | null;
+  // For specific amount queries like "Which day did I withdraw 1000"
+  searchedAmount?: number;
 }
 
 // Colors for the premium theme
@@ -254,10 +256,14 @@ export function FundTransfersCard({
   countOut,
   transfers,
   suggestion,
+  searchedAmount,
 }: FundTransfersProps) {
   const config = transferConfig[transferType];
   const netAmount = totalIn - totalOut;
   const hasNoData = transactionCount === 0;
+
+  // Specific amount lookup mode - shows single transfer prominently
+  const isSpecificAmountQuery = searchedAmount !== undefined && transfers && transfers.length === 1;
 
   // Determine what to show in hero section based on direction filter
   const heroLabel = direction === 'in' ? 'Total Deposited' : direction === 'out' ? 'Total Withdrawn' : 'Net Movement';
@@ -282,8 +288,74 @@ export function FundTransfersCard({
 
       {/* Main content */}
       <div style={{ position: 'relative', padding: '12px 14px' }}>
-        {/* Hero amount or Suggestion */}
-        {hasNoData && suggestion ? (
+        {/* Specific amount lookup - single transfer view */}
+        {isSpecificAmountQuery && transfers && transfers[0] ? (() => {
+          const transfer = transfers[0];
+          const isWithdrawal = transfer.direction === 'out';
+          const transferDate = new Date(transfer.date);
+          const formattedDate = transferDate.toLocaleDateString('en-US', {
+            weekday: 'long',
+            month: 'long',
+            day: 'numeric',
+            year: 'numeric'
+          });
+          return (
+            <div
+              style={{
+                ...metricBoxStyle,
+                textAlign: 'center',
+                padding: '16px 14px',
+                background: `linear-gradient(135deg, ${config.gradientFrom} 0%, ${colors.bgMetric} 100%)`,
+                borderTop: `2px solid ${isWithdrawal ? colors.red : colors.green}`,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', marginBottom: '8px' }}>
+                <span style={{ fontSize: '14px' }}>{isWithdrawal ? '📤' : '📥'}</span>
+                <span style={{ ...labelStyle, color: isWithdrawal ? colors.red : colors.green }}>
+                  Transfer Found
+                </span>
+              </div>
+              {/* Date as hero */}
+              <p style={{
+                fontFamily: 'monospace',
+                fontSize: '18px',
+                fontWeight: 700,
+                color: colors.white,
+                margin: '4px 0 12px 0',
+              }}>
+                {formattedDate}
+              </p>
+              {/* Transfer details */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '16px' }}>
+                <div style={{ textAlign: 'center' }}>
+                  <span style={{ ...labelStyle, fontSize: '9px' }}>Amount</span>
+                  <p style={{
+                    fontFamily: 'monospace',
+                    fontSize: '16px',
+                    fontWeight: 600,
+                    color: isWithdrawal ? colors.red : colors.green,
+                    margin: '2px 0 0 0',
+                  }}>
+                    {isWithdrawal ? '-' : '+'}{formatCurrency(transfer.amount)}
+                  </p>
+                </div>
+                <div style={{ width: '1px', height: '30px', backgroundColor: colors.border }} />
+                <div style={{ textAlign: 'center' }}>
+                  <span style={{ ...labelStyle, fontSize: '9px' }}>Method</span>
+                  <p style={{
+                    fontFamily: 'monospace',
+                    fontSize: '14px',
+                    fontWeight: 600,
+                    color: colors.white,
+                    margin: '2px 0 0 0',
+                  }}>
+                    {transfer.type}
+                  </p>
+                </div>
+              </div>
+            </div>
+          );
+        })() : hasNoData && suggestion ? (
           <div
             style={{
               ...metricBoxStyle,
@@ -380,8 +452,8 @@ export function FundTransfersCard({
           </>
         )}
 
-        {/* Transfers list */}
-        {transfers && transfers.length > 0 && (
+        {/* Transfers list - hidden for specific amount queries since we show single transfer prominently */}
+        {transfers && transfers.length > 0 && !isSpecificAmountQuery && (
           <div style={{ borderTop: `1px solid ${colors.borderHeader}`, paddingTop: '8px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
               <span style={labelStyle}>Recent Transfers</span>

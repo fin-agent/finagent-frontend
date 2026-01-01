@@ -128,6 +128,17 @@ ${intents.map(i => `### ${i.id}
 
   **CRITICAL: "charges" keyword = FEES intent**
   When user says "charges" (e.g., "debit balance charges"), this is a FEES query (debit_interest), NOT an account balance query.
+- **transferType**: For fund transfer queries, infer from context:
+  - "wire" / "wired" / "wire transfer" -> "wire"
+  - "ACH" / "ach" / "ACH transfer" -> "ach"
+  - "journal" / "journal entry" -> "journal"
+  - If not specified -> "all"
+- **direction**: For fund transfer queries, infer from context:
+  - "in" / "into" / "deposit" / "deposited" / "bring in" / "brought in" / "wired in" -> "in"
+  - "out" / "withdraw" / "withdrew" / "withdrawal" / "took out" / "wired out" -> "out"
+  - If not specified (general fund movements) -> "all"
+- **amount**: For fund transfer queries, extract specific dollar amounts mentioned:
+  - "withdraw 1000" / "deposit 5000" / "$10,000" -> extract as number (1000, 5000, 10000)
 
 ## Database Schema Reference
 
@@ -438,5 +449,26 @@ Query: "And what about the first half of the year?"
 Response: {"intent": "contextual.time_period_followup", "confidence": 0.91, "entities": {"timePeriod": "first half of the year", "dateFilter": {"type": "range", "startDate": "2025-01-01", "endDate": "2025-06-30", "description": "H1 2025"}}}
 
 Query: "So how much for the last six months?"
-Response: {"intent": "contextual.time_period_followup", "confidence": 0.87, "entities": {"timePeriod": "last six months", "dateFilter": {"type": "relative", "period": "last six months", "description": "last six months"}}}`;
+Response: {"intent": "contextual.time_period_followup", "confidence": 0.87, "entities": {"timePeriod": "last six months", "dateFilter": {"type": "relative", "period": "last six months", "description": "last six months"}}}
+
+Query: "Show me all money that I wired in this year"
+Response: {"intent": "transfers.query", "confidence": 0.95, "entities": {"transferType": "wire", "direction": "in", "timePeriod": "this year", "dateFilter": {"type": "relative", "period": "this year", "description": "this year"}}}
+
+Query: "Show all fund movements into the account in December"
+Response: {"intent": "transfers.query", "confidence": 0.94, "entities": {"direction": "in", "timePeriod": "December", "dateFilter": {"type": "range", "startDate": "2025-12-01", "endDate": "2025-12-31", "description": "December 2025"}}}
+
+Query: "How much did I withdraw in September?"
+Response: {"intent": "transfers.query", "confidence": 0.93, "entities": {"direction": "out", "timePeriod": "September", "dateFilter": {"type": "range", "startDate": "2025-09-01", "endDate": "2025-09-30", "description": "September 2025"}}}
+
+Query: "Which day did I withdraw 1000?"
+Response: {"intent": "transfers.query", "confidence": 0.92, "entities": {"direction": "out", "amount": 1000}}
+
+Query: "How many wire transfers did I do this year?"
+Response: {"intent": "transfers.query", "confidence": 0.94, "entities": {"transferType": "wire", "timePeriod": "this year", "dateFilter": {"type": "relative", "period": "this year", "description": "this year"}}}
+
+Query: "How much money did I bring into my account this year?"
+Response: {"intent": "transfers.query", "confidence": 0.93, "entities": {"direction": "in", "timePeriod": "this year", "dateFilter": {"type": "relative", "period": "this year", "description": "this year"}}}
+
+Query: "ACH deposits this month"
+Response: {"intent": "transfers.query", "confidence": 0.92, "entities": {"transferType": "ach", "direction": "in", "timePeriod": "this month", "dateFilter": {"type": "relative", "period": "this month", "description": "this month"}}}`;
 }

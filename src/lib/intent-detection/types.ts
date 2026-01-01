@@ -81,6 +81,10 @@ export interface ExtractedEntities {
   // Fundamentals entities
   metricType?: string;           // "pe_ratio", "market_cap", "beta", "52_week_high", etc.
   statementType?: 'income' | 'balance' | 'cashflow';
+  // Fund transfers entities
+  transferType?: 'all' | 'wire' | 'ach' | 'journal';
+  direction?: 'all' | 'in' | 'out';
+  amount?: number;
 }
 
 // Result from GPT classification

@@ -91,6 +91,7 @@ interface QueryIntent {
   dateFilter?: { type: string; startDate?: string; endDate?: string; description: string };
   transferType?: TransferType;  // For fund transfers: all, wire, ach, journal
   direction?: DirectionType;    // For fund transfers: all, in, out
+  amount?: number;              // For fund transfers: specific amount lookup
 }
 
 interface QueryIntentWithConfidence extends QueryIntent {
@@ -784,6 +785,9 @@ async function classifyIntentViaAPI(query: string): Promise<QueryIntentWithConfi
       accountQueryType: result.entities.accountQueryType,
       feeType: result.entities.feeType,
       dateFilter: result.entities.dateFilter,
+      transferType: result.entities.transferType as TransferType | undefined,  // For fund transfers
+      direction: result.entities.direction as DirectionType | undefined,      // For fund transfers
+      amount: result.entities.amount,                                         // For fund transfers: specific amount
       confidence: result.confidence,
     };
   } catch (error) {
@@ -1658,23 +1662,25 @@ const UnifiedAssistant: React.FC = () => {
           }
           let tradeUI: TradeUIData | undefined;
 
-          // CRITICAL: Wait for tool function to complete before checking toolUIDataRef
-          // This prevents the race condition where message handler runs before tool fetch completes
+          // CRITICAL: Wait for tool function to complete and USE the data from the promise
+          // This prevents race conditions where a new query overwrites toolUIDataRef before we read it
           if (pendingToolDataPromiseRef.current) {
             console.log('⏳ [Text Mode] Awaiting tool data promise...');
             const toolData = await pendingToolDataPromiseRef.current;
             pendingToolDataPromiseRef.current = null;  // Clear after awaiting
             console.log('✅ [Text Mode] Tool data promise resolved:', toolData ? toolData.type : 'null');
+
+            // USE the toolData directly from the promise (captured at resolution time)
+            // This is the correct data for THIS query, even if toolUIDataRef was overwritten by a subsequent query
+            if (toolData) {
+              tradeUI = toolData;
+              console.log('🎯 [Tool Direct] Using UI data from tool promise:', tradeUI.type);
+              lastIntentCardRenderedAtRef.current = Date.now();
+            }
           }
 
-          // HIGHEST PRIORITY: Use UI data set directly by client tools (single source of truth)
-          if (toolUIDataRef.current) {
-            tradeUI = toolUIDataRef.current;
-            toolUIDataRef.current = null; // Clear after use
-            console.log('🎯 [Tool Direct] Using UI data from client tool:', tradeUI.type);
-            // Mark timestamp to prevent fallback from overriding
-            lastIntentCardRenderedAtRef.current = Date.now();
-          }
+          // Clear toolUIDataRef to prevent stale data - the promise already captured the correct value
+          toolUIDataRef.current = null;
 
           // CRITICAL: Await LLM classifier before checking pendingIntent
           // The classifier runs async in user message handler and may not have finished yet
@@ -1719,6 +1725,9 @@ const UnifiedAssistant: React.FC = () => {
                   feeType: pendingIntent.feeType,
                   dateFilter: pendingIntent.dateFilter,
                   securityType: pendingIntent.securityType,
+                  transferType: pendingIntent.transferType,
+                  direction: pendingIntent.direction,
+                  amount: pendingIntent.amount,
                 }
               );
               if (data) {
@@ -2028,6 +2037,7 @@ const UnifiedAssistant: React.FC = () => {
           transfer_type: extraParams?.transferType || 'all',
           direction: extraParams?.direction || 'all',
           time_period: timePeriod,
+          date_filter: extraParams?.dateFilter,
           amount: extraParams?.amount,
         };
         const res = await fetch(endpoint, {
@@ -2511,6 +2521,9 @@ const UnifiedAssistant: React.FC = () => {
                   feeType: suggestionIntent.feeType,
                   dateFilter: suggestionIntent.dateFilter,
                   securityType: suggestionIntent.securityType,
+                  transferType: suggestionIntent.transferType,
+                  direction: suggestionIntent.direction,
+                  amount: suggestionIntent.amount,
                 }
               );
               // Clear suggestion after use
@@ -2582,30 +2595,25 @@ const UnifiedAssistant: React.FC = () => {
             }
             let tradeUI: TradeUIData | undefined;
 
-            // CRITICAL: Wait for tool function to complete before checking toolUIDataRef
-            // This prevents the race condition where message handler runs before tool fetch completes
+            // CRITICAL: Wait for tool function to complete and USE the data from the promise
+            // This prevents race conditions where a new query overwrites toolUIDataRef before we read it
             if (pendingToolDataPromiseRef.current) {
               console.log('⏳ [Voice Mode] Awaiting tool data promise...');
               const toolData = await pendingToolDataPromiseRef.current;
               pendingToolDataPromiseRef.current = null;  // Clear after awaiting
               console.log('✅ [Voice Mode] Tool data promise resolved:', toolData ? toolData.type : 'null');
+
+              // USE the toolData directly from the promise (captured at resolution time)
+              // This is the correct data for THIS query, even if toolUIDataRef was overwritten by a subsequent query
+              if (toolData) {
+                tradeUI = toolData;
+                console.log('🎯 [Voice Tool Direct] Using UI data from tool promise:', tradeUI.type);
+                lastIntentCardRenderedAtRef.current = Date.now();
+              }
             }
 
-            // DEBUG: Log the state of toolUIDataRef.current
-            console.log('🔍 [Voice Mode] toolUIDataRef.current:', toolUIDataRef.current ? 'SET' : 'NULL');
-            if (toolUIDataRef.current) {
-              console.log('🔍 [Voice Mode] toolUIDataRef type:', toolUIDataRef.current.type);
-              console.log('🔍 [Voice Mode] toolUIDataRef data has trades:', !!(toolUIDataRef.current.data as { trades?: unknown[] })?.trades);
-            }
-
-            // HIGHEST PRIORITY: Use UI data set directly by client tools (single source of truth)
-            if (toolUIDataRef.current) {
-              tradeUI = toolUIDataRef.current;
-              toolUIDataRef.current = null; // Clear after use
-              console.log('🎯 [Voice Tool Direct] Using UI data from client tool:', tradeUI.type);
-              // Mark timestamp to prevent fallback from overriding
-              lastIntentCardRenderedAtRef.current = Date.now();
-            }
+            // Clear toolUIDataRef to prevent stale data - the promise already captured the correct value
+            toolUIDataRef.current = null;
 
             // CRITICAL: Await LLM classifier before checking pendingIntent
             // The classifier runs async in user message handler and may not have finished yet
@@ -2654,6 +2662,9 @@ const UnifiedAssistant: React.FC = () => {
                     feeType: pendingIntent.feeType,
                     dateFilter: pendingIntent.dateFilter,
                     securityType: pendingIntent.securityType,
+                    transferType: pendingIntent.transferType,
+                    direction: pendingIntent.direction,
+                    amount: pendingIntent.amount,
                   }
                 );
                 if (data) {
@@ -3128,6 +3139,9 @@ const UnifiedAssistant: React.FC = () => {
                 feeType: intent.feeType,
                 dateFilter: intent.dateFilter,
                 securityType: intent.securityType,
+                transferType: intent.transferType,
+                direction: intent.direction,
+                amount: intent.amount,
               }
             )
           : null;
@@ -3193,6 +3207,9 @@ const UnifiedAssistant: React.FC = () => {
 		              feeType: intent.feeType,
 		              dateFilter: intent.dateFilter,
 		              securityType: intent.securityType,
+		              transferType: intent.transferType,
+		              direction: intent.direction,
+		              amount: intent.amount,
 		            }
 		          )
 		        : null;
@@ -3262,6 +3279,9 @@ const UnifiedAssistant: React.FC = () => {
             feeType: intent.feeType,
             dateFilter: intent.dateFilter,
             securityType: intent.securityType,
+            transferType: intent.transferType,
+            direction: intent.direction,
+            amount: intent.amount,
           }
         )
       : null;
@@ -4108,6 +4128,7 @@ const UnifiedAssistant: React.FC = () => {
           startDate: string;
           endDate: string;
         } | null;
+        searchedAmount?: number; // For specific amount queries like "Which day did I withdraw 1000"
       };
 
       if (transfersData.timePeriod) {
@@ -4125,6 +4146,7 @@ const UnifiedAssistant: React.FC = () => {
               countOut={transfersData.countOut}
               transfers={transfersData.transfers}
               suggestion={transfersData.suggestion}
+              searchedAmount={transfersData.searchedAmount}
             />
           </div>
         );

@@ -27,6 +27,8 @@ export interface OrderConfirmationProps {
     nextOpen: string;
     nextClose: string;
   };
+  onConfirm?: () => void;
+  onCancel?: () => void;
 }
 
 // Terminal Luxe color palette
@@ -204,6 +206,8 @@ export function OrderConfirmationCard(props: OrderConfirmationProps) {
     positionAction,
     splitOrder,
     marketStatus,
+    onConfirm,
+    onCancel,
   } = props;
 
   const isBuy = side === 'buy';
@@ -236,10 +240,59 @@ export function OrderConfirmationCard(props: OrderConfirmationProps) {
           <StatusBadge text={sideLabel} color={accentColor} />
           <StatusBadge text={orderTypeLabel} color={orderType === 'limit' ? colors.gold : colors.cyan} />
         </div>
-        {marketStatus && !marketStatus.isOpen && (
-          <StatusBadge text="Market Closed" color={colors.purple} />
-        )}
       </div>
+
+      {/* Market Closed Banner - Prominent Alert */}
+      {marketStatus && !marketStatus.isOpen && (
+        <div style={{
+          padding: '14px 18px',
+          background: `linear-gradient(135deg, ${colors.red}18 0%, ${colors.redMuted}08 100%)`,
+          borderBottom: `1px solid ${colors.red}40`,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+        }}>
+          <div style={{
+            width: '36px',
+            height: '36px',
+            borderRadius: '8px',
+            background: `${colors.red}20`,
+            border: `1px solid ${colors.red}50`,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            boxShadow: `0 0 12px ${colors.red}30`,
+          }}>
+            <span style={{ fontSize: '18px' }}>🕐</span>
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{
+              fontSize: '12px',
+              fontWeight: 700,
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+              color: colors.red,
+              marginBottom: '2px',
+            }}>
+              Market Closed
+            </div>
+            <div style={{
+              fontSize: '11px',
+              color: colors.textMuted,
+            }}>
+              Order will be queued for next trading session
+            </div>
+          </div>
+          <div style={{
+            width: '10px',
+            height: '10px',
+            borderRadius: '50%',
+            backgroundColor: colors.red,
+            animation: 'pulse 2s ease-in-out infinite',
+            boxShadow: `0 0 10px ${colors.red}60`,
+          }} />
+        </div>
+      )}
 
       {/* Symbol & Company Hero */}
       <div style={{
@@ -401,27 +454,101 @@ export function OrderConfirmationCard(props: OrderConfirmationProps) {
         padding: '16px 18px',
         background: colors.bgCardSecondary,
         display: 'flex',
+        flexDirection: 'column',
         alignItems: 'center',
-        justifyContent: 'center',
-        gap: '8px',
+        gap: '14px',
       }}>
-        <span style={{
-          fontSize: '11px',
-          fontWeight: 500,
-          color: colors.textMuted,
-          letterSpacing: '0.05em',
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
         }}>
-          Awaiting confirmation...
-        </span>
-        <span style={{
-          display: 'inline-block',
-          width: '8px',
-          height: '8px',
-          borderRadius: '50%',
-          backgroundColor: colors.gold,
-          animation: 'pulse 1.5s ease-in-out infinite',
-          boxShadow: `0 0 8px ${colors.gold}60`,
-        }} />
+          <span style={{
+            fontSize: '11px',
+            fontWeight: 500,
+            color: colors.textMuted,
+            letterSpacing: '0.05em',
+          }}>
+            Confirm this order?
+          </span>
+          <span style={{
+            display: 'inline-block',
+            width: '8px',
+            height: '8px',
+            borderRadius: '50%',
+            backgroundColor: colors.gold,
+            animation: 'pulse 1.5s ease-in-out infinite',
+            boxShadow: `0 0 8px ${colors.gold}60`,
+          }} />
+        </div>
+
+        {/* Yes/No Buttons */}
+        <div style={{
+          display: 'flex',
+          gap: '12px',
+          width: '100%',
+          maxWidth: '280px',
+        }}>
+          <button
+            onClick={onCancel}
+            style={{
+              flex: 1,
+              padding: '12px 20px',
+              borderRadius: '8px',
+              background: `${colors.red}15`,
+              border: `1px solid ${colors.red}40`,
+              color: colors.red,
+              fontSize: '13px',
+              fontWeight: 600,
+              letterSpacing: '0.05em',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+              fontFamily: 'inherit',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = `${colors.red}25`;
+              e.currentTarget.style.borderColor = `${colors.red}60`;
+              e.currentTarget.style.boxShadow = `0 0 12px ${colors.red}30`;
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = `${colors.red}15`;
+              e.currentTarget.style.borderColor = `${colors.red}40`;
+              e.currentTarget.style.boxShadow = 'none';
+            }}
+          >
+            No
+          </button>
+          <button
+            onClick={onConfirm}
+            style={{
+              flex: 1,
+              padding: '12px 20px',
+              borderRadius: '8px',
+              background: `linear-gradient(135deg, ${colors.green}20 0%, ${colors.greenMuted}15 100%)`,
+              border: `1px solid ${colors.green}50`,
+              color: colors.green,
+              fontSize: '13px',
+              fontWeight: 600,
+              letterSpacing: '0.05em',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+              fontFamily: 'inherit',
+              boxShadow: `0 0 8px ${colors.green}20`,
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = `linear-gradient(135deg, ${colors.green}30 0%, ${colors.greenMuted}25 100%)`;
+              e.currentTarget.style.borderColor = `${colors.green}70`;
+              e.currentTarget.style.boxShadow = `0 0 16px ${colors.green}40`;
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = `linear-gradient(135deg, ${colors.green}20 0%, ${colors.greenMuted}15 100%)`;
+              e.currentTarget.style.borderColor = `${colors.green}50`;
+              e.currentTarget.style.boxShadow = `0 0 8px ${colors.green}20`;
+            }}
+          >
+            Yes
+          </button>
+        </div>
       </div>
 
       {/* Inline keyframes for pulse animation */}

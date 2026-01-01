@@ -98,6 +98,12 @@ interface QueryIntent {
   direction?: DirectionType;    // For fund transfers: all, in, out
   amount?: number;              // For fund transfers: specific amount lookup
   positionType?: PositionFilterType; // For positions: all, long, short, flat
+  // Order-related fields
+  orderSide?: 'buy' | 'sell';
+  orderType?: 'market' | 'limit';
+  orderQuantity?: number;
+  orderPrice?: number;
+  sellPosition?: boolean;
 }
 
 interface QueryIntentWithConfidence extends QueryIntent {
@@ -794,6 +800,13 @@ async function classifyIntentViaAPI(query: string): Promise<QueryIntentWithConfi
       transferType: result.entities.transferType as TransferType | undefined,  // For fund transfers
       direction: result.entities.direction as DirectionType | undefined,      // For fund transfers
       amount: result.entities.amount,                                         // For fund transfers: specific amount
+      positionType: result.entities.positionType as PositionFilterType | undefined, // For positions
+      // Order-related fields
+      orderSide: result.entities.orderSide,
+      orderType: result.entities.orderType,
+      orderQuantity: result.entities.orderQuantity,
+      orderPrice: result.entities.orderPrice,
+      sellPosition: result.entities.sellPosition,
       confidence: result.confidence,
     };
   } catch (error) {
@@ -1883,6 +1896,12 @@ const UnifiedAssistant: React.FC = () => {
                   direction: pendingIntent.direction,
                   amount: pendingIntent.amount,
                   positionType: pendingIntent.positionType,
+                  // Order-related params
+                  orderSide: pendingIntent.orderSide,
+                  orderType: pendingIntent.orderType,
+                  orderQuantity: pendingIntent.orderQuantity,
+                  orderPrice: pendingIntent.orderPrice,
+                  sellPosition: pendingIntent.sellPosition,
                 }
               );
               if (data) {
@@ -1957,7 +1976,7 @@ const UnifiedAssistant: React.FC = () => {
     type: TradeUIData['type'],
     tradeType?: 'buy' | 'sell' | 'all',
     timePeriod?: string,
-    extraParams?: { callPut?: 'call' | 'put'; expiration?: string; aggregation?: string; accountQueryType?: AccountQueryType; feeType?: FeeType; includeTrades?: boolean; dateFilter?: { type: string; startDate?: string; endDate?: string; description: string }; queryType?: string; strike?: number; chartPeriod?: string; securityType?: 'stock' | 'option'; transferType?: TransferType; direction?: DirectionType; amount?: number; positionType?: PositionFilterType }
+    extraParams?: { callPut?: 'call' | 'put'; expiration?: string; aggregation?: string; accountQueryType?: AccountQueryType; feeType?: FeeType; includeTrades?: boolean; dateFilter?: { type: string; startDate?: string; endDate?: string; description: string }; queryType?: string; strike?: number; chartPeriod?: string; securityType?: 'stock' | 'option'; transferType?: TransferType; direction?: DirectionType; amount?: number; positionType?: PositionFilterType; orderSide?: 'buy' | 'sell'; orderType?: 'market' | 'limit'; orderQuantity?: number; orderPrice?: number; sellPosition?: boolean }
   ): Promise<TradeUIData | null> => {
     try {
       let endpoint: string;
@@ -2485,6 +2504,32 @@ const UnifiedAssistant: React.FC = () => {
           expiration: extraParams?.expiration,
           data: uiData
         };
+      } else if (type === 'order-confirmation') {
+        // SINGLE FETCH: Use place-order webhook with order params
+        endpoint = '/api/elevenlabs/place-order';
+        console.log('📝 [fetchTradeData order-confirmation] extraParams:', JSON.stringify(extraParams));
+        body = {
+          symbol,
+          quantity: extraParams?.orderQuantity,
+          side: extraParams?.orderSide,
+          order_type: extraParams?.orderType || (extraParams?.orderPrice ? 'limit' : 'market'),
+          limit_price: extraParams?.orderPrice,
+          sell_position: extraParams?.sellPosition,
+        };
+        console.log('📝 [fetchTradeData order-confirmation] body:', JSON.stringify(body));
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const voicePayload = await res.json();
+        const uiData = voicePayload?.uiData || voicePayload;
+        return { type, symbol, data: uiData };
+      } else if (type === 'order-execution') {
+        // Order execution should come from tool function, not fetchTradeData
+        // Return null to let the tool handle it
+        console.warn('[fetchTradeData] order-execution should be handled by confirm_order tool');
+        return null;
       } else {
         endpoint = '/api/elevenlabs/detailed-trades';
       }
@@ -2838,6 +2883,12 @@ const UnifiedAssistant: React.FC = () => {
                     direction: pendingIntent.direction,
                     amount: pendingIntent.amount,
                     positionType: pendingIntent.positionType,
+                    // Order-related params
+                    orderSide: pendingIntent.orderSide,
+                    orderType: pendingIntent.orderType,
+                    orderQuantity: pendingIntent.orderQuantity,
+                    orderPrice: pendingIntent.orderPrice,
+                    sellPosition: pendingIntent.sellPosition,
                   }
                 );
                 if (data) {
@@ -3316,6 +3367,12 @@ const UnifiedAssistant: React.FC = () => {
                 direction: intent.direction,
                 amount: intent.amount,
                 positionType: intent.positionType,
+                // Order-related params
+                orderSide: intent.orderSide,
+                orderType: intent.orderType,
+                orderQuantity: intent.orderQuantity,
+                orderPrice: intent.orderPrice,
+                sellPosition: intent.sellPosition,
               }
             )
           : null;
@@ -3385,6 +3442,12 @@ const UnifiedAssistant: React.FC = () => {
 		              direction: intent.direction,
 		              amount: intent.amount,
 		              positionType: intent.positionType,
+		              // Order-related params
+		              orderSide: intent.orderSide,
+		              orderType: intent.orderType,
+		              orderQuantity: intent.orderQuantity,
+		              orderPrice: intent.orderPrice,
+		              sellPosition: intent.sellPosition,
 		            }
 		          )
 		        : null;
@@ -3458,6 +3521,12 @@ const UnifiedAssistant: React.FC = () => {
             direction: intent.direction,
             amount: intent.amount,
             positionType: intent.positionType,
+            // Order-related params
+            orderSide: intent.orderSide,
+            orderType: intent.orderType,
+            orderQuantity: intent.orderQuantity,
+            orderPrice: intent.orderPrice,
+            sellPosition: intent.sellPosition,
           }
         )
       : null;
@@ -4378,6 +4447,122 @@ const UnifiedAssistant: React.FC = () => {
       console.log('🎨 Rendering order confirmation card with data:', data);
       const confirmData = data as OrderConfirmationProps;
 
+      // Handler for Yes button - confirms the order via API
+      const handleConfirmOrder = async () => {
+        console.log('✅ User confirmed order via button');
+
+        // Add user message "Yes"
+        const userMessageId = `btn-yes-${Date.now()}`;
+        const userMessage: TranscriptMessage = {
+          id: userMessageId,
+          role: 'user',
+          content: 'Yes',
+          timestamp: new Date(),
+        };
+        setTranscript(prev => [...prev, userMessage]);
+
+        // Save user message
+        if (currentConversationId) {
+          saveMessage(currentConversationId, 'user', 'Yes', 'text');
+        }
+
+        // Prepare order data for API
+        const orderPayload = {
+          symbol: confirmData.symbol,
+          quantity: confirmData.quantity,
+          side: confirmData.side,
+          order_type: confirmData.orderType,
+          limit_price: confirmData.limitPrice,
+          confirmed: true,
+          split_order: confirmData.splitOrder ? {
+            long_qty: confirmData.splitOrder.longQty,
+            short_qty: confirmData.splitOrder.shortQty,
+          } : undefined,
+        };
+
+        console.log('📤 Calling confirm-order API with:', orderPayload);
+
+        try {
+          const response = await fetch('/api/elevenlabs/confirm-order', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(orderPayload),
+          });
+
+          const result = await response.json();
+          console.log('📥 confirm-order API response:', result);
+
+          // Add assistant message with execution result
+          const assistantMessageId = `btn-exec-${Date.now()}`;
+          const assistantMessage: TranscriptMessage = {
+            id: assistantMessageId,
+            role: 'assistant',
+            content: result.response || 'Order processed.',
+            timestamp: new Date(),
+            tradeUI: result.uiData ? {
+              type: result.uiData.type,
+              symbol: confirmData.symbol,
+              data: result.uiData,
+              responseText: result.response,
+            } : undefined,
+          };
+          setTranscript(prev => [...prev, assistantMessage]);
+
+          // Save assistant message
+          if (currentConversationId) {
+            saveMessage(currentConversationId, 'assistant', result.response || 'Order processed.', 'text');
+          }
+
+        } catch (error) {
+          console.error('❌ Error confirming order:', error);
+
+          // Add error message
+          const errorMessageId = `btn-error-${Date.now()}`;
+          const errorMessage: TranscriptMessage = {
+            id: errorMessageId,
+            role: 'assistant',
+            content: 'Sorry, there was an error confirming your order. Please try again.',
+            timestamp: new Date(),
+          };
+          setTranscript(prev => [...prev, errorMessage]);
+        }
+      };
+
+      // Handler for No button - cancels and asks what to change
+      const handleCancelOrder = async () => {
+        console.log('❌ User cancelled order via button');
+
+        // Add user message "No"
+        const userMessageId = `btn-no-${Date.now()}`;
+        const userMessage: TranscriptMessage = {
+          id: userMessageId,
+          role: 'user',
+          content: 'No',
+          timestamp: new Date(),
+        };
+        setTranscript(prev => [...prev, userMessage]);
+
+        // Save user message
+        if (currentConversationId) {
+          saveMessage(currentConversationId, 'user', 'No', 'text');
+        }
+
+        // Add assistant response asking what to change
+        const assistantMessageId = `btn-cancel-${Date.now()}`;
+        const assistantMessage: TranscriptMessage = {
+          id: assistantMessageId,
+          role: 'assistant',
+          content: 'Order cancelled. What would you like to change in your order?',
+          timestamp: new Date(),
+        };
+        setTranscript(prev => [...prev, assistantMessage]);
+
+        // Save assistant message
+        if (currentConversationId) {
+          saveMessage(currentConversationId, 'assistant', 'Order cancelled. What would you like to change in your order?', 'text');
+        }
+      };
+
       return (
         <div style={{ marginTop: '12px' }}>
           <OrderConfirmationCard
@@ -4393,6 +4578,8 @@ const UnifiedAssistant: React.FC = () => {
             positionAction={confirmData.positionAction}
             splitOrder={confirmData.splitOrder}
             marketStatus={confirmData.marketStatus}
+            onConfirm={handleConfirmOrder}
+            onCancel={handleCancelOrder}
           />
         </div>
       );

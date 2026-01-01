@@ -73,7 +73,7 @@ export async function POST(req: NextRequest) {
       const completedTrace = trace.complete();
 
       return NextResponse.json({
-        response: 'Order cancelled. Let me know if you would like to place a different order.',
+        response: 'Order cancelled. What would you like to change in your order?',
         uiData: {
           type: 'order-execution',
           success: false,

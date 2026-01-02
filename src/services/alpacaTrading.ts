@@ -222,6 +222,44 @@ export async function cancelOrder(orderId: string): Promise<void> {
   }
 }
 
+export interface ListOrdersParams {
+  status?: 'open' | 'closed' | 'all';
+  limit?: number;
+  after?: string;
+  until?: string;
+  direction?: 'asc' | 'desc';
+  symbols?: string[];
+}
+
+/**
+ * List orders with optional filters
+ */
+export async function listOrders(params: ListOrdersParams = {}): Promise<OrderResponse[]> {
+  const searchParams = new URLSearchParams();
+
+  if (params.status) searchParams.set('status', params.status);
+  if (params.limit) searchParams.set('limit', params.limit.toString());
+  if (params.after) searchParams.set('after', params.after);
+  if (params.until) searchParams.set('until', params.until);
+  if (params.direction) searchParams.set('direction', params.direction);
+  if (params.symbols && params.symbols.length > 0) {
+    searchParams.set('symbols', params.symbols.join(','));
+  }
+
+  const url = `${ALPACA_TRADING_URL}/v2/orders${searchParams.toString() ? `?${searchParams}` : ''}`;
+
+  const response = await fetch(url, {
+    headers: getHeaders(),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ message: 'Unknown error' }));
+    throw new Error(`Failed to list orders: ${errorData.message || response.statusText}`);
+  }
+
+  return response.json();
+}
+
 // ============================================================================
 // Position Functions
 // ============================================================================

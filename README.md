@@ -365,6 +365,26 @@ The voice agent includes automatic reconnection and keepalive mechanisms:
 - `⚠️ [Disconnect] Quota/billing error detected` - Check ElevenLabs billing
 - `🔄 Sent keepalive ping to ElevenLabs` - Connection is healthy
 
+### Voice Activity Detection (VAD)
+
+The voice agent includes VAD score monitoring via the `onVadScore` callback to detect speech presence and help debug background noise issues.
+
+| Feature | Description |
+|---------|-------------|
+| **VAD Score** | 0-1 value indicating speech probability (higher = more likely speech) |
+| **Callback** | `onVadScore` in `useConversation` hook |
+| **Logging** | Logs when score > 0.5: `🎤 [VAD] Speech detected (score: X.XX)` |
+
+**Use Cases:**
+- Debug background noise triggering false speech detection
+- Implement visual feedback for microphone activity
+- Threshold-based audio filtering (only process when score > threshold)
+
+**Console Log:**
+```
+🎤 [VAD] Speech detected (score: 0.87)
+```
+
 ### Tool Webhook Flow
 
 ```mermaid

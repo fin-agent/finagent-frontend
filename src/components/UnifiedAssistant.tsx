@@ -2669,6 +2669,14 @@ const UnifiedAssistant: React.FC = () => {
     onStatusChange: (status) => {
       console.log('🔄 [Status Change]', JSON.stringify(status));
     },
+    onVadScore: (event) => {
+      // VAD score: 0-1, higher = more likely speech is detected
+      // Useful for debugging background noise issues
+      const score = event.vadScore;
+      if (score > 0.5) {
+        console.log(`🎤 [VAD] Speech detected (score: ${score.toFixed(2)})`);
+      }
+    },
     onMessage: async (message) => {
       // DEBUG: Log raw ElevenLabs message object to compare voice vs text
       console.log('🎙️ [ElevenLabs RAW] ================================');

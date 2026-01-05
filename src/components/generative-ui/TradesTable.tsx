@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useState, useMemo } from 'react';
-import { Download, ChevronLeft, ChevronRight, BarChart3, Layers, DollarSign, TrendingUp, Shuffle } from 'lucide-react';
-import { downloadCsv, toCsv } from '@/src/lib/csv';
+import { ChevronLeft, ChevronRight, BarChart3, Layers, DollarSign, TrendingUp, Shuffle } from 'lucide-react';
+import { DownloadMenu } from './DownloadMenu';
 import { getTradeCashFlowUSD, safeParseNumber } from '@/src/lib/trade-math';
 
 interface Trade {
@@ -137,27 +137,28 @@ const getDisplaySymbol = (symbol: string, isOption: boolean): string => {
 export function TradesTable({ trades, summary, filters, aggregations, pageSize = ITEMS_PER_PAGE }: TradesTableProps) {
   const [currentPage, setCurrentPage] = useState(1);
 
-  const handleDownload = () => {
-    const rows = trades.map((trade) => ({
-      TradeID: trade.TradeID,
-      Date: trade.Date,
-      Symbol: trade.Symbol,
-      SecurityType: trade.SecurityType,
-      TradeType: trade.TradeType,
-      StockShareQty: trade.StockShareQty,
-      StockTradePrice: trade.StockTradePrice,
-      OptionContracts: trade.OptionContracts,
-      OptionTradePremium: trade.OptionTradePremium,
-      Strike: trade.Strike || '',
-      Expiration: trade.Expiration || '',
-      CallPut: trade['Call/Put'] || '',
-      NetAmount: trade.NetAmount,
-      AmountUSD: getTradeCashFlowUSD(trade),
-    }));
+  // Prepare download data
+  const downloadRows = useMemo(() => trades.map((trade) => ({
+    TradeID: trade.TradeID,
+    Date: trade.Date,
+    Symbol: trade.Symbol,
+    SecurityType: trade.SecurityType,
+    TradeType: trade.TradeType,
+    StockShareQty: trade.StockShareQty,
+    StockTradePrice: trade.StockTradePrice,
+    OptionContracts: trade.OptionContracts,
+    OptionTradePremium: trade.OptionTradePremium,
+    Strike: trade.Strike || '',
+    Expiration: trade.Expiration || '',
+    CallPut: trade['Call/Put'] || '',
+    NetAmount: trade.NetAmount,
+    AmountUSD: getTradeCashFlowUSD(trade),
+  })), [trades]);
 
-    const filenameBase = (filters?.symbol || summary?.symbol || trades[0]?.Symbol || 'trades').toString().trim() || 'trades';
-    downloadCsv(`${filenameBase}_trades.csv`, toCsv(rows));
-  };
+  const downloadFilename = useMemo(() => {
+    const base = (filters?.symbol || summary?.symbol || trades[0]?.Symbol || 'trades').toString().trim() || 'trades';
+    return `${base}_trades`;
+  }, [filters?.symbol, summary?.symbol, trades]);
 
   const stockTrades = useMemo(() => trades.filter(t => t.SecurityType === 'S'), [trades]);
   const optionTrades = useMemo(() => trades.filter(t => t.SecurityType === 'O'), [trades]);
@@ -334,26 +335,8 @@ export function TradesTable({ trades, summary, filters, aggregations, pageSize =
           </div>
         </div>
 
-        {/* Download Button */}
-        <button
-          onClick={handleDownload}
-          style={{
-            width: '36px',
-            height: '36px',
-            borderRadius: '8px',
-            border: `1px solid ${palette.border}`,
-            backgroundColor: palette.elevated,
-            color: palette.textSecondary,
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            flexShrink: 0,
-          }}
-          title="Download CSV"
-        >
-          <Download size={14} />
-        </button>
+        {/* Download Menu */}
+        <DownloadMenu data={downloadRows} filename={downloadFilename} />
       </div>
 
       {/* Compact Stats Row */}

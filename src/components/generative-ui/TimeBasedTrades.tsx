@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState } from 'react';
-import { Calendar, Download, ChevronLeft, ChevronRight, Layers, Clock, TrendingUp, Shuffle } from 'lucide-react';
-import { downloadCsv, toCsv } from '@/src/lib/csv';
+import React, { useState, useMemo } from 'react';
+import { Calendar, ChevronLeft, ChevronRight, Layers, Clock, TrendingUp, Shuffle } from 'lucide-react';
+import { DownloadMenu } from './DownloadMenu';
 import { getTradeCashFlowUSD, safeParseNumber } from '@/src/lib/trade-math';
 
 interface Trade {
@@ -103,25 +103,26 @@ export function TimeBasedTrades({
 }: TimeBasedTradesProps) {
   const [currentPage, setCurrentPage] = useState(1);
 
-  const handleDownload = () => {
-    const rows = trades.map((trade) => ({
-      TradeID: trade.TradeID,
-      Date: trade.Date,
-      Symbol: trade.Symbol,
-      SecurityType: trade.SecurityType,
-      TradeType: trade.TradeType,
-      StockTradePrice: trade.StockTradePrice || '',
-      StockShareQty: trade.StockShareQty || '',
-      OptionContracts: trade.OptionContracts || '',
-      OptionTradePremium: trade.OptionTradePremium || '',
-      NetAmount: trade.NetAmount || '',
-      AmountUSD: getTradeCashFlowUSD(trade),
-    }));
+  // Prepare download data
+  const downloadRows = useMemo(() => trades.map((trade) => ({
+    TradeID: trade.TradeID,
+    Date: trade.Date,
+    Symbol: trade.Symbol,
+    SecurityType: trade.SecurityType,
+    TradeType: trade.TradeType,
+    StockTradePrice: trade.StockTradePrice || '',
+    StockShareQty: trade.StockShareQty || '',
+    OptionContracts: trade.OptionContracts || '',
+    OptionTradePremium: trade.OptionTradePremium || '',
+    NetAmount: trade.NetAmount || '',
+    AmountUSD: getTradeCashFlowUSD(trade),
+  })), [trades]);
 
+  const downloadFilename = useMemo(() => {
     const filenameBase = symbol ? symbol : 'portfolio';
     const periodSlug = timePeriod.description.trim().toLowerCase().replace(/\s+/g, '_');
-    downloadCsv(`${filenameBase}_${periodSlug}_trades.csv`, toCsv(rows));
-  };
+    return `${filenameBase}_${periodSlug}_trades`;
+  }, [symbol, timePeriod.description]);
 
   // Sort trades by date descending
   const sortedTrades = [...trades].sort((a, b) => new Date(b.Date).getTime() - new Date(a.Date).getTime());
@@ -295,26 +296,8 @@ export function TimeBasedTrades({
           </div>
         </div>
 
-        {/* Download Button */}
-        <button
-          onClick={handleDownload}
-          style={{
-            width: '36px',
-            height: '36px',
-            borderRadius: '8px',
-            border: `1px solid ${palette.border}`,
-            backgroundColor: palette.elevated,
-            color: palette.textSecondary,
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            flexShrink: 0,
-          }}
-          title="Download CSV"
-        >
-          <Download size={14} />
-        </button>
+        {/* Download Menu */}
+        <DownloadMenu data={downloadRows} filename={downloadFilename} />
       </div>
 
       {/* Compact Stats Row */}

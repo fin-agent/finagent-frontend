@@ -1,3 +1,5 @@
+import * as XLSX from 'xlsx';
+
 export type CsvCell = string | number | boolean | null | undefined;
 export type CsvRow = Record<string, CsvCell>;
 
@@ -35,5 +37,18 @@ export function downloadCsv(filename: string, csvText: string): void {
   link.remove();
 
   URL.revokeObjectURL(url);
+}
+
+export function downloadXlsx(filename: string, rows: CsvRow[], columns?: string[]): void {
+  if (rows.length === 0) return;
+
+  const header = columns ?? Object.keys(rows[0]);
+  const data = rows.map(row => header.map(key => row[key] ?? ''));
+
+  const worksheet = XLSX.utils.aoa_to_sheet([header, ...data]);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Data');
+
+  XLSX.writeFile(workbook, filename);
 }
 

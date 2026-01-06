@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useConversation } from '@elevenlabs/react';
-import { Mic, MessageSquare, X, Phone, Loader2, Plus, History, Send } from 'lucide-react';
+import { Mic, MicOff, MessageSquare, X, Phone, Loader2, Plus, History, Send } from 'lucide-react';
 import { TradesTable, type ActiveFilters, type Aggregations } from './generative-ui/TradesTable';
 import { TradeSummary } from './generative-ui/TradeSummary';
 import { TradeStats } from './generative-ui/TradeStats';
@@ -223,6 +223,10 @@ function formatDateForHighestStrikeCard(dateStr: string): string {
     year: 'numeric',
   });
 }
+
+// Voice command patterns for mute/unmute detection
+const MUTE_PATTERNS = [/please\s+(mute|hold)/i, /(mute|hold)\s+please/i];
+const UNMUTE_PATTERNS = [/please\s+(unmute|resume)/i, /(unmute|resume)\s+please/i];
 
 /**
  * Generate dynamic variables for ElevenLabs conversation session.
@@ -846,6 +850,8 @@ const UnifiedAssistant: React.FC = () => {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
+  const [isMicMuted, setIsMicMuted] = useState(false);
+  const [callDuration, setCallDuration] = useState(0); // Call duration in seconds
   const [transcript, setTranscript] = useState<TranscriptMessage[]>([]);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -2601,6 +2607,7 @@ const UnifiedAssistant: React.FC = () => {
 
   // ElevenLabs Conversation Hook - single source of truth for both voice and text
   const elevenLabsConversation = useConversation({
+    micMuted: isMicMuted, // Controlled by state - setting isMicMuted will automatically mute/unmute
     clientTools,
     onConnect: () => {
       console.log('ElevenLabs connected');
@@ -2617,6 +2624,7 @@ const UnifiedAssistant: React.FC = () => {
       isResumingFromHistoryRef.current = false;
       voiceTitleSetRef.current = false; // Reset title tracking
       setIsSending(false);
+      setIsMicMuted(false); // Ensure mic starts unmuted
     },
     onDisconnect: (details) => {
       console.log('ElevenLabs disconnected', JSON.stringify(details, null, 2));
@@ -2625,6 +2633,7 @@ const UnifiedAssistant: React.FC = () => {
       const errorMessage = details?.reason === 'error' ? (details as { message?: string }).message : undefined;
       console.log('🔴 [Disconnect] Reason:', details?.reason, '| Message:', errorMessage);
       setIsSending(false);
+      setIsMicMuted(false); // Reset mute state on disconnect
 
       // Check if this is a quota/billing error - don't auto-reconnect for these
       const isQuotaError = errorMessage?.toLowerCase().includes('quota') ||
@@ -2685,6 +2694,27 @@ const UnifiedAssistant: React.FC = () => {
       console.log('🎙️ [ElevenLabs RAW] message.source:', message.source);
       console.log('🎙️ [ElevenLabs RAW] message type:', (message as unknown as Record<string, unknown>).type);
       console.log('🎙️ [ElevenLabs RAW] ================================');
+
+      // Voice command detection for mute/unmute
+      if (message.source === 'user' && message.message) {
+        const userText = message.message.toLowerCase();
+
+        // Check for mute commands: "please mute", "please hold", "mute please", "hold please"
+        const isMuteCommand = MUTE_PATTERNS.some(pattern => pattern.test(userText));
+        if (isMuteCommand) {
+          console.log('🔇 [Voice Command] Mute detected');
+          setIsMicMuted(true); // State change triggers useConversation to mute
+          return; // Don't add mute command to transcript
+        }
+
+        // Check for unmute commands: "please unmute", "please resume", "unmute please", "resume please"
+        const isUnmuteCommand = UNMUTE_PATTERNS.some(pattern => pattern.test(userText));
+        if (isUnmuteCommand) {
+          console.log('🔊 [Voice Command] Unmute detected');
+          setIsMicMuted(false); // State change triggers useConversation to unmute
+          return; // Don't add unmute command to transcript
+        }
+      }
 
       if (message.message) {
         const role = message.source === 'user' ? 'user' : 'assistant';
@@ -4900,6 +4930,32 @@ const UnifiedAssistant: React.FC = () => {
   const isVoiceConnecting = elevenLabsConversation.status === 'connecting';
   const isStreaming = isSending;
 
+  // Call duration timer effect
+  useEffect(() => {
+    let intervalId: NodeJS.Timeout | null = null;
+
+    if (isVoiceConnected) {
+      // Start timer when connected
+      intervalId = setInterval(() => {
+        setCallDuration(prev => prev + 1);
+      }, 1000);
+    } else {
+      // Reset duration when disconnected
+      setCallDuration(0);
+    }
+
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [isVoiceConnected]);
+
+  // Format call duration as MM:SS
+  const formatCallDuration = (seconds: number): string => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
   // Format date for conversation list with time
   const formatDate = (dateStr: string) => {
     const date = new Date(dateStr);
@@ -5460,15 +5516,77 @@ const UnifiedAssistant: React.FC = () => {
               </div>
               <div>
                 <div style={{ color: colors.textPrimary, fontSize: '14px', fontWeight: 600 }}>
-                  {isVoiceConnected ? (elevenLabsConversation.isSpeaking ? 'Speaking...' : 'Listening...') : 'Voice Call'}
+                  {isVoiceConnected
+                    ? isMicMuted
+                      ? 'Muted'
+                      : elevenLabsConversation.isSpeaking
+                        ? 'Speaking...'
+                        : 'Listening...'
+                    : 'Voice Call'}
                 </div>
                 <div style={{ color: colors.textMuted, fontSize: '12px' }}>
-                  {isVoiceConnected ? 'Say something to talk' : 'Start a call to begin'}
+                  {isVoiceConnected
+                    ? isMicMuted
+                      ? 'Tap to unmute'
+                      : 'Say something to talk'
+                    : 'Start a call to begin'}
                 </div>
               </div>
             </div>
+
+            {/* Call Duration Timer */}
+            {isVoiceConnected && (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                padding: '4px 10px',
+                backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                borderRadius: '6px',
+              }}>
+                <span style={{
+                  fontFamily: '"JetBrains Mono", "SF Mono", "Fira Code", monospace',
+                  fontSize: '12px',
+                  fontWeight: 500,
+                  color: colors.textMuted,
+                  letterSpacing: '0.5px',
+                  opacity: 0.8,
+                }}>
+                  {formatCallDuration(callDuration)}
+                </span>
+              </div>
+            )}
+
             {isVoiceConnected ? (
-              <button onClick={stopVoiceSession} style={{
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                {/* Mute Button */}
+                <button
+                  onClick={() => {
+                    const newMuted = !isMicMuted;
+                    setIsMicMuted(newMuted); // State change triggers useConversation to mute/unmute
+                    console.log(newMuted ? '🔇 [UI] Muted' : '🔊 [UI] Unmuted');
+                  }}
+                  title={isMicMuted ? 'Unmute microphone' : 'Mute microphone'}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: '36px',
+                    height: '36px',
+                    borderRadius: '50%',
+                    border: 'none',
+                    backgroundColor: isMicMuted ? '#ff4444' : colors.bgHover,
+                    cursor: 'pointer',
+                    transition: 'background-color 0.2s ease',
+                  }}
+                >
+                  {isMicMuted ? (
+                    <MicOff size={16} color="#ffffff" />
+                  ) : (
+                    <Mic size={16} color={colors.textSecondary} />
+                  )}
+                </button>
+                {/* End Call Button */}
+                <button onClick={stopVoiceSession} style={{
                 display: 'flex',
                 alignItems: 'center',
                 gap: '6px',
@@ -5484,6 +5602,7 @@ const UnifiedAssistant: React.FC = () => {
                 <Phone size={14} />
                 End
               </button>
+              </div>
             ) : (
               <button onClick={startVoiceSession} disabled={isVoiceConnecting} style={{
                 display: 'flex',

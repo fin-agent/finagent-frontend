@@ -1,0 +1,1234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FinAgent — Enterprise Deployment Architecture</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700;800&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-deep: #06060a;
+      --bg-page: #08080c;
+      --bg-card: #0c0c12;
+      --bg-card-secondary: #101018;
+      --bg-card-hover: #14141e;
+      --border: #1e1e2a;
+      --border-accent: #2a2a3a;
+      --text-primary: #e8e8ec;
+      --text-title: #9a9aac;
+      --text-label: #6a6a7c;
+      --text-muted: #4a4a5c;
+      --green: #4ade80;
+      --green-dim: rgba(74, 222, 128, 0.08);
+      --green-glow: rgba(74, 222, 128, 0.15);
+      --blue: #60a5fa;
+      --blue-dim: rgba(96, 165, 250, 0.08);
+      --blue-glow: rgba(96, 165, 250, 0.15);
+      --purple: #bd93f9;
+      --purple-dim: rgba(189, 147, 249, 0.08);
+      --purple-glow: rgba(189, 147, 249, 0.15);
+      --gold: #f0c674;
+      --gold-dim: rgba(240, 198, 116, 0.08);
+      --gold-glow: rgba(240, 198, 116, 0.15);
+      --gray: #6a6a7c;
+      --gray-dim: rgba(106, 106, 124, 0.06);
+      --mono: 'JetBrains Mono', 'SF Mono', 'Monaco', monospace;
+      --sans: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: var(--bg-page);
+      color: var(--text-primary);
+      font-family: var(--sans);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── Noise overlay ─────────────────────────── */
+    body::before {
+      content: '';
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+      pointer-events: none;
+      z-index: 9999;
+    }
+
+    /* ── Animations ────────────────────────────── */
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(24px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    @keyframes pulse-line {
+      0%, 100% { opacity: 0.3; }
+      50% { opacity: 0.8; }
+    }
+
+    @keyframes dash-flow {
+      to { stroke-dashoffset: -20; }
+    }
+
+    @keyframes glow-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 transparent; }
+      50% { box-shadow: 0 0 20px var(--glow-color, rgba(74, 222, 128, 0.1)); }
+    }
+
+    .animate {
+      opacity: 0;
+      animation: fadeUp 0.6s ease-out forwards;
+    }
+
+    /* ── Page header ───────────────────────────── */
+    .page-header {
+      text-align: center;
+      padding: 72px 40px 56px;
+      position: relative;
+      animation: fadeIn 0.8s ease-out;
+    }
+
+    .page-header::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 50%; transform: translateX(-50%);
+      width: 600px; height: 300px;
+      background: radial-gradient(ellipse, rgba(74, 222, 128, 0.04) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .page-badge {
+      display: inline-block;
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: var(--green);
+      background: var(--green-dim);
+      border: 1px solid rgba(74, 222, 128, 0.2);
+      padding: 6px 16px;
+      border-radius: 100px;
+      margin-bottom: 24px;
+    }
+
+    .page-header h1 {
+      font-family: var(--mono);
+      font-size: 36px;
+      font-weight: 700;
+      letter-spacing: 6px;
+      text-transform: uppercase;
+      color: var(--text-primary);
+      margin-bottom: 12px;
+    }
+
+    .page-header h1 span {
+      background: linear-gradient(135deg, var(--green), var(--blue));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .page-header .subtitle {
+      color: var(--text-muted);
+      font-family: var(--mono);
+      font-size: 13px;
+      letter-spacing: 1px;
+    }
+
+    /* ── Container ─────────────────────────────── */
+    .container {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    /* ── Section headers ───────────────────────── */
+    .section-header {
+      padding: 48px 0 32px;
+    }
+
+    .section-tag {
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+    }
+
+    .section-title {
+      font-family: var(--mono);
+      font-size: 22px;
+      font-weight: 600;
+      color: var(--text-primary);
+      letter-spacing: 1px;
+    }
+
+    .section-title .sep {
+      color: var(--green);
+      margin: 0 8px;
+    }
+
+    .section-title .dim {
+      color: var(--text-label);
+      font-weight: 400;
+    }
+
+    /* ── Architecture layer ────────────────────── */
+    .arch-layer {
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+      overflow: hidden;
+      position: relative;
+    }
+
+    .arch-layer::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; bottom: 0;
+      width: 3px;
+    }
+
+    .layer-green::before { background: var(--green); }
+    .layer-purple::before { background: var(--purple); }
+    .layer-blue::before { background: var(--blue); }
+    .layer-gold::before { background: var(--gold); }
+    .layer-gray::before { background: var(--gray); }
+    .layer-dashed { border-style: dashed; border-color: var(--border-accent); }
+    .layer-dashed::before { display: none; }
+
+    .layer-header {
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: linear-gradient(180deg, var(--bg-card-secondary) 0%, var(--bg-card) 100%);
+    }
+
+    .layer-header-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .layer-icon {
+      font-size: 14px;
+      width: 28px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 8px;
+      flex-shrink: 0;
+    }
+
+    .layer-name {
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+
+    .layer-badge {
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 1px;
+      padding: 4px 12px;
+      border-radius: 100px;
+    }
+
+    .badge-green { color: var(--green); background: var(--green-dim); border: 1px solid rgba(74,222,128,0.2); }
+    .badge-purple { color: var(--purple); background: var(--purple-dim); border: 1px solid rgba(189,147,249,0.2); }
+    .badge-blue { color: var(--blue); background: var(--blue-dim); border: 1px solid rgba(96,165,250,0.2); }
+    .badge-gold { color: var(--gold); background: var(--gold-dim); border: 1px solid rgba(240,198,116,0.2); }
+    .badge-gray { color: var(--gray); background: var(--gray-dim); border: 1px solid rgba(106,106,124,0.2); }
+
+    .icon-green { color: var(--green); background: var(--green-dim); }
+    .icon-purple { color: var(--purple); background: var(--purple-dim); }
+    .icon-blue { color: var(--blue); background: var(--blue-dim); }
+    .icon-gold { color: var(--gold); background: var(--gold-dim); }
+    .icon-gray { color: var(--gray); background: var(--gray-dim); }
+
+    .layer-body {
+      padding: 24px;
+    }
+
+    /* ── Cards grid ────────────────────────────── */
+    .cards-row {
+      display: flex;
+      gap: 14px;
+      flex-wrap: wrap;
+    }
+
+    .cards-row-center {
+      justify-content: center;
+    }
+
+    .card {
+      background: var(--bg-card-secondary);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 18px;
+      flex: 1;
+      min-width: 180px;
+      transition: all 0.3s ease;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .card:hover {
+      border-color: var(--border-accent);
+      background: var(--bg-card-hover);
+    }
+
+    .card-wide {
+      flex: 2;
+      min-width: 400px;
+    }
+
+    .card-accent-top {
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+    }
+
+    .accent-green { background: linear-gradient(90deg, var(--green), transparent); }
+    .accent-purple { background: linear-gradient(90deg, var(--purple), transparent); }
+    .accent-blue { background: linear-gradient(90deg, var(--blue), transparent); }
+    .accent-gold { background: linear-gradient(90deg, var(--gold), transparent); }
+
+    .card-title {
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 700;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .card-title .card-emoji {
+      font-size: 15px;
+    }
+
+    .card-subtitle {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--text-muted);
+      margin-bottom: 14px;
+      letter-spacing: 0.5px;
+    }
+
+    .card-list {
+      list-style: none;
+    }
+
+    .card-list li {
+      font-size: 12px;
+      color: var(--text-label);
+      padding: 3px 0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      line-height: 1.4;
+    }
+
+    .card-list li::before {
+      content: '';
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .dot-green li::before { background: var(--green); box-shadow: 0 0 4px var(--green-glow); }
+    .dot-purple li::before { background: var(--purple); box-shadow: 0 0 4px var(--purple-glow); }
+    .dot-blue li::before { background: var(--blue); box-shadow: 0 0 4px var(--blue-glow); }
+    .dot-gold li::before { background: var(--gold); box-shadow: 0 0 4px var(--gold-glow); }
+    .dot-gray li::before { background: var(--gray); }
+
+    .card-footer {
+      margin-top: 14px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border);
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--text-muted);
+      font-style: italic;
+      letter-spacing: 0.3px;
+    }
+
+    .card-divider {
+      height: 1px;
+      background: var(--border);
+      margin: 10px 0;
+    }
+
+    .card-section-label {
+      font-family: var(--mono);
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      margin: 10px 0 6px;
+    }
+
+    /* ── User pills ────────────────────────────── */
+    .user-pills {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      justify-content: center;
+      padding: 12px 0;
+    }
+
+    .user-pill {
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--text-title);
+      background: var(--bg-card-secondary);
+      border: 1px solid var(--border);
+      padding: 8px 18px;
+      border-radius: 100px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .user-pill .pill-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--text-muted);
+    }
+
+    /* ── Flow arrows ───────────────────────────── */
+    .flow-arrow {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px 0;
+      position: relative;
+    }
+
+    .flow-line {
+      width: 1px;
+      height: 28px;
+      position: relative;
+      overflow: visible;
+    }
+
+    .flow-line::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0;
+      width: 1px;
+      height: 100%;
+      background: linear-gradient(180deg, var(--border-accent), var(--text-muted), var(--border-accent));
+      animation: pulse-line 3s ease-in-out infinite;
+    }
+
+    .flow-line::after {
+      content: '';
+      position: absolute;
+      bottom: -5px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 0; height: 0;
+      border-left: 5px solid transparent;
+      border-right: 5px solid transparent;
+      border-top: 6px solid var(--text-muted);
+    }
+
+    .flow-label {
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      padding: 6px 14px;
+      background: var(--bg-deep);
+      border: 1px solid var(--border);
+      border-radius: 100px;
+      margin-top: 12px;
+    }
+
+    /* ── Callout box ───────────────────────────── */
+    .callout {
+      margin-top: 16px;
+      padding: 16px 20px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: var(--bg-deep);
+    }
+
+    .callout-title {
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .callout-list {
+      list-style: none;
+    }
+
+    .callout-list li {
+      font-size: 12px;
+      color: var(--text-label);
+      padding: 3px 0;
+      padding-left: 16px;
+      position: relative;
+      line-height: 1.5;
+    }
+
+    .callout-list li::before {
+      content: '›';
+      position: absolute;
+      left: 0;
+      font-weight: 700;
+    }
+
+    /* ── Divider ───────────────────────────────── */
+    .section-divider {
+      height: 1px;
+      margin: 56px 0 0;
+      background: linear-gradient(90deg, transparent, var(--border), transparent);
+    }
+
+    /* ── Legend ─────────────────────────────────── */
+    .legend-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+      padding-bottom: 80px;
+    }
+
+    .legend-item {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 18px;
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+    }
+
+    .legend-symbol {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 15px;
+      flex-shrink: 0;
+      font-weight: 700;
+    }
+
+    .legend-item h4 {
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 700;
+      margin-bottom: 4px;
+      letter-spacing: 0.5px;
+    }
+
+    .legend-item p {
+      font-size: 11px;
+      color: var(--text-label);
+      line-height: 1.5;
+    }
+
+    /* ── Condensed diagram ─────────────────────── */
+    .condensed-row {
+      display: flex;
+      align-items: stretch;
+      gap: 14px;
+    }
+
+    .condensed-block {
+      flex: 1;
+      background: var(--bg-card-secondary);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 18px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .condensed-block-title {
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 700;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .condensed-block-desc {
+      font-size: 11px;
+      color: var(--text-label);
+      line-height: 1.5;
+    }
+
+    .condensed-layer {
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+      overflow: hidden;
+      position: relative;
+    }
+
+    .condensed-layer::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; bottom: 0;
+      width: 3px;
+    }
+
+    .condensed-header {
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(180deg, var(--bg-card-secondary) 0%, var(--bg-card) 100%);
+    }
+
+    .condensed-header-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .condensed-label {
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+    }
+
+    .condensed-body {
+      padding: 16px 20px;
+    }
+
+    .condensed-body .inline-items {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .inline-chip {
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 500;
+      padding: 4px 10px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--bg-card-secondary);
+      color: var(--text-title);
+    }
+
+    /* ── Security bar ──────────────────────────── */
+    .security-bar {
+      margin-top: 24px;
+      padding: 16px 24px;
+      border-radius: 12px;
+      border: 1px solid rgba(96, 165, 250, 0.15);
+      background: rgba(96, 165, 250, 0.03);
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .security-bar .sec-icon {
+      font-size: 16px;
+    }
+
+    .security-bar .sec-items {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .sec-chip {
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 500;
+      color: var(--blue);
+      padding: 4px 10px;
+      border-radius: 6px;
+      border: 1px solid rgba(96, 165, 250, 0.15);
+      background: rgba(96, 165, 250, 0.05);
+    }
+
+    /* ── Flow arrow condensed ──────────────────── */
+    .flow-arrow-sm {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 12px 0;
+    }
+
+    .flow-arrow-sm .flow-line {
+      height: 16px;
+    }
+
+    .flow-arrow-sm .flow-label {
+      font-size: 9px;
+      padding: 4px 10px;
+      margin-top: 8px;
+    }
+
+    /* ── Responsive ────────────────────────────── */
+    @media (max-width: 900px) {
+      .cards-row { flex-direction: column; }
+      .card-wide { min-width: unset; }
+      .legend-grid { grid-template-columns: repeat(2, 1fr); }
+      .condensed-row { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ════════════════════════════════════════════════════════ -->
+  <!--  PAGE HEADER                                            -->
+  <!-- ════════════════════════════════════════════════════════ -->
+  <header class="page-header">
+    <div class="page-badge">Enterprise Architecture</div>
+    <h1><span>FinAgent</span></h1>
+    <p class="subtitle">How Your Tech Stack Comes Together</p>
+  </header>
+
+  <div class="container">
+
+    <!-- ══════════════════════════════════════════════════════ -->
+    <!--  DIAGRAM 1: DETAILED ARCHITECTURE                     -->
+    <!-- ══════════════════════════════════════════════════════ -->
+    <div class="section-header">
+      <div class="section-tag">Full View</div>
+      <div class="section-title">Detailed Architecture<span class="sep">//</span><span class="dim">All Layers</span></div>
+    </div>
+
+    <!-- LAYER 1: Users -->
+    <div class="arch-layer layer-dashed animate" style="animation-delay: 0.1s">
+      <div class="layer-header">
+        <div class="layer-header-left">
+          <div class="layer-icon icon-gray">👤</div>
+          <div class="layer-name" style="color: var(--text-title)">Your Users</div>
+        </div>
+      </div>
+      <div class="layer-body">
+        <div class="user-pills">
+          <div class="user-pill"><span class="pill-dot"></span>Financial Advisors</div>
+          <div class="user-pill"><span class="pill-dot"></span>Traders</div>
+          <div class="user-pill"><span class="pill-dot"></span>Operations</div>
+          <div class="user-pill"><span class="pill-dot"></span>Client Service Reps</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Arrow -->
+    <div class="flow-arrow animate" style="animation-delay: 0.2s">
+      <div class="flow-line"></div>
+      <div class="flow-label">Voice & Text</div>
+    </div>
+
+    <!-- LAYER 2: FinAgent AI -->
+    <div class="arch-layer layer-green animate" style="animation-delay: 0.3s">
+      <div class="layer-header">
+        <div class="layer-header-left">
+          <div class="layer-icon icon-green">★</div>
+          <div class="layer-name" style="color: var(--green)">FinAgent AI Layer</div>
+        </div>
+        <div class="layer-badge badge-green">What We Provide</div>
+      </div>
+      <div class="layer-body">
+        <div class="cards-row cards-row-center">
+          <div class="card card-wide" style="--glow-color: var(--green-glow);">
+            <div class="card-accent-top accent-green"></div>
+            <div class="card-title" style="color: var(--green)">
+              <span class="card-emoji">🤖</span> AI Voice & Text Agent
+            </div>
+            <ul class="card-list dot-green">
+              <li>Natural voice interaction</li>
+              <li>System prompt customized to your firm</li>
+              <li>Specialized tools (trades, account, options, fees, market data)</li>
+              <li>Intent classification & smart query routing</li>
+              <li>Generative UI — data cards rendered alongside voice responses</li>
+            </ul>
+            <div class="card-footer">Delivered: Agent configuration, tool definitions, implementation & integration</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Arrow -->
+    <div class="flow-arrow animate" style="animation-delay: 0.4s">
+      <div class="flow-line"></div>
+      <div class="flow-label">Tool Calls & Voice</div>
+    </div>
+
+    <!-- LAYER 3: Licensed Services -->
+    <div class="arch-layer layer-purple animate" style="animation-delay: 0.5s">
+      <div class="layer-header">
+        <div class="layer-header-left">
+          <div class="layer-icon icon-purple">⚙</div>
+          <div class="layer-name" style="color: var(--purple)">Licensed Services</div>
+        </div>
+        <div class="layer-badge badge-purple">You Subscribe</div>
+      </div>
+      <div class="layer-body">
+        <div class="cards-row">
+          <div class="card">
+            <div class="card-accent-top accent-purple"></div>
+            <div class="card-title" style="color: var(--purple)">
+              <span class="card-emoji">🔊</span> ElevenLabs Enterprise
+            </div>
+            <div class="card-subtitle">Voice AI Platform</div>
+            <ul class="card-list dot-purple">
+              <li>Voice agent hosting</li>
+              <li>Speech-to-text & text-to-speech</li>
+              <li>SOC 2 compliant</li>
+              <li>PII data handling (enterprise tier)</li>
+              <li>Concurrent calls</li>
+              <li>Runtime processing only — data discarded after</li>
+              <li>One agent per client firm</li>
+            </ul>
+          </div>
+          <div class="card">
+            <div class="card-accent-top accent-purple"></div>
+            <div class="card-title" style="color: var(--purple)">
+              <span class="card-emoji">🧠</span> LLM Provider
+            </div>
+            <div class="card-subtitle">Your Choice — Platform Agnostic</div>
+            <ul class="card-list dot-purple">
+              <li>Azure OpenAI</li>
+              <li>AWS Bedrock</li>
+              <li>Google Cloud AI</li>
+              <li>Self-hosted</li>
+            </ul>
+            <div class="card-divider"></div>
+            <div class="card-section-label">Used For</div>
+            <ul class="card-list dot-purple">
+              <li>Intent classification</li>
+              <li>Date & symbol disambiguation</li>
+              <li>Query assistance</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Arrow -->
+    <div class="flow-arrow animate" style="animation-delay: 0.6s">
+      <div class="flow-line"></div>
+      <div class="flow-label">API Requests & Webhooks</div>
+    </div>
+
+    <!-- LAYER 4: Application Layer -->
+    <div class="arch-layer layer-blue animate" style="animation-delay: 0.7s">
+      <div class="layer-header">
+        <div class="layer-header-left">
+          <div class="layer-icon icon-blue">★</div>
+          <div class="layer-name" style="color: var(--blue)">Application Layer</div>
+        </div>
+        <div class="layer-badge badge-blue">We Implement</div>
+      </div>
+      <div class="layer-body">
+        <div class="cards-row">
+          <div class="card">
+            <div class="card-accent-top accent-blue"></div>
+            <div class="card-title" style="color: var(--blue)">
+              <span class="card-emoji">📊</span> Trade Tools
+            </div>
+            <ul class="card-list dot-blue">
+              <li>Summary</li>
+              <li>Detail</li>
+              <li>Stats</li>
+              <li>P/L</li>
+            </ul>
+          </div>
+          <div class="card">
+            <div class="card-accent-top accent-blue"></div>
+            <div class="card-title" style="color: var(--blue)">
+              <span class="card-emoji">💰</span> Account Tools
+            </div>
+            <ul class="card-list dot-blue">
+              <li>Balance</li>
+              <li>Positions</li>
+              <li>Margin</li>
+            </ul>
+          </div>
+          <div class="card">
+            <div class="card-accent-top accent-blue"></div>
+            <div class="card-title" style="color: var(--blue)">
+              <span class="card-emoji">📋</span> Options Tools
+            </div>
+            <ul class="card-list dot-blue">
+              <li>Chains</li>
+              <li>Expiring</li>
+              <li>Premium</li>
+            </ul>
+          </div>
+          <div class="card">
+            <div class="card-accent-top accent-blue"></div>
+            <div class="card-title" style="color: var(--blue)">
+              <span class="card-emoji">📈</span> Market & Fundamentals
+            </div>
+            <ul class="card-list dot-blue">
+              <li>Quotes & Charts</li>
+              <li>News</li>
+              <li>Company Overview</li>
+            </ul>
+          </div>
+          <div class="card">
+            <div class="card-accent-top accent-blue"></div>
+            <div class="card-title" style="color: var(--blue)">
+              <span class="card-emoji">💸</span> Fee Tools
+            </div>
+            <ul class="card-list dot-blue">
+              <li>Commissions</li>
+              <li>Interest</li>
+              <li>Locate Fees</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Arrow -->
+    <div class="flow-arrow animate" style="animation-delay: 0.8s">
+      <div class="flow-line"></div>
+      <div class="flow-label">Data Queries (REST)</div>
+    </div>
+
+    <!-- LAYER 5: Abstracted Data Layer -->
+    <div class="arch-layer layer-gold animate" style="animation-delay: 0.9s">
+      <div class="layer-header">
+        <div class="layer-header-left">
+          <div class="layer-icon icon-gold">☐</div>
+          <div class="layer-name" style="color: var(--gold)">Abstracted Data Layer</div>
+        </div>
+        <div class="layer-badge badge-gold">We Build</div>
+      </div>
+      <div class="layer-body">
+        <div class="cards-row">
+          <div class="card">
+            <div class="card-accent-top accent-gold"></div>
+            <div class="card-title" style="color: var(--gold)">
+              <span class="card-emoji">📁</span> Trade History
+            </div>
+            <ul class="card-list dot-gold">
+              <li>Buy/sell trades</li>
+              <li>Stocks & options</li>
+              <li>Timestamps, prices, qty</li>
+            </ul>
+          </div>
+          <div class="card">
+            <div class="card-accent-top accent-gold"></div>
+            <div class="card-title" style="color: var(--gold)">
+              <span class="card-emoji">📁</span> Account & Balances
+            </div>
+            <ul class="card-list dot-gold">
+              <li>Cash, equity, buying power</li>
+              <li>Margin requirements</li>
+              <li>Day trading BP</li>
+            </ul>
+          </div>
+          <div class="card">
+            <div class="card-accent-top accent-gold"></div>
+            <div class="card-title" style="color: var(--gold)">
+              <span class="card-emoji">📁</span> Fees & Interest
+            </div>
+            <ul class="card-list dot-gold">
+              <li>Commissions</li>
+              <li>Debit/credit interest</li>
+              <li>Locate fees</li>
+            </ul>
+          </div>
+          <div class="card">
+            <div class="card-accent-top accent-gold"></div>
+            <div class="card-title" style="color: var(--gold)">
+              <span class="card-emoji">📁</span> Positions & Transfers
+            </div>
+            <ul class="card-list dot-gold">
+              <li>Current holdings</li>
+              <li>Fund in/out</li>
+              <li>Journals</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="callout">
+          <div class="callout-title" style="color: var(--gold)">
+            ℹ️ Why This Layer Matters
+          </div>
+          <ul class="callout-list" style="color: var(--text-label);">
+            <li>Back office systems run batch processing — can lock up for hours</li>
+            <li>This layer caches/stages data so queries never hit back office directly</li>
+            <li>You control exactly what data is exposed to the AI service</li>
+            <li>Standard REST APIs — framework agnostic (Java, Python, C#, etc.)</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Arrow -->
+    <div class="flow-arrow animate" style="animation-delay: 1.0s">
+      <div class="flow-line"></div>
+      <div class="flow-label">Extract & Cache</div>
+    </div>
+
+    <!-- LAYER 6: Existing Infrastructure -->
+    <div class="arch-layer layer-gray animate" style="animation-delay: 1.1s">
+      <div class="layer-header">
+        <div class="layer-header-left">
+          <div class="layer-icon icon-gray">✓</div>
+          <div class="layer-name" style="color: var(--text-title)">Your Existing Infrastructure</div>
+        </div>
+        <div class="layer-badge badge-gray">Already Have</div>
+      </div>
+      <div class="layer-body">
+        <div class="cards-row">
+          <div class="card">
+            <div class="card-title" style="color: var(--text-title)">
+              <span class="card-emoji">🏢</span> Back Office / OMS
+            </div>
+            <ul class="card-list dot-gray">
+              <li>Trade execution</li>
+              <li>Account management</li>
+              <li>Compliance</li>
+            </ul>
+          </div>
+          <div class="card">
+            <div class="card-title" style="color: var(--text-title)">
+              <span class="card-emoji">📡</span> Market Data Feeds
+            </div>
+            <ul class="card-list dot-gray">
+              <li>Real-time quotes</li>
+              <li>Historical data</li>
+              <li>Corporate actions</li>
+            </ul>
+          </div>
+          <div class="card">
+            <div class="card-title" style="color: var(--text-title)">
+              <span class="card-emoji">🏦</span> Clearing & Settlement
+            </div>
+            <ul class="card-list dot-gray">
+              <li>DTCC, OCC</li>
+              <li>Reconciliation</li>
+              <li>Statements</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════ -->
+    <!--  DIVIDER                                              -->
+    <!-- ══════════════════════════════════════════════════════ -->
+    <div class="section-divider"></div>
+
+    <!-- ══════════════════════════════════════════════════════ -->
+    <!--  DIAGRAM 2: CONDENSED SINGLE-SLIDE                    -->
+    <!-- ══════════════════════════════════════════════════════ -->
+    <div class="section-header">
+      <div class="section-tag">Presentation View</div>
+      <div class="section-title">Single-Slide Overview<span class="sep">//</span><span class="dim">Condensed</span></div>
+    </div>
+
+    <!-- Condensed: Users -->
+    <div class="condensed-layer layer-dashed animate" style="animation-delay: 1.3s">
+      <div class="condensed-header">
+        <div class="condensed-header-left">
+          <span>👤</span>
+          <div class="condensed-label" style="color: var(--text-title)">Your Users</div>
+        </div>
+      </div>
+      <div class="condensed-body">
+        <div class="inline-items">
+          <span class="inline-chip">Financial Advisors</span>
+          <span class="inline-chip">Traders</span>
+          <span class="inline-chip">Operations</span>
+          <span class="inline-chip">Client Service Reps</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="flow-arrow-sm animate" style="animation-delay: 1.35s">
+      <div class="flow-line"></div>
+      <div class="flow-label">Voice & Text</div>
+    </div>
+
+    <!-- Condensed: FinAgent -->
+    <div class="condensed-layer layer-green animate" style="animation-delay: 1.4s">
+      <div class="condensed-header">
+        <div class="condensed-header-left">
+          <span style="color: var(--green)">★</span>
+          <div class="condensed-label" style="color: var(--green)">FinAgent Provides</div>
+        </div>
+        <span class="layer-badge badge-green">We Deliver</span>
+      </div>
+      <div class="condensed-body">
+        <div class="condensed-block-desc">AI Voice & Text Agent — Specialized tools, intent detection, generative UI, system prompt customized to your firm</div>
+      </div>
+    </div>
+
+    <div class="flow-arrow-sm animate" style="animation-delay: 1.45s">
+      <div class="flow-line"></div>
+    </div>
+
+    <!-- Condensed: Licensed -->
+    <div class="condensed-layer layer-purple animate" style="animation-delay: 1.5s">
+      <div class="condensed-header">
+        <div class="condensed-header-left">
+          <span style="color: var(--purple)">⚙</span>
+          <div class="condensed-label" style="color: var(--purple)">You License</div>
+        </div>
+        <span class="layer-badge badge-purple">Subscribe</span>
+      </div>
+      <div class="condensed-body">
+        <div class="condensed-row">
+          <div class="condensed-block">
+            <div class="card-accent-top accent-purple"></div>
+            <div class="condensed-block-title" style="color: var(--purple)">🔊 ElevenLabs Enterprise</div>
+            <div class="condensed-block-desc">Voice AI hosting · SOC 2 · PII safe · Concurrent calls</div>
+          </div>
+          <div class="condensed-block">
+            <div class="card-accent-top accent-purple"></div>
+            <div class="condensed-block-title" style="color: var(--purple)">🧠 LLM Provider</div>
+            <div class="condensed-block-desc">Azure / AWS / GCP / Self-hosted — intent classification & NLP</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="flow-arrow-sm animate" style="animation-delay: 1.55s">
+      <div class="flow-line"></div>
+    </div>
+
+    <!-- Condensed: Data Layer -->
+    <div class="condensed-layer layer-gold animate" style="animation-delay: 1.6s">
+      <div class="condensed-header">
+        <div class="condensed-header-left">
+          <span style="color: var(--gold)">☐</span>
+          <div class="condensed-label" style="color: var(--gold)">We Build</div>
+        </div>
+        <span class="layer-badge badge-gold">Data Layer</span>
+      </div>
+      <div class="condensed-body">
+        <div class="condensed-block-desc">Abstracted Data Layer — REST APIs over your back office data. Cached, decoupled, you control exactly what's exposed.</div>
+        <div class="inline-items" style="margin-top: 10px;">
+          <span class="inline-chip">Trade History</span>
+          <span class="inline-chip">Account Balances</span>
+          <span class="inline-chip">Fees & Interest</span>
+          <span class="inline-chip">Positions</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="flow-arrow-sm animate" style="animation-delay: 1.65s">
+      <div class="flow-line"></div>
+    </div>
+
+    <!-- Condensed: Existing -->
+    <div class="condensed-layer layer-gray animate" style="animation-delay: 1.7s">
+      <div class="condensed-header">
+        <div class="condensed-header-left">
+          <span style="color: var(--text-label)">✓</span>
+          <div class="condensed-label" style="color: var(--text-title)">Already Have</div>
+        </div>
+        <span class="layer-badge badge-gray">Existing</span>
+      </div>
+      <div class="condensed-body">
+        <div class="inline-items">
+          <span class="inline-chip">Back Office / OMS</span>
+          <span class="inline-chip">Market Data Feeds</span>
+          <span class="inline-chip">Clearing & Settlement</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Security Bar -->
+    <div class="security-bar animate" style="animation-delay: 1.8s">
+      <span class="sec-icon">🔒</span>
+      <div class="sec-items">
+        <span class="sec-chip">SOC 2 Compliant</span>
+        <span class="sec-chip">PII Handling</span>
+        <span class="sec-chip">Runtime-Only Processing</span>
+        <span class="sec-chip">Isolated Agent Per Firm</span>
+        <span class="sec-chip">Data Stays in Your Cloud</span>
+      </div>
+    </div>
+
+    <!-- ══════════════════════════════════════════════════════ -->
+    <!--  LEGEND                                               -->
+    <!-- ══════════════════════════════════════════════════════ -->
+    <div class="section-divider"></div>
+
+    <div class="section-header">
+      <div class="section-tag">Reference</div>
+      <div class="section-title">Legend<span class="sep">//</span><span class="dim">Ownership</span></div>
+    </div>
+
+    <div class="legend-grid animate" style="animation-delay: 1.9s">
+      <div class="legend-item">
+        <div class="legend-symbol icon-green">★</div>
+        <div>
+          <h4 style="color: var(--green)">FinAgent Provides</h4>
+          <p>AI agent, tools, system prompt, implementation & integration, generative UI</p>
+        </div>
+      </div>
+      <div class="legend-item">
+        <div class="legend-symbol icon-purple">⚙</div>
+        <div>
+          <h4 style="color: var(--purple)">You License</h4>
+          <p>ElevenLabs Enterprise + LLM provider (Azure, AWS, GCP, or self-hosted)</p>
+        </div>
+      </div>
+      <div class="legend-item">
+        <div class="legend-symbol icon-gold">☐</div>
+        <div>
+          <h4 style="color: var(--gold)">We Build</h4>
+          <p>Abstracted data layer — REST APIs over back office data</p>
+        </div>
+      </div>
+      <div class="legend-item">
+        <div class="legend-symbol icon-gray">✓</div>
+        <div>
+          <h4 style="color: var(--text-title)">Already Have</h4>
+          <p>Back office, market data feeds, clearing & settlement</p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+</body>
+</html>

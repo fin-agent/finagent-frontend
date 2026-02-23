@@ -27,7 +27,7 @@ graph TB
         ─────────────────────
         • Natural voice interaction
         • System prompt customized to your firm
-        • ~10 specialized tools
+        • Specialized tools
         • Intent classification & query routing
         • Generative UI data cards"]
     end
@@ -42,7 +42,7 @@ graph TB
             • Speech-to-text & text-to-speech
             • SOC 2 compliant
             • PII handling (enterprise)
-            • 50+ concurrent calls
+            • Concurrent calls
             • Runtime processing only
             • One agent per client firm"]
         end
@@ -68,7 +68,7 @@ graph TB
         • Summary
         • Detail
         • Stats
-        • P/L (FIFO)"]
+        • P/L"]
         T2["💰 Account Tools
         • Balance
         • Positions
@@ -88,7 +88,7 @@ graph TB
     end
 
     %% ── Abstracted Data Layer ───────────────────────────────────
-    subgraph DATA ["☐ ABSTRACTED DATA LAYER — You Build / We Help"]
+    subgraph DATA ["☐ ABSTRACTED DATA LAYER — We Build"]
         direction LR
         D1["📁 Trade History
         Buy/sell, stocks & options,
@@ -163,7 +163,7 @@ graph TB
 
     subgraph PROVIDED ["★ FinAgent Provides"]
         AGENT["🤖 AI Agent & Tools
-        Voice + text · 10 tools · Generative UI
+        Voice + text · Specialized tools · Generative UI
         Intent detection · System prompt"]
     end
 
@@ -172,14 +172,15 @@ graph TB
         VOICE["🔊 ElevenLabs
         Enterprise
         Voice AI hosting
-        SOC 2 · PII safe"]
+        SOC 2 · PII safe
+        Concurrent calls"]
         LLMP["🧠 LLM Provider
         Azure / AWS / GCP
         or self-hosted
         Intent & NLP"]
     end
 
-    subgraph BUILT ["☐ You Build (We Help)"]
+    subgraph BUILT ["☐ We Build"]
         DATALAYER["📁 Abstracted Data Layer
         REST APIs over your back office data
         Cached · Decoupled · You control access"]
@@ -223,5 +224,5 @@ graph TB
 |--------|---------|
 | ★ | **FinAgent provides** — Agent, tools, system prompt, implementation |
 | ⚙ | **You license** — ElevenLabs Enterprise + LLM provider |
-| ☐ | **You build (we help)** — Abstracted data layer (REST APIs) |
+| ☐ | **We build** — Abstracted data layer (REST APIs) |
 | ✓ | **You already have** — Back office, market data, clearing |
